@@ -1,0 +1,49 @@
+appId: com.kokomovie.app
+productName: KokoMovie
+copyright: Copyright © 2026 KokoMovie Inc.
+electronVersion: "31.7.7"
+
+directories:
+  buildResources: build
+  output: release/mac
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+asar: true
+asarUnpack:
+  - "**/*.node"
+  - node_modules/better-sqlite3/**/*
+  - node_modules/keytar/**/*
+compression: maximum
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: build/icons/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  category: public.app-category.entertainment
+  notarize:
+    teamId: ${env.APPLE_TEAM_ID}
+
+dmg:
+  sign: true
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: kokomovie-pc
+  releaseType: release

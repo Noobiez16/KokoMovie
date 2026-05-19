@@ -1,0 +1,108 @@
+appId: com.kokomovie.app
+productName: KokoMovie
+copyright: Copyright © 2026 KokoMovie Inc.
+electronVersion: "31.7.7"
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+extraResources:
+  - from: build/icons
+    to: icons
+
+asar: true
+asarUnpack:
+  - "**/*.node"
+  - node_modules/better-sqlite3/**/*
+  - node_modules/keytar/**/*
+compression: maximum
+
+# ─── Windows ──────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+  icon: build/icons/icon.ico
+  certificateSubjectName: ${env.WIN_CSC_SUBJECT_NAME}
+  signingHashAlgorithms: [sha256]
+  timeStampServer: http://timestamp.digicert.com
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: KokoMovie
+
+# ─── macOS ────────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: mas
+      arch: [x64, arm64]
+  icon: build/icons/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  category: public.app-category.entertainment
+  notarize:
+    teamId: ${env.APPLE_TEAM_ID}
+
+dmg:
+  sign: true
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ─── Linux ────────────────────────────────────────────────────────────────────
+linux:
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64]
+    - target: snap
+      arch: [x64]
+  icon: build/icons
+  category: AudioVideo
+  synopsis: Stream your favourite movies and TV shows
+
+snap:
+  summary: KokoMovie — desktop streaming app
+  description: |
+    Stream your favourite movies and TV shows in up to 4K HDR.
+    Supports offline downloads, multiple profiles, and Widevine DRM.
+  grade: stable
+  confinement: strict
+  plugs:
+    - default
+    - audio-playback
+    - network
+    - network-bind
+    - home
+    - removable-media
+    - desktop
+    - desktop-legacy
+    - x11
+    - wayland
+
+# ─── Auto-update (GitHub Releases) ───────────────────────────────────────────
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: kokomovie-pc
+  releaseType: release

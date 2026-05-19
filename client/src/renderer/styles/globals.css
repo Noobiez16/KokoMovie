@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --km-bg-rgb: 9, 6, 17;
+    --km-surface-rgb: 16, 11, 33;
+    --km-surface-2-rgb: 27, 19, 51;
+    --km-border-rgb: 39, 27, 74;
+    --km-accent-rgb: 139, 92, 246;
+    --km-accent-hover-rgb: 167, 139, 250;
+
+    --km-bg: rgb(var(--km-bg-rgb));
+    --km-surface: rgb(var(--km-surface-rgb));
+    --km-surface-2: rgb(var(--km-surface-2-rgb));
+    --km-border: rgb(var(--km-border-rgb));
+    --km-accent: rgb(var(--km-accent-rgb));
+    --km-accent-hover: rgb(var(--km-accent-hover-rgb));
+    --km-text: #f3e8ff;
+    --km-text-muted: #a78bfa;
+  }
+
+  * {
+    -webkit-app-region: no-drag;
+  }
+
+  body {
+    @apply text-[var(--km-text)] font-sans antialiased;
+    background: radial-gradient(circle at top left, #160e2e, var(--km-bg) 65%);
+    background-attachment: fixed;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* Allow text selection in inputs and content areas */
+  input, textarea, [data-selectable] {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-purple-500/20 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-purple-500/40;
+  }
+}
+
+@layer components {
+  .km-card {
+    @apply rounded-xl overflow-hidden bg-[var(--km-surface)] border border-[var(--km-border)]/50 transition-all duration-300 ease-out;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+  }
+  .km-card:hover {
+    @apply scale-[1.03] -translate-y-1 z-10 border-[var(--km-accent)]/50;
+    box-shadow: 0 10px 30px rgba(139, 92, 246, 0.15), 0 0 15px rgba(139, 92, 246, 0.1);
+  }
+
+  .km-btn-primary {
+    @apply px-6 py-2 bg-[var(--km-accent)] hover:bg-[var(--km-accent-hover)] text-white font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--km-accent)] focus:ring-offset-2 focus:ring-offset-[var(--km-bg)] active:scale-[0.98];
+    box-shadow: 0 4px 14px rgba(139, 92, 246, 0.3);
+  }
+  .km-btn-primary:hover {
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+  }
+
+  .km-input {
+    @apply w-full px-4 py-3 bg-[var(--km-surface-2)] border border-[var(--km-border)] rounded-lg text-[var(--km-text)] placeholder-purple-300/30 focus:outline-none focus:border-[var(--km-accent)] focus:ring-1 focus:ring-[var(--km-accent)] transition-all;
+  }
+
+  .km-link {
+    @apply text-[var(--km-accent)] hover:text-[var(--km-accent-hover)] hover:underline cursor-pointer transition-colors;
+  }
+}

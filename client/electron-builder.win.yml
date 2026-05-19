@@ -1,0 +1,37 @@
+appId: com.kokomovie.app
+productName: KokoMovie
+copyright: Copyright © 2026 KokoMovie Inc.
+electronVersion: "31.7.7"
+
+directories:
+  buildResources: build
+  output: release/windows
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+npmRebuild: false
+asar: false
+compression: maximum
+
+win:
+  target:
+    - target: zip
+      arch: [x64]
+  icon: build/icons/icon.ico
+  sign: false
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: KokoMovie
+
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: kokomovie-pc
+  releaseType: release

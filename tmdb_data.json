@@ -1,0 +1,216 @@
+{
+  "movies": [
+    {
+      "id": 533535,
+      "imdb_id": "tt6263850",
+      "title": "Deadpool & Wolverine",
+      "overview": "A listless Wade Wilson toils away in civilian life with his days as the morally flexible mercenary, Deadpool, behind him. But when his homeworld faces an existential threat, Wade must reluctantly suit-up again with an even more reluctant Wolverine.",
+      "release_date": "2024-07-24",
+      "vote_average": 7.6,
+      "runtime": 128,
+      "poster_path": "/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg",
+      "backdrop_path": "/ufpeVEM64uZHPpzzeiDNIAdaeOD.jpg"
+    },
+    {
+      "id": 1022789,
+      "imdb_id": "tt22022452",
+      "title": "Inside Out 2",
+      "overview": "Teenager Riley's mind headquarters is undergoing a sudden demolition to make room for something entirely unexpected: new Emotions! Joy, Sadness, Anger, Fear and Disgust, who’ve long been running a successful operation by all accounts, aren’t sure how to feel when Anxiety shows up. And it looks like she’s not alone.",
+      "release_date": "2024-06-11",
+      "vote_average": 7.5,
+      "runtime": 97,
+      "poster_path": "/vpnVM9B6NMmQpWeZvzLvDESb2QY.jpg",
+      "backdrop_path": "/p5ozvmdgsmbWe0H8Xk7Rc8SCwAB.jpg"
+    },
+    {
+      "id": 693134,
+      "imdb_id": "tt15239678",
+      "title": "Dune: Part Two",
+      "overview": "Follow the mythic journey of Paul Atreides as he unites with Chani and the Fremen while on a path of revenge against the conspirators who destroyed his family. Facing a choice between the love of his life and the fate of the known universe, Paul endeavors to prevent a terrible future only he can foresee.",
+      "release_date": "2024-02-27",
+      "vote_average": 8.1,
+      "runtime": 167,
+      "poster_path": "/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg",
+      "backdrop_path": "/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg"
+    },
+    {
+      "id": 872585,
+      "imdb_id": "tt15398776",
+      "title": "Oppenheimer",
+      "overview": "The story of J. Robert Oppenheimer's role in the development of the atomic bomb during World War II.",
+      "release_date": "2023-07-19",
+      "vote_average": 8.032,
+      "runtime": 181,
+      "poster_path": "/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg",
+      "backdrop_path": "/neeNHeXjMF5fXoCJRsOmkNGC7q.jpg"
+    },
+    {
+      "id": 157336,
+      "imdb_id": "tt0816692",
+      "title": "Interstellar",
+      "overview": "The adventures of a group of explorers who make use of a newly discovered wormhole to surpass the limitations on human space travel and conquer the vast distances involved in an interstellar voyage.",
+      "release_date": "2014-11-05",
+      "vote_average": 8.474,
+      "runtime": 169,
+      "poster_path": "/yQvGrMoipbRoddT0ZR8tPoR7NfX.jpg",
+      "backdrop_path": "/2ssWTSVklAEc98frZUQhgtGHx7s.jpg"
+    },
+    {
+      "id": 155,
+      "imdb_id": "tt0468569",
+      "title": "The Dark Knight",
+      "overview": "Batman raises the stakes in his war on crime. With the help of Lt. Jim Gordon and District Attorney Harvey Dent, Batman sets out to dismantle the remaining criminal organizations that plague the streets. The partnership proves to be effective, but they soon find themselves prey to a reign of chaos unleashed by a rising criminal mastermind known to the terrified citizens of Gotham as the Joker.",
+      "release_date": "2008-07-16",
+      "vote_average": 8.53,
+      "runtime": 152,
+      "poster_path": "/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
+      "backdrop_path": "/cfT29Im5VDvjE0RpyKOSdCKZal7.jpg"
+    },
+    {
+      "id": 76600,
+      "imdb_id": "tt1630029",
+      "title": "Avatar: The Way of Water",
+      "overview": "Set more than a decade after the events of the first film, learn the story of the Sully family (Jake, Neytiri, and their kids), the trouble that follows them, the lengths they go to keep each other safe, the battles they fight to stay alive, and the tragedies they endure.",
+      "release_date": "2022-12-14",
+      "vote_average": 7.592,
+      "runtime": 192,
+      "poster_path": "/t6HIqrRAclMCA60NsSmeqe9RmNV.jpg",
+      "backdrop_path": "/kJsPVzdyBrYHLomuNv5SJDXUQ2f.jpg"
+    },
+    {
+      "id": 324857,
+      "imdb_id": "tt4633694",
+      "title": "Spider-Man: Into the Spider-Verse",
+      "overview": "Struggling to find his place in the world while juggling school and family, Brooklyn teenager Miles Morales is unexpectedly bitten by a radioactive spider and develops unfathomable powers just like the one and only Spider-Man. While wrestling with the implications of his new abilities, Miles discovers a super collider created by the madman Wilson \"Kingpin\" Fisk, causing others from across the Spider-Verse to be inadvertently transported to his dimension.",
+      "release_date": "2018-12-06",
+      "vote_average": 8.393,
+      "runtime": 117,
+      "poster_path": "/iiZZdoQBEYBv6id8su7ImL0oCbD.jpg",
+      "backdrop_path": "/8mnXR9rey5uQ08rZAvzojKWbDQS.jpg"
+    },
+    {
+      "id": 24428,
+      "imdb_id": "tt0848228",
+      "title": "The Avengers",
+      "overview": "When an unexpected enemy emerges and threatens global safety and security, Nick Fury, director of the international peacekeeping agency known as S.H.I.E.L.D., finds himself in need of a team to pull the world back from the brink of disaster. Spanning the globe, a daring recruitment effort begins!",
+      "release_date": "2012-04-25",
+      "vote_average": 8.026,
+      "runtime": 143,
+      "poster_path": "/RYMX2wcKCBAr24UyPD7xwmjaTn.jpg",
+      "backdrop_path": "/9BBTo63ANSmhC4e6r62OJFuK2GL.jpg"
+    },
+    {
+      "id": 245891,
+      "imdb_id": "tt2911666",
+      "title": "John Wick",
+      "overview": "Ex-hitman John Wick comes out of retirement to track down the gangsters that took everything from him.",
+      "release_date": "2014-10-22",
+      "vote_average": 7.454,
+      "runtime": 101,
+      "poster_path": "/wXqWR7dHncNRbxoEGybEy7QTe9h.jpg",
+      "backdrop_path": "/ff2ti5DkA9UYLzyqhQfI2kZqEuh.jpg"
+    }
+  ],
+  "tvs": [
+    {
+      "id": 100088,
+      "imdb_id": "tt3581920",
+      "title": "The Last of Us",
+      "overview": "Twenty years after modern civilization has been destroyed, Joel, a hardened survivor, is hired to smuggle Ellie, a 14-year-old girl, out of an oppressive quarantine zone. What starts as a small job soon becomes a brutal, heartbreaking journey, as they both must traverse the United States and depend on each other for survival.",
+      "first_air_date": "2023-01-15",
+      "vote_average": 8.432,
+      "poster_path": "/dmo6TYuuJgaYinXBPjrgG9mB5od.jpg",
+      "backdrop_path": "/acevLdSl5I2MK5RYAm7gwAndt1w.jpg"
+    },
+    {
+      "id": 126308,
+      "imdb_id": "tt2788316",
+      "title": "Shōgun",
+      "overview": "In Japan in the year 1600, at the dawn of a century-defining civil war, Lord Yoshii Toranaga is fighting for his life as his enemies on the Council of Regents unite against him, when a mysterious European ship is found marooned in a nearby fishing village.",
+      "first_air_date": "2024-02-27",
+      "vote_average": 8.421,
+      "poster_path": "/7O4iVfOMQmdCSxhOg1WnzG1AgYT.jpg",
+      "backdrop_path": "/6Tb87q9Tog30F5AAHh1gyDT2Vve.jpg"
+    },
+    {
+      "id": 66732,
+      "imdb_id": "tt4574334",
+      "title": "Stranger Things",
+      "overview": "When a young boy vanishes, a small town uncovers a mystery involving secret experiments, terrifying supernatural forces, and one strange little girl.",
+      "first_air_date": "2016-07-15",
+      "vote_average": 8.567,
+      "poster_path": "/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg",
+      "backdrop_path": "/56v2KjBlU4XaOv9rVYEQypROD7P.jpg"
+    },
+    {
+      "id": 1396,
+      "imdb_id": "tt0903747",
+      "title": "Breaking Bad",
+      "overview": "Walter White, a New Mexico chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of only two years left to live. He becomes filled with a sense of fearlessness and an unrelenting desire to secure his family's financial future at any cost as he enters the dangerous world of drugs and crime.",
+      "first_air_date": "2008-01-20",
+      "vote_average": 8.9,
+      "poster_path": "/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg",
+      "backdrop_path": "/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg"
+    },
+    {
+      "id": 76479,
+      "imdb_id": "tt1190634",
+      "title": "The Boys",
+      "overview": "A group of vigilantes known informally as “The Boys” set out to take down corrupt superheroes with no more than blue-collar grit and a willingness to fight dirty.",
+      "first_air_date": "2019-07-25",
+      "vote_average": 8.5,
+      "poster_path": "/in1R2dDc421JxsoRWaIIAqVI2KE.jpg",
+      "backdrop_path": "/bq28ajZaoMyzEIm6REelqyqtEDZ.jpg"
+    },
+    {
+      "id": 119051,
+      "imdb_id": "tt13443470",
+      "title": "Wednesday",
+      "overview": "Smart, sarcastic and a little dead inside, Wednesday Addams investigates twisted mysteries while making new friends — and foes — at Nevermore Academy.",
+      "first_air_date": "2022-11-23",
+      "vote_average": 8.349,
+      "poster_path": "/36xXlhEpQqVVPuiZhfoQuaY4OlA.jpg",
+      "backdrop_path": "/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg"
+    },
+    {
+      "id": 84958,
+      "imdb_id": "tt9140554",
+      "title": "Loki",
+      "overview": "After stealing the Tesseract during the events of “Avengers: Endgame,” an alternate version of Loki is brought to the mysterious Time Variance Authority, a bureaucratic organization that exists outside of time and space and monitors the timeline. They give Loki a choice: face being erased from existence due to being a “time variant” or help fix the timeline and stop a greater threat.",
+      "first_air_date": "2021-06-09",
+      "vote_average": 8.17,
+      "poster_path": "/kEl2t3OhXc3Zb9FBh1AuYzRTgZp.jpg",
+      "backdrop_path": "/q3jHCb4dMfYF6ojikKuHd6LscxC.jpg"
+    },
+    {
+      "id": 1399,
+      "imdb_id": "tt0944947",
+      "title": "Game of Thrones",
+      "overview": "Seven noble families fight for control of the mythical land of Westeros. Friction between the houses leads to full-scale war. All while a very ancient evil awakens in the farthest north. Amidst the war, a neglected military order of misfits, the Night's Watch, is all that stands between the realms of men and icy horrors beyond.",
+      "first_air_date": "2011-04-17",
+      "vote_average": 8.5,
+      "poster_path": "/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
+      "backdrop_path": "/2OMB0ynKlyIenMJWI2Dy9IWT4c.jpg"
+    },
+    {
+      "id": 111110,
+      "imdb_id": "tt11737520",
+      "title": "ONE PIECE",
+      "overview": "With his straw hat and ragtag crew, young pirate Monkey D. Luffy goes on an epic voyage for treasure.",
+      "first_air_date": "2023-08-31",
+      "vote_average": 8.109,
+      "poster_path": "/blWCPEqDGLBuLB9u89CxP9ORQP4.jpg",
+      "backdrop_path": "/qD211Hb5XwFxrszzBBe5EUYJerh.jpg"
+    },
+    {
+      "id": 82856,
+      "imdb_id": "tt8111088",
+      "title": "The Mandalorian",
+      "overview": "After the fall of the Galactic Empire, lawlessness has spread throughout the galaxy. A lone gunfighter makes his way through the outer reaches, earning his keep as a bounty hunter.",
+      "first_air_date": "2019-11-12",
+      "vote_average": 8.408,
+      "poster_path": "/sWgBv7LV2PRoQgkxwlibdGXKz1S.jpg",
+      "backdrop_path": "/9zcbqSxdsRMZWHYtyCd1nXPr2xq.jpg"
+    }
+  ]
+}

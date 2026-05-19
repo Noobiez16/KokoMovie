@@ -1,0 +1,40 @@
+appId: com.kokomovie.app
+productName: KokoMovie
+copyright: Copyright © 2026 KokoMovie Inc.
+electronVersion: "31.7.7"
+
+directories:
+  buildResources: build
+  output: release/linux
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+npmRebuild: false
+asar: true
+asarUnpack:
+  - "**/*.node"
+  - node_modules/better-sqlite3/**/*
+  - node_modules/keytar/**/*
+compression: maximum
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: build/icons
+  category: AudioVideo
+  synopsis: Stream your favourite movies and TV shows
+
+deb:
+  afterInstall: build/postInstall.sh
+
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: kokomovie-pc
+  releaseType: release

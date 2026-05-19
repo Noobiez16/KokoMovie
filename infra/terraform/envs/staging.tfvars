@@ -1,0 +1,11 @@
+environment              = "staging"
+aws_region               = "us-east-1"
+dr_region                = "us-west-2"
+domain_name              = "staging.streamflix.com"
+vpc_cidr                 = "10.1.0.0/16"
+rds_instance_class       = "db.t4g.medium"
+elasticache_node_type    = "cache.t4g.medium"
+msk_broker_instance_type = "kafka.t3.small"
+cloudfront_price_class   = "PriceClass_100"
+ecs_desired_count        = 1
+image_tag                = "latest"

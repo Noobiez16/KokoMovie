@@ -1,0 +1,10 @@
+environment              = "production"
+aws_region               = "us-east-1"
+dr_region                = "us-west-2"
+domain_name              = "streamflix.com"
+vpc_cidr                 = "10.0.0.0/16"
+rds_instance_class       = "db.r6g.large"
+elasticache_node_type    = "cache.r7g.large"
+msk_broker_instance_type = "kafka.m5.large"
+cloudfront_price_class   = "PriceClass_All"
+ecs_desired_count        = 2

@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+coverage/
+.DS_Store
+Thumbs.db
+
+# Electron
+client/dist-electron/
+client/release/
+client/*.asar
+
+# Generated RSA keys
+services/auth/keys/
+
+# SQLite offline DB
+*.sqlite
+*.db
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/*.tfvars
+infra/.terraform.lock.hcl
