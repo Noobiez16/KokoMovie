@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:services\" \"npm run dev:client\"",
+    "dev": "concurrently -k \"npm run dev:services\" \"wait-on tcp:3001 tcp:3002 && npm run dev:client\"",
     "dev:client": "npm run electron:dev --workspace=client",
     "migrate:all": "npm run migrate --workspace=services/auth; npm run migrate --workspace=services/user; npm run migrate --workspace=services/catalog; true",
     "dev:services": "npm run docker:up && npm run migrate:all && concurrently \"npm run dev --workspace=services/auth\" \"npm run dev --workspace=services/user\" \"npm run dev --workspace=services/catalog\" \"npm run dev --workspace=services/playback\" \"npm run dev --workspace=services/recommendation\"",
@@ -28,7 +28,8 @@
     "concurrently": "^9.0.0",
     "electron-builder": "^25.1.8",
     "eslint": "^9.0.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "wait-on": "^9.0.10"
   },
   "engines": {
     "node": ">=22.0.0",
