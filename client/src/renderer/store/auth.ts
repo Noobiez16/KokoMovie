@@ -37,7 +37,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'km-auth',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
       // Never persist tokens — they live in OS keychain
       partialize: (state) => ({
         account: state.account,

@@ -38,13 +38,6 @@ locals {
         { name = "NODE_ENV", value = "production" },
       ]
     }
-    billing = {
-      port = 3006, cpu = 512, memory = 1024
-      env = [
-        { name = "BILLING_PORT", value = "3006" },
-        { name = "NODE_ENV", value = "production" },
-      ]
-    }
   }
 }
 
@@ -326,7 +319,6 @@ locals {
     playback       = { priority = 30, path = "/playback/*" }
     user           = { priority = 40, path = "/user/*" }
     recommendation = { priority = 50, path = "/recommendations/*" }
-    billing        = { priority = 60, path = "/billing/*" }
   }
 }
 

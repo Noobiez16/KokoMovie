@@ -25,13 +25,14 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false)
   const [mfaToken, setMfaToken] = useState('')
   const [needsMfa, setNeedsMfa] = useState(false)
+  const [stayLogged, setStayLogged] = useState(true)
   const { mutate: login, isPending, error } = useLogin()
 
   const apiError = error as { code?: string; message?: string } | null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    login({ email, password, mfaToken: needsMfa ? mfaToken : undefined })
+    login({ email, password, mfaToken: needsMfa ? mfaToken : undefined, stayLogged })
   }
 
   // Detect MFA requirement
@@ -80,6 +81,27 @@ export function LoginForm() {
         }
       />
 
+      {!needsMfa && (
+        <label className="flex items-center gap-2.5 cursor-pointer select-none group py-0.5">
+          <div className="relative">
+            <input
+              type="checkbox"
+              checked={stayLogged}
+              onChange={(e) => setStayLogged(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-5 h-5 rounded-md border border-white/20 bg-white/5 peer-checked:bg-violet-500/80 peer-checked:border-violet-400 transition-all duration-200 group-hover:border-white/40 flex items-center justify-center">
+              {stayLogged && (
+                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+          <span className="text-sm text-white/60 group-hover:text-white/80 transition-colors">Stay signed in</span>
+        </label>
+      )}
+
       {needsMfa && (
         <div className="animate-slide-up">
           <Input
@@ -124,3 +146,4 @@ export function LoginForm() {
     </form>
   )
 }
+

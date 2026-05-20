@@ -24,6 +24,7 @@ export interface Provider {
   readonly id: string
   readonly name: string
   readonly sessionName: string  // persistent session key for this provider
+  readonly defaultEnabled?: boolean  // false = disabled on first install; omit or true = enabled
   getEmbedUrl(req: StreamRequest): string | null
 }
 

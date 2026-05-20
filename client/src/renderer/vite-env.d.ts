@@ -6,7 +6,7 @@ interface ElectronAPI {
   setAuthToken: (token: string) => Promise<void>
   clearAuthToken: () => Promise<void>
   getRefreshToken: () => Promise<string | null>
-  setRefreshToken: (token: string) => Promise<void>
+  setRefreshToken: (token: string, persist?: boolean) => Promise<void>
 
   // Downloads
   downloadContent: (opts: {

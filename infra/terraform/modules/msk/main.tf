@@ -87,7 +87,6 @@ resource "aws_msk_topic" "topics" {
   for_each = {
     "playback.events"  = { partitions = 12, retention_ms = 604800000 }  # 7d
     "user.actions"     = { partitions = 6, retention_ms = 604800000 }
-    "billing.webhooks" = { partitions = 3, retention_ms = 2592000000 }  # 30d
     "content.ingested" = { partitions = 3, retention_ms = 259200000 }   # 3d
   }
 

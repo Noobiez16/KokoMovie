@@ -1,6 +1,6 @@
 {
   "name": "kokomovie-client",
-  "version": "1.0.0",
+  "version": "1.0.2-beta",
   "description": "KokoMovie desktop streaming client — Windows, macOS, Linux",
   "author": {
     "name": "KokoMovie Inc.",
@@ -15,7 +15,7 @@
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "build": "npm run build:renderer && npm run build:main",
-    "electron:dev": "concurrently -k \"vite\" \"nodemon --watch dist-electron --exec electron --no-sandbox .\"",
+    "electron:dev": "concurrently -k \"vite\" \"tsc -p tsconfig.main.json -w\" \"nodemon --watch dist-electron --delay 3 --exec electron --no-sandbox .\"",
     "electron:build": "npm run build && electron-builder",
     "rebuild:native": "electron-rebuild --version 31.7.7",
     "dist:linux": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.linux.yml",

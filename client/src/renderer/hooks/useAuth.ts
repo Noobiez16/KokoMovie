@@ -8,11 +8,12 @@ export function useLogin() {
   const navigate = useNavigate()
 
   return useMutation({
-    mutationFn: (payload: LoginPayload) => authApi.login(payload),
-    onSuccess: async (response) => {
+    mutationFn: (payload: LoginPayload & { stayLogged?: boolean }) => authApi.login(payload),
+    onSuccess: async (response, variables) => {
       const { accessToken, refreshToken, account } = response.data
+      const persist = variables.stayLogged ?? false
       await window.electronAPI?.setAuthToken(accessToken)
-      await window.electronAPI?.setRefreshToken(refreshToken)
+      await window.electronAPI?.setRefreshToken(refreshToken, persist)
       setAccount(account)
       navigate('/profiles')
     },
@@ -28,7 +29,7 @@ export function useRegister() {
     onSuccess: async (response) => {
       const { accessToken, refreshToken, account } = response.data
       await window.electronAPI?.setAuthToken(accessToken)
-      await window.electronAPI?.setRefreshToken(refreshToken)
+      await window.electronAPI?.setRefreshToken(refreshToken, true)
       setAccount(account)
       navigate('/profiles')
     },
@@ -45,6 +46,7 @@ export function useLogout() {
       const refreshToken = await window.electronAPI?.getRefreshToken()
       if (refreshToken) await authApi.logout(refreshToken)
       await window.electronAPI?.clearAuthToken()
+      await window.electronAPI?.setRefreshToken('', true)
     },
     onSettled: () => {
       logout()
@@ -53,3 +55,4 @@ export function useLogout() {
     },
   })
 }
+

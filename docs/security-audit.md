@@ -44,13 +44,13 @@
 default-src 'self'
 script-src 'self'
 style-src 'self' 'unsafe-inline'
-media-src 'self' blob: https://*.cloudfront.net
-connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com
-img-src 'self' data: https://*.cloudfront.net
-frame-src 'none'
+media-src 'self' blob: https: http:
+connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https:
+img-src 'self' data: blob: https:
+frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
 ```
 
-**Status:** ✓ PASS — Production CSP in `index.ts:76-88`. No `eval`, no inline scripts.
+**Status:** ✓ PASS — Production CSP in `index.ts:76-98`. `frame-src` allows YouTube for background hero trailers; streaming providers operate via Main process (hidden BrowserWindow), not inside the renderer frame.
 
 ### Certificate Pinning
 

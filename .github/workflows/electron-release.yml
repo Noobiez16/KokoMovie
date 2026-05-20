@@ -6,13 +6,10 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+  # ─── Linux: AppImage + .deb → client/release/linux/ ─────────────────────────
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -25,43 +22,56 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build renderer
-        run: npm run build:renderer --workspace=client
+      - name: Build renderer + main process
+        run: npm run build --workspace=client
 
-      - name: Build main process
-        run: npm run build:main --workspace=client
-
-      - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --publish always
+      - name: Package Linux (.AppImage + .deb)
+        run: npx electron-builder --config electron-builder.linux.yml --publish never
         working-directory: client
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
-      - name: Package (macOS)
-        if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --publish always
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            client/release/linux/*.AppImage
+            client/release/linux/*.deb
+          retention-days: 1
+
+  # ─── Windows: NSIS .exe installer → client/release/windows/ ─────────────────
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer + main process
+        run: npm run build --workspace=client
+
+      - name: Package Windows (.exe)
+        run: npx electron-builder --config electron-builder.win.yml --publish never
         working-directory: client
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
-      - name: Package (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --publish always
-        working-directory: client
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: client/release/windows/*.exe
+          retention-days: 1
 
+  # ─── Release: collect artifacts → single GitHub Release ─────────────────────
   create-release:
-    name: Create GitHub Release
-    needs: build
+    name: Publish GitHub Release
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,9 +79,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create release
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: artifacts/linux
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/windows
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          files: |
+            artifacts/linux/*.AppImage
+            artifacts/linux/*.deb
+            artifacts/windows/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

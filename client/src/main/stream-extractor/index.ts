@@ -1,4 +1,14 @@
-import { BrowserWindow, session } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
+import { appendFileSync } from 'fs'
+import { join } from 'path'
+import { lookup } from 'dns'
+
+function logExtraction(msg: string) {
+  try {
+    const logPath = join(app.getPath('userData'), 'extraction.log')
+    appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`, 'utf8')
+  } catch {}
+}
 
 export interface ExtractedStream {
   url: string
@@ -17,16 +27,30 @@ const STREAM_PATTERNS = [
   /application\/x-mpegurl/i,
 ]
 
-// Domains to cancel (ads, trackers)
+// Domains to cancel (ads, trackers, and defunct/dead providers).
+// NOTE: hd4u.sbs is VidSrc.rip's player domain — do NOT add it here again.
+// Blocking it prevents VidSrc.rip from ever loading its player and extracting a stream.
 const BLOCKED_HOSTS = [
   'google-analytics.com', 'googletagmanager.com', 'doubleclick.net',
   'googlesyndication.com', 'amazon-adsystem.com', 'facebook.com',
   'analytics.', 'stats.', 'tracking.', 'popads.net', 'popcash.net',
+  'bulsis.net', 'crewtv.net',
+  'youtube.com', 'googlevideo.com', 'ytimg.com', 'youtube-nocookie.com',
 ]
+
+// Cache DNS resolution results with a 3-minute TTL.
+// Without a TTL, a single transient DNS failure permanently blacklists a CDN host
+// for the entire app session, causing legitimate providers to always time out.
+const hostResolutionCache = new Map<string, { ok: boolean; expiresAt: number }>()
+const HOST_RESOLUTION_TTL_MS = 3 * 60 * 1000
 
 function isStreamUrl(url: string): boolean {
   try {
     const u = new URL(url)
+    const host = u.hostname
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com') || host.includes('googlevideo.com')) {
+      return false
+    }
     const path = u.pathname + u.search
     return STREAM_PATTERNS.some((p) => p.test(path))
   } catch {
@@ -86,6 +110,18 @@ function shouldBlock(url: string): boolean {
     const host = parsed.hostname
     if (BLOCKED_HOSTS.some((d) => host.includes(d))) return true
     
+    const cached = hostResolutionCache.get(host)
+    const now = Date.now()
+    if (cached && cached.expiresAt > now) {
+      if (!cached.ok) return true
+    } else {
+      // Assume resolvable until DNS lookup completes; update cache asynchronously.
+      hostResolutionCache.set(host, { ok: true, expiresAt: now + HOST_RESOLUTION_TTL_MS })
+      lookup(host, (err) => {
+        hostResolutionCache.set(host, { ok: !err, expiresAt: Date.now() + HOST_RESOLUTION_TTL_MS })
+      })
+    }
+
     const pathname = parsed.pathname.toLowerCase()
     if (BLOCKED_EXTENSIONS.some((ext) => pathname.endsWith(ext))) return true
     
@@ -129,11 +165,9 @@ export async function extractStream(
       return
     }
 
-    // Use persistent session per provider (keeps cookies/localStorage between attempts)
-    // Falls back to ephemeral if no sessionName given
-    const partition = sessionName
-      ? `persist:${sessionName}`
-      : `providers-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    // Always use ephemeral partition for every extraction to avoid cookie/localStorage state pollution
+    // (e.g. providers resuming/redirecting to the wrong episode based on previous plays)
+    const partition = `providers-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const providerSession = session.fromPartition(partition)
 
@@ -141,6 +175,9 @@ export async function extractStream(
       show: false,
       width: 1280,
       height: 720,
+      frame: false,
+      transparent: true,
+      skipTaskbar: true,
       webPreferences: {
         session: providerSession,
         nodeIntegration: false,
@@ -148,10 +185,25 @@ export async function extractStream(
         webSecurity: false,
         javascript: true,
         images: false,
+        backgroundThrottling: false,
       },
     })
 
+    win.webContents.setWindowOpenHandler((details) => {
+      logExtraction(`[Extractor] Blocked popup window: ${details.url}`)
+      return { action: 'deny' }
+    })
+
     let done = false
+
+    const clickInterval = setInterval(() => {
+      if (done) return
+      try {
+        logExtraction(`[Extractor] Simulating click at center (640, 360) for ${embedUrl}`)
+        win.webContents.sendInputEvent({ type: 'mouseDown', x: 640, y: 360, button: 'left', clickCount: 1 })
+        win.webContents.sendInputEvent({ type: 'mouseUp', x: 640, y: 360, button: 'left', clickCount: 1 })
+      } catch {}
+    }, 2000)
 
     const onAbort = () => {
       finish(null)
@@ -164,6 +216,7 @@ export async function extractStream(
     const finish = (result: ExtractedStream | null) => {
       if (done) return
       done = true
+      clearInterval(clickInterval)
       clearTimeout(timer)
       if (signal) {
         signal.removeEventListener('abort', onAbort)
@@ -200,6 +253,14 @@ export async function extractStream(
         if (!done) {
           const ct = (details.responseHeaders?.['content-type'] ?? details.responseHeaders?.['Content-Type'] ?? []).join('')
           if (isStreamContentType(ct) && details.url.startsWith('http')) {
+            try {
+              const u = new URL(details.url)
+              const host = u.hostname
+              if (host.includes('youtube.com') || host.includes('youtube-nocookie.com') || host.includes('googlevideo.com')) {
+                callback({ responseHeaders: details.responseHeaders })
+                return
+              }
+            } catch {}
             if (isCamStream(details.url)) {
               callback({ responseHeaders: details.responseHeaders })
               return
@@ -215,6 +276,7 @@ export async function extractStream(
     providerSession.webRequest.onBeforeRequest(
       { urls: ['*://*/*'] },
       (details, callback) => {
+        logExtraction(`[Request] ${details.url}`)
         callback({ cancel: shouldBlock(details.url) })
       },
     )
@@ -225,9 +287,23 @@ export async function extractStream(
 
     win.loadURL(embedUrl, {
       httpReferrer: new URL(embedUrl).origin,
-    }).catch(() => finish(null))
+    }).catch((err) => {
+      logExtraction(`[Extractor] loadURL failed for ${embedUrl} with error: ${String(err)}`)
+      finish(null)
+    })
 
-    win.on('closed', () => finish(null))
+    win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      logExtraction(`[Extractor] did-fail-load for ${validatedURL} | code: ${errorCode} | desc: ${errorDescription} | isMainFrame: ${isMainFrame}`)
+      const isMain = isMainFrame === true || validatedURL === embedUrl || validatedURL === (embedUrl + '/')
+      if (isMain) {
+        finish(null)
+      }
+    })
+
+    win.on('closed', () => {
+      logExtraction(`[Extractor] Window closed for ${embedUrl}`)
+      finish(null)
+    })
   })
 }
 

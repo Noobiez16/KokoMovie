@@ -145,12 +145,12 @@ User opens app
 ```
 User clicks Watch on a title
   → ContentDetail calls POST /catalog/sync (TMDB full detail → DB)
-  → Source picker modal opens
-  → User picks provider (e.g. VidSrc)
-  → IPC: providers:getStream(providerId, { imdbId, tmdbId, type, season?, episode? })
-  → Main process creates hidden BrowserWindow with persistent provider session
-  → Hidden window loads embed URL (e.g. https://vidsrc.to/embed/movie/tt1234567)
-  → webRequest.onSendHeaders intercepts first *.m3u8 request
+  → IPC: providers:getFirstStream({ imdbId, tmdbId, type, season?, episode? })
+  → Main process races all enabled providers in parallel batches of 4 (staggered 1.5s)
+  → Each provider creates a hidden BrowserWindow with a persistent session
+  → Hidden window loads provider embed URL (e.g. https://vidsrc.to/embed/movie/tt1234567)
+  → webRequest.onSendHeaders intercepts first *.m3u8 or *.mp4 request
+  → First provider to succeed aborts all others via AbortController
   → Stream URL + headers returned to Renderer
   → Player page opens with directStreamUrl in navigation state
   → VideoPlayer creates HLS.js instance, loads manifest
@@ -205,12 +205,12 @@ All renderer ↔ main communication goes through `contextBridge.exposeInMainWorl
 
 ```
 default-src 'self'
-script-src 'self'
+script-src 'self' 'unsafe-inline' 'unsafe-eval'
 style-src 'self' 'unsafe-inline'
 media-src 'self' blob: https:
 connect-src 'self' http://localhost:* ws://localhost:* https:
-img-src 'self' data: https:
-frame-src 'none'
+img-src 'self' data: blob: https:
+frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
 ```
 
 ### State Management
@@ -243,14 +243,27 @@ interface StreamRequest {
 }
 ```
 
-### Registered Providers
+### Registered Providers (by priority)
 
-| ID | Name | Source | ID type |
+| ID | Name | Domain | ID type |
 |---|---|---|---|
+| `vidbinge` | VidBinge | vidbinge.com | IMDB ID |
 | `vidsrc` | VidSrc | vidsrc.to | IMDB ID preferred, TMDB fallback |
+| `vidsrc-su` | VidSrc.su | vidsrc.su | TMDB ID |
+| `vidsrc-pm` | VidSrc.pm | vidsrc.pm | TMDB ID |
+| `vidsrc-in` | VidSrc.in | vidsrc.in | TMDB ID |
+| `vidlink` | VidLink | vidlink.pro | IMDB ID |
+| `vidsrc-cc` | VidSrc.cc | vidsrc.cc | IMDB ID |
+| `multiembed` | MultiEmbed | multiembed.mov | TMDB ID |
+| `vidsrc-pro` | VidSrc.pro | vidsrc.pro | TMDB ID |
+| `vidsrc-rip` | VidSrc.rip | vidsrc.rip | TMDB ID |
+| `autoembed` | AutoEmbed | autoembed.cc | TMDB ID |
+| `superembed` | SuperEmbed | multiembed.mov | TMDB ID |
 | `vidsrc-me` | VidSrc.me | vidsrc.me | TMDB ID |
 | `2embed` | 2Embed | 2embed.cc | IMDB ID preferred, TMDB fallback |
-| `superembed` | SuperEmbed | multiembed.mov | TMDB ID |
+| `smashystream` | SmashyStream | smashystream.com | TMDB ID |
+| `moviesapi` | MoviesAPI | moviesapi.to | TMDB ID |
+| `embed-su` | EmbedSu | embed.su | TMDB ID |
 
 ### Stream Extraction Pipeline
 

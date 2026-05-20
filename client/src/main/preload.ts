@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAuthToken: (token: string) => ipcRenderer.invoke('keychain:set-token', token),
   clearAuthToken: () => ipcRenderer.invoke('keychain:clear-token'),
   getRefreshToken: () => ipcRenderer.invoke('keychain:get-refresh-token'),
-  setRefreshToken: (token: string) => ipcRenderer.invoke('keychain:set-refresh-token', token),
+  setRefreshToken: (token: string, persist?: boolean) => ipcRenderer.invoke('keychain:set-refresh-token', token, persist ?? true),
 
   // ─── Downloads ────────────────────────────────────────────────────────────
   downloadContent: (opts: {

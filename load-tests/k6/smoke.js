@@ -1,6 +1,6 @@
 /**
  * Smoke test — quick sanity check against staging/prod.
- * Run with: k6 run --env BASE_URL=https://api.streamflix.com smoke.js
+ * Run with: k6 run --env BASE_URL=https://api.kokomovie.com smoke.js
  * Expected duration: ~2 minutes, 1 VU.
  */
 import http from 'k6/http'

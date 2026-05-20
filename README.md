@@ -37,7 +37,7 @@ KokoMovie PC is **not** a self-hosted Netflix. It is a content aggregator:
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/your-repo/kokomovie-pc
+git clone https://github.com/Noobiez16/KokoMovie
 cd kokomovie-pc
 npm install
 ```
@@ -78,12 +78,11 @@ On first launch, create an account, then select or create a profile. The Home pa
 
 1. Browse the Home page, Movies, or Series to find something to watch
 2. Click any poster to open the content detail page
-3. Click **Watch** — a source picker modal appears
-4. Select a provider (VidSrc is a good first choice)
-5. Wait ~10–20 seconds while KokoMovie finds the stream
-6. The player opens automatically
+3. Click **Watch** — KokoMovie races all enabled providers in parallel and collects every working stream
+4. The highest-quality stream wins and playback starts automatically
+5. Inside the player, open **Select Source** (bottom controls) to switch to any alternative provider — sources confirmed working for this title show a green **A** badge; sources that returned nothing show a dimmed red **S** badge. Switching to an **A** source is instant; **S** sources trigger a fresh extraction attempt
 
-To manage providers, go to **Providers** in the left sidebar.
+To manage which providers are active, go to **Providers** in the left sidebar.
 
 ---
 
@@ -117,19 +116,29 @@ kokomovie-pc/
 
 ## Stream Providers
 
-Providers are configured at **Providers** in the app sidebar. Available providers:
+Providers are configured at **Providers** in the app sidebar. All enabled providers participate in a staggered parallel race — the first one to return a working stream wins. Available providers:
 
-| Provider | Source | Requires |
+| Provider | Domain | ID Required |
 |---|---|---|
-| VidSrc | `vidsrc.to`, `.su`, `.pm`, `.in` | IMDB ID (or TMDB ID) |
+| VidBinge | `vidbinge.com` | IMDB ID |
+| VidSrc | `vidsrc.to` | IMDB ID preferred, TMDB fallback |
+| VidSrc.su | `vidsrc.su` | TMDB ID |
+| VidSrc.pm | `vidsrc.pm` | TMDB ID |
+| VidSrc.in (vsrc.su) | `vsrc.su` | IMDB or TMDB ID |
+| VidLink | `vidlink.pro` | TMDB ID |
+| VidSrc.cc | `vidsrc.cc` | IMDB ID |
+| MultiEmbed | `multiembed.mov` | TMDB ID |
 | VidSrc.pro | `vidsrc.pro` | TMDB ID |
 | VidSrc.rip | `vidsrc.rip` | TMDB ID |
-| VidSrc.cc | `vidsrc.cc` | IMDB ID |
-| VidLink | `vidlink.pro` | IMDB ID (or TMDB ID) |
-| 2Embed | `2embed.cc` | IMDB ID (or TMDB ID) |
+| AutoEmbed | `autoembed.cc` | TMDB ID |
 | SuperEmbed | `multiembed.mov` | TMDB ID |
+| VidSrc.me (vidsrcme) | `vidsrcme.su` | TMDB ID |
+| 2Embed | `2embed.cc` | IMDB ID preferred |
+| SmashyStream | `smashystream.com` | TMDB ID |
+| MoviesAPI | `moviesapi.to` | TMDB ID |
+| EmbedSu | `embed.su` | TMDB ID |
 
-**How it works**: Each provider has an embed URL pattern. KokoMovie opens the embed page in a hidden Electron `BrowserWindow`, monitors outbound network requests, and captures the first `.m3u8` URL it finds. That URL is handed directly to hls.js in the main window.
+**How it works**: Each provider has an embed URL pattern. KokoMovie opens the embed page in a hidden Electron `BrowserWindow` with a persistent session, monitors outbound network requests via `webRequest.onSendHeaders`, and captures the first `.m3u8` or `.mp4` URL it finds. That URL is then passed to a built-in local HTTP proxy server running in the main process (`http://localhost:PORT`), which fetches segments using a custom Node-level fetcher (`fetchNode`) to bypass Electron's forbidden headers restriction (like Referer/Origin) and Chromium's strict CORS enforcement, before feeding the stream to `hls.js` in the main window. Providers are raced in parallel batches of 4, staggered 1.5 seconds apart.
 
 **To add a new provider**: implement the `Provider` interface in `client/src/main/providers/` and register it in `registry.ts`.
 
@@ -223,12 +232,12 @@ git tag v1.0.0 && git push origin v1.0.0
 ## Tech Stack
 
 **Client**
-- Electron 33 (main: Node.js, renderer: Chromium)
-- React 18 + Vite + TypeScript
-- TailwindCSS
-- TanStack Query (data fetching + cache)
-- Zustand (auth/UI state)
-- hls.js (HLS player)
+- Electron 31 (main: Node.js, renderer: Chromium)
+- React 19 + Vite 5 + TypeScript
+- TailwindCSS 3
+- TanStack Query v5 (data fetching + cache)
+- Zustand v5 (auth/UI state)
+- hls.js v1.5 (HLS player)
 
 **Services**
 - Fastify 5 (HTTP framework)

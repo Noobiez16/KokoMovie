@@ -5,7 +5,7 @@ export const PLAYBACK_URL = __ENV.PLAYBACK_URL || `${BASE_URL}:3003`
 
 // Shared test account (pre-seeded in test env)
 export const TEST_ACCOUNT = {
-  email: __ENV.TEST_EMAIL || 'loadtest@streamflix.test',
+  email: __ENV.TEST_EMAIL || 'loadtest@kokomovie.test',
   password: __ENV.TEST_PASSWORD || 'LoadTest123!',
 }
 

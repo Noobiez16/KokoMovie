@@ -19,7 +19,7 @@ export function MoviesPage() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const movies = data?.data ?? []
+  const movies = [...new Map((data?.data ?? []).map((m) => [m.id, m])).values()]
   const totalPages = data?.meta?.pagination?.pages ?? 1
 
   return (

@@ -9,10 +9,10 @@ export const vidlinkProvider: Provider = {
     if (!req.tmdbId) return null
 
     if (req.type === 'movie') {
-      return `https://vidlink.pro/embed/movie/${req.tmdbId}`
+      return `https://vidlink.pro/movie/${req.tmdbId}`
     }
     if (req.type === 'tv' && req.season != null && req.episode != null) {
-      return `https://vidlink.pro/embed/tv/${req.tmdbId}/${req.season}/${req.episode}`
+      return `https://vidlink.pro/tv/${req.tmdbId}/${req.season}/${req.episode}`
     }
     return null
   },

@@ -103,6 +103,6 @@ snap:
 # ─── Auto-update (GitHub Releases) ───────────────────────────────────────────
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
+  owner: Noobiez16
   repo: kokomovie-pc
   releaseType: release

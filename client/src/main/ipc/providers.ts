@@ -1,9 +1,14 @@
-import { app, ipcMain, session } from 'electron'
+import { app, ipcMain, session, net } from 'electron'
 import { listProviders, getEnabledProviders, toggleProvider, getProvider } from '../providers/registry.js'
 import { extractStreamWithRetry } from '../stream-extractor/index.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
 import { appendFileSync } from 'fs'
 import { join } from 'path'
+import * as http from 'http'
+import * as https from 'https'
+import * as zlib from 'zlib'
+import { setMaxListeners } from 'events'
+import { lookup } from 'dns'
 
 function logExtraction(msg: string) {
   try {
@@ -12,26 +17,632 @@ function logExtraction(msg: string) {
   } catch {}
 }
 
+function checkDomainResolves(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const hostname = new URL(url).hostname
+      lookup(hostname, (err) => {
+        if (err) resolve(false)
+        else resolve(true)
+      })
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 // Stream headers to inject when the renderer's HLS player fetches segments
 // Keyed by URL host prefix
 const streamHeadersRegistry = new Map<string, Record<string, string>>()
+const streamSessionsRegistry = new Map<string, string>()
+
+export function getStreamHeaders(host: string): Record<string, string> {
+  const headers = streamHeadersRegistry.get(host)
+  if (headers && Object.keys(headers).length > 0) {
+    return headers
+  }
+  if (streamHeadersRegistry.size > 0) {
+    const entries = Array.from(streamHeadersRegistry.entries())
+    const lastEntry = entries[entries.length - 1]
+    if (lastEntry && lastEntry[1]) {
+      return lastEntry[1]
+    }
+  }
+  return {}
+}
+
+// Pre-register headers and session partition in the main process so they're ready BEFORE the renderer starts loading
+export function autoRegisterHeaders(streamUrl: string, headers: Record<string, string>, sessionName?: string): void {
+  try {
+    const host = new URL(streamUrl).host
+    streamHeadersRegistry.set(host, headers)
+    if (sessionName) {
+      const partition = `persist:${sessionName}`
+      streamSessionsRegistry.set(host, partition)
+    }
+    setTimeout(() => {
+      streamHeadersRegistry.delete(host)
+      streamSessionsRegistry.delete(host)
+    }, 4 * 3600 * 1000)
+    logExtraction(`Headers auto-registered for host: ${host} (${Object.keys(headers).length} headers) | Session: ${sessionName || 'default'}`)
+  } catch { /* ignore */ }
+}
+
+// Check if a URL belongs to a registered stream host (used by index.ts for CORS injection fallback).
+// Must match the exact host — returning true for any URL whenever the registry is non-empty
+// causes duplicate Access-Control-Allow-Origin headers on local-proxy responses, which Chromium rejects.
+export function isStreamHost(url: string): boolean {
+  try {
+    return streamHeadersRegistry.has(new URL(url).host)
+  } catch {
+    return false
+  }
+}
+
+// ─── Local HTTP Proxy (bypasses CORS for HLS playback) ──────────────────────────
+// Stream CDNs don't return Access-Control-Allow-Origin headers. hls.js in the
+// renderer can't fetch them directly. This local server proxies requests through
+// Node.js (net.fetch) where CORS doesn't exist, and returns responses with proper
+// CORS headers. URL format: http://localhost:PORT/proxy/cdn.example.com/path/file.m3u8
+// This preserves relative URL resolution for HLS segments.
+
+let proxyPort = 0
+
+// Pure Node-level fetch helper that ignores Electron's forbidden header rules
+function fetchNode(
+  url: string,
+  options: { headers?: Record<string, string>; method?: string; maxRedirects?: number } = {},
+): Promise<{ status: number; headers: Record<string, string>; buffer: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const maxRedirects = options.maxRedirects ?? 5
+    let currentRedirects = 0
+
+    function makeRequest(currentUrl: string) {
+      try {
+        const urlObj = new URL(currentUrl)
+        const isHttps = urlObj.protocol === 'https:'
+        const reqModule = isHttps ? https : http
+
+        const reqHeaders: Record<string, string> = {}
+        if (options.headers) {
+          for (const [k, v] of Object.entries(options.headers)) {
+            const lowerK = k.toLowerCase()
+            if (lowerK !== 'host') {
+              reqHeaders[k] = v
+            }
+          }
+        }
+        reqHeaders['Accept-Encoding'] = 'gzip, deflate'
+
+        const reqOpts: https.RequestOptions = {
+          method: options.method ?? 'GET',
+          headers: reqHeaders,
+          timeout: 15000,
+          rejectUnauthorized: false,
+        }
+
+        const req = reqModule.request(currentUrl, reqOpts, (res) => {
+          try {
+            if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0)) {
+              const location = res.headers.location
+              if (location) {
+                currentRedirects++
+                if (currentRedirects > maxRedirects) {
+                  reject(new Error('Too many redirects'))
+                  return
+                }
+                const absoluteLocation = new URL(location, currentUrl).toString()
+                makeRequest(absoluteLocation)
+                return
+              }
+            }
+
+            const chunks: Buffer[] = []
+            res.on('data', (chunk) => chunks.push(chunk))
+            res.on('end', () => {
+              try {
+                let buffer = Buffer.concat(chunks)
+                const encoding = res.headers['content-encoding']
+                if (encoding === 'gzip') {
+                  buffer = zlib.gunzipSync(buffer)
+                } else if (encoding === 'deflate') {
+                  buffer = zlib.inflateSync(buffer)
+                }
+
+                const resHeaders: Record<string, string> = {}
+                for (const [k, v] of Object.entries(res.headers)) {
+                  if (v !== undefined) {
+                    resHeaders[k] = Array.isArray(v) ? v.join(', ') : v
+                  }
+                }
+
+                resolve({
+                  status: res.statusCode ?? 200,
+                  headers: resHeaders,
+                  buffer,
+                })
+              } catch (e) {
+                reject(new Error(`Failed to process response body: ${e}`))
+              }
+            })
+          } catch (e) {
+            reject(e)
+          }
+        })
+
+        req.on('error', (err) => {
+          reject(err)
+        })
+
+        req.on('timeout', () => {
+          req.destroy(new Error('Request timeout'))
+        })
+
+        req.end()
+      } catch (e) {
+        reject(e)
+      }
+    }
+
+    makeRequest(url)
+  })
+}
+
+function streamSegment(
+  currentUrl: string,
+  headers: Record<string, string>,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  redirectsCount = 0
+) {
+  if (redirectsCount > 5) {
+    res.writeHead(502)
+    res.end('Too many redirects')
+    return
+  }
+
+  try {
+    const urlObj = new URL(currentUrl)
+    const isHttps = urlObj.protocol === 'https:'
+    const reqModule = isHttps ? https : http
+
+    const reqHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.toLowerCase() !== 'host') {
+        reqHeaders[k] = v
+      }
+    }
+
+    if (req.headers.range) {
+      reqHeaders['Range'] = req.headers.range
+    }
+
+    const clientReq = reqModule.request(currentUrl, {
+      method: req.method ?? 'GET',
+      headers: reqHeaders,
+      timeout: 30000,
+      rejectUnauthorized: false,
+    }, (clientRes) => {
+      if (req.destroyed) {
+        clientReq.destroy()
+        clientRes.destroy()
+        return
+      }
+
+      const statusCode = clientRes.statusCode ?? 200
+      if ([301, 302, 303, 307, 308].includes(statusCode)) {
+        const location = clientRes.headers.location
+        if (location) {
+          const absoluteLocation = new URL(location, currentUrl).toString()
+          streamSegment(absoluteLocation, headers, req, res, redirectsCount + 1)
+          return
+        }
+      }
+
+      const resHeaders: Record<string, string> = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      }
+      for (const [k, v] of Object.entries(clientRes.headers)) {
+        if (v !== undefined && !k.toLowerCase().startsWith('access-control-')) {
+          resHeaders[k] = String(v)
+        }
+      }
+
+      res.writeHead(statusCode, resHeaders)
+
+      // DIAGNOSTIC: capture status, size, content-type, and first 16 bytes of each segment
+      // so we can tell whether the upstream is returning real TS data (0x47 sync byte) or
+      // an HTML challenge / error page / unexpected envelope.
+      let firstBytes: Buffer | null = null
+      let totalBytes = 0
+      clientRes.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length
+        if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, Math.min(16, chunk.length)))
+      })
+      clientRes.on('end', () => {
+        const head = firstBytes ? firstBytes.toString('hex') : 'none'
+        const ct = clientRes.headers['content-type'] ?? '?'
+        const urlBrief = currentUrl.length > 140 ? currentUrl.slice(0, 140) + '…' : currentUrl
+        logExtraction(`[Segment ${statusCode}] bytes=${totalBytes} ct=${ct} head=${head} url=${urlBrief}`)
+      })
+
+      clientRes.pipe(res)
+    })
+
+    clientReq.on('timeout', () => {
+      clientReq.destroy()
+    })
+
+    clientReq.on('error', (err) => {
+      logExtraction(`[Proxy Segment Error] ${currentUrl}: ${err.message}`)
+      if (!res.headersSent) {
+        res.writeHead(502)
+        res.end('Proxy segment request failed')
+      }
+    })
+
+    req.on('close', () => {
+      clientReq.destroy()
+    })
+
+    clientReq.end()
+  } catch (err: any) {
+    logExtraction(`[Proxy Segment Exception] ${currentUrl}: ${err.message}`)
+    if (!res.headersSent) {
+      res.writeHead(502)
+      res.end('Proxy segment request exception')
+    }
+  }
+}
+
+// Lenient SRT/VTT normalizer.
+// Goal: never drop a cue. The previous strict block parser silently rejected any cue with
+// non-canonical timing (single-digit hours, M:SS.mmm style, blank lines containing whitespace),
+// which is why the subtitle track went near-empty after the parser rewrite.
+//
+// We do the bare minimum: strip BOM, normalize line endings, swap SRT commas to VTT dots,
+// prepend WEBVTT header if missing, then regex-inject bottom-center positioning onto every
+// cue line that doesn't already carry settings. Cue identifier lines (sequence numbers) are
+// valid in VTT and are left in place.
+function srtToVtt(raw: string): string {
+  let text = raw
+    .replace(/^﻿/, '')         // strip BOM
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+
+  // SRT uses comma between seconds and ms; VTT requires dot.
+  // Supports both HH:MM:SS,mmm and MM:SS,mmm formats
+  text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}),(\d{3})/g, '$1.$3')
+
+  if (!text.trimStart().startsWith('WEBVTT')) {
+    text = 'WEBVTT\n\n' + text
+  }
+
+  // Inject default bottom-center positioning onto any cue timestamp line that has no
+  // existing cue settings. Match lines whose entire content is just `START --> END`
+  // (optional trailing whitespace) and append settings. Lines that already have settings
+  // are left alone. Supports both HH:MM:SS.mmm and MM:SS.mmm.
+  text = text.replace(
+    /^((\d{1,3}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{1,3}:)?\d{2}:\d{2}\.\d{3})[ \t]*$/gm,
+    '$1 line:90% position:50% align:center',
+  )
+
+  return text
+}
+
+export async function startStreamProxy(): Promise<void> {
+  return new Promise((resolve) => {
+    const server = http.createServer(async (req, res) => {
+      // CORS preflight
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Max-Age': '86400',
+        })
+        res.end()
+        return
+      }
+
+      if (!req.url?.startsWith('/proxy/')) {
+        res.writeHead(404)
+        res.end('Not found')
+        return
+      }
+
+      // Reconstruct original HTTPS URL from path
+      let realUrl = 'https://' + req.url.slice('/proxy/'.length)
+      realUrl = realUrl.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+      logExtraction(`[Proxy] Fetching: ${realUrl}`)
+
+      try {
+        let urlObj = new URL(realUrl)
+        const isVtt = urlObj.searchParams.get('format') === 'vtt'
+        if (isVtt) {
+          urlObj.searchParams.delete('format')
+          realUrl = urlObj.toString()
+        }
+
+        const host = urlObj.host
+        const streamHeaders = { ...getStreamHeaders(host) }
+
+        // Extract and inject headers from the URL's query parameters if present (e.g. VidLink headers)
+        const qHeaders = urlObj.searchParams.get('headers')
+        if (qHeaders) {
+          try {
+            const parsed = JSON.parse(qHeaders)
+            for (const [k, v] of Object.entries(parsed)) {
+              // Only set if not already present in the captured headers to avoid decoy headers!
+              const lowerK = k.toLowerCase()
+              const existingKey = Object.keys(streamHeaders).find(ex => ex.toLowerCase() === lowerK)
+              if (!existingKey) {
+                streamHeaders[k] = String(v)
+              }
+            }
+          } catch {}
+        }
+
+        // Clean headers and prepare for fetchNode
+        const fetchHeaders: Record<string, string> = {}
+        for (const [k, v] of Object.entries(streamHeaders)) {
+          const lowerK = k.toLowerCase()
+          // Do not send Host header as Node http/https module handles it.
+          // Skip other connection/security headers to prevent issues.
+          if (
+            lowerK !== 'host' &&
+            !lowerK.startsWith('sec-') &&
+            lowerK !== 'connection' &&
+            lowerK !== 'accept-encoding' &&
+            lowerK !== 'cookie'
+          ) {
+            fetchHeaders[k] = String(v)
+          }
+        }
+
+        // Force a real browser User-Agent
+        fetchHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+        const isManifest = realUrl.includes('.m3u')
+        if (!isManifest && !isVtt) {
+          streamSegment(realUrl, fetchHeaders, req, res)
+          return
+        }
+
+        logExtraction(`[Proxy Request] Target: ${realUrl} | Referer: ${fetchHeaders['Referer'] || fetchHeaders['referer']} | Origin: ${fetchHeaders['Origin'] || fetchHeaders['origin']}`)
+
+        const response = await fetchNode(realUrl, {
+          method: req.method,
+          headers: fetchHeaders,
+        })
+
+        let buffer = response.buffer
+        let contentType = response.headers['content-type'] ?? 'application/octet-stream'
+
+        // Convert SRT to WebVTT format on-the-fly.
+        // A proper block parser is used instead of a simple regex so that:
+        // 1. SRT sequence numbers are stripped (VTT doesn't use them)
+        // 2. Every cue gets explicit bottom-center positioning (line:90% position:50% align:center)
+        //    so cues never float to the middle of the screen regardless of the source file's settings
+        // 3. BOM, mixed line endings, and blank-body cues are all handled cleanly
+        if (isVtt) {
+          const raw = buffer.toString('utf8')
+          // If it's already a VTT file, rewrite cue position settings but skip SRT parsing
+          const isAlreadyVtt = raw.replace(/^﻿/, '').trimStart().startsWith('WEBVTT')
+          if (isAlreadyVtt) {
+            // Rewrite or inject positioning on every --> line that doesn't already have settings
+            const rewritten = raw
+              .replace(/^﻿/, '')
+              .replace(/\r\n/g, '\n')
+              .replace(/\r/g, '\n')
+              .replace(
+                /^((\d{1,3}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{1,3}:)?\d{2}:\d{2}\.\d{3})(\s*)$/gm,
+                '$1 line:90% position:50% align:center',
+              )
+            buffer = Buffer.from(rewritten, 'utf8')
+          } else {
+            buffer = Buffer.from(srtToVtt(raw), 'utf8')
+          }
+          contentType = 'text/vtt; charset=utf-8'
+        } else if (realUrl.includes('.m3u') || contentType.includes('mpegurl')) {
+          let text = buffer.toString('utf8')
+
+          // DIAGNOSTIC: detect encryption, master vs. media playlist, variant + segment counts.
+          // EXT-X-KEY with an unrewritten URI is a known root cause for "0:00 stuck" playback.
+          const hasEncKey = text.includes('#EXT-X-KEY')
+          const isMaster = text.includes('#EXT-X-STREAM-INF')
+          const variantCount = (text.match(/#EXT-X-STREAM-INF/g) || []).length
+          const segmentCount = (text.match(/#EXTINF/g) || []).length
+          const keyLine = hasEncKey ? (text.split('\n').find((l) => l.startsWith('#EXT-X-KEY')) ?? '') : ''
+          logExtraction(`[Manifest ${response.status}] master=${isMaster} variants=${variantCount} segments=${segmentCount} encKey=${hasEncKey}${keyLine ? ` | ${keyLine.slice(0, 200)}` : ''} | size=${buffer.length}`)
+
+          // Extract all resolutions to check if high resolution is available
+          const resMatches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
+          let hasHighRes = false
+          for (const match of resMatches) {
+            const w = parseInt(match[1]!, 10)
+            const h = parseInt(match[2]!, 10)
+            if (!isNaN(w) && !isNaN(h)) {
+              if (getStandardHeight(w, h) >= 720) {
+                hasHighRes = true
+                break
+              }
+            }
+          }
+
+          if (hasHighRes) {
+            const lines = text.split(/\r?\n/)
+            const newLines: string[] = []
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i]!
+              if (line.startsWith('#EXT-X-STREAM-INF:')) {
+                const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/i)
+                if (resMatch) {
+                  const w = parseInt(resMatch[1]!, 10)
+                  const h = parseInt(resMatch[2]!, 10)
+                  if (!isNaN(w) && !isNaN(h)) {
+                    const stdHeight = getStandardHeight(w, h)
+                    if (stdHeight < 720) {
+                      // Skip this tag, and also find and skip the next line that is the playlist URI
+                      let j = i + 1
+                      while (j < lines.length && (lines[j]!.trim() === '' || lines[j]!.startsWith('#'))) {
+                        j++
+                      }
+                      i = j
+                      continue
+                    }
+                  }
+                }
+              }
+              newLines.push(line)
+            }
+            text = newLines.join('\n')
+          }
+
+          // Rewrite absolute paths (starting with / but not //)
+          text = text.replace(/^(\/[^\/].*)$/gm, `/proxy/${host}$1`)
+          // Rewrite full URLs (https://...)
+          text = text.replace(/^(https?:\/\/(.*))$/gm, '/proxy/$2')
+          buffer = Buffer.from(text, 'utf8')
+        }
+
+        res.writeHead(response.status, {
+          'Content-Type': contentType,
+          'Content-Length': buffer.length.toString(),
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
+        })
+        res.end(buffer)
+      } catch (err) {
+        logExtraction(`Proxy error for ${realUrl}: ${err} | Headers: ${JSON.stringify(getStreamHeaders(new URL(realUrl).host))}`)
+        res.writeHead(502)
+        res.end('Stream proxy failed')
+      }
+    })
+
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as { port: number }
+      proxyPort = addr.port
+      logExtraction(`Stream proxy started on http://127.0.0.1:${proxyPort}`)
+      resolve()
+    })
+  })
+}
+
+// Rewrite stream URL to go through the local proxy
+// e.g. https://cdn.example.com/path/master.m3u8 → http://localhost:PORT/proxy/cdn.example.com/path/master.m3u8
+// Relative URLs in HLS manifests (like "segment0.ts") resolve correctly because
+// the path structure mirrors the original URL hierarchy.
+function toProxyUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const proto = parsed.protocol // "https:" or "http:"
+    const rest = url.slice(proto.length + 2) // everything after "https://"
+    return `http://localhost:${proxyPort}/proxy/${rest}`.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+  } catch {
+    return url.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+  }
+}
+
+function getStandardHeight(width: number, height: number): number {
+  const w = width || 0
+  const h = height || 0
+  if (w >= 3840 || h >= 2160) return 2160
+  if (w >= 2560 || h >= 1400) return 1440
+  if (w >= 1920 || h >= 800) return 1080
+  if (w >= 1280 || h >= 530) return 720
+  if (w >= 960 || h >= 540) return 540
+  if (w >= 854 || h >= 480) return 480
+  return h
+}
+
+// Fetch HLS manifest in the main process to check its maximum resolution
+async function getMaxResolution(url: string, headers: Record<string, string>): Promise<number> {
+  try {
+    const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
+    if (isDirect) return 1080 // direct files are assumed to be high resolution
+
+    const proxyUrl = toProxyUrl(url)
+    const response = await fetchNode(proxyUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      }
+    })
+
+    if (response.status < 200 || response.status >= 300) {
+      logExtraction(`getMaxResolution got non-ok status ${response.status} for ${url}`)
+      return 720 // fallback if resolution check fails
+    }
+    const text = response.buffer.toString('utf8')
+
+    if (text.includes('<html') || text.includes('<!DOCTYPE html')) {
+      logExtraction(`getMaxResolution got HTML page instead of playlist for ${url}`)
+      return 0 // Invalid stream
+    }
+
+    if (!text.includes('#EXTM3U')) {
+      return 1080 // Assume direct stream (like mp4)
+    }
+
+    if (text.includes('#EXT-X-MEDIA-SEQUENCE') || text.includes('#EXTINF')) {
+      return 1080 // It's a media playlist (direct quality), assume 1080p
+    }
+
+    const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
+    if (matches.length === 0) {
+      return 720 // default guess
+    }
+
+    const standardHeights = matches.map((m) => {
+      const w = parseInt(m[1]!, 10)
+      const h = parseInt(m[2]!, 10)
+      return getStandardHeight(w, h)
+    }).filter((h) => !isNaN(h))
+
+    return standardHeights.length > 0 ? Math.max(...standardHeights) : 720
+  } catch (err) {
+    logExtraction(`Failed to check resolution for ${url}: ${err}`)
+    return 720 // default fallback
+  }
+}
+
+// Helper to attach the header injector to any session (default or provider-specific)
+export function attachHeaderInjector(ses: Electron.Session): void {
+  try {
+    logExtraction(`Attaching header injector to session partition: ${ses.getStoragePath() || 'default'}`)
+    ses.webRequest.onBeforeSendHeaders(
+      { urls: ['*://*/*'] },
+      (details, callback) => {
+        try {
+          const host = new URL(details.url).host
+          const headers = getStreamHeaders(host)
+          logExtraction(`onBeforeSendHeaders intercepting: ${details.url} | Host: ${host} | Has registry headers: ${Object.keys(headers).length > 0}`)
+          if (headers && Object.keys(headers).length > 0) {
+            // Merge custom headers, overwriting defaults where necessary
+            const mergedHeaders = { ...details.requestHeaders }
+            for (const [k, v] of Object.entries(headers)) {
+              mergedHeaders[k] = v
+            }
+            logExtraction(`Injecting headers for: ${host} | Referer: ${mergedHeaders['Referer'] || mergedHeaders['referer']} | Origin: ${mergedHeaders['Origin'] || mergedHeaders['origin']}`)
+            callback({ requestHeaders: mergedHeaders })
+            return
+          }
+        } catch (err) {
+          logExtraction(`Error in onBeforeSendHeaders: ${err}`)
+        }
+        callback({ requestHeaders: details.requestHeaders })
+      },
+    )
+  } catch (err) {
+    logExtraction(`Failed to attach header injector: ${err}`)
+  }
+}
 
 // Set up the persistent header injector on the main window session
 export function initStreamHeaderInjector(): void {
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['*://*/*'] },
-    (details, callback) => {
-      try {
-        const host = new URL(details.url).host
-        const headers = streamHeadersRegistry.get(host)
-        if (headers && Object.keys(headers).length > 0) {
-          callback({ requestHeaders: { ...details.requestHeaders, ...headers } })
-          return
-        }
-      } catch { /* ignore */ }
-      callback({ requestHeaders: details.requestHeaders })
-    },
-  )
+  attachHeaderInjector(session.defaultSession)
 }
 
 export function registerProvidersIpc(): void {
@@ -76,6 +687,16 @@ export function registerProvidersIpc(): void {
       }
     }
 
+    const resolves = await checkDomainResolves(embedUrl)
+    if (!resolves) {
+      return {
+        providerId,
+        providerName: p.name,
+        streams: [],
+        error: `Provider domain (${new URL(embedUrl).hostname}) is currently offline or unreachable.`,
+      }
+    }
+
     try {
       const result = await extractStreamWithRetry(embedUrl, {
         maxAttempts: 2,
@@ -92,10 +713,13 @@ export function registerProvidersIpc(): void {
         }
       }
 
+      // Auto-register headers in main process BEFORE returning to renderer
+      autoRegisterHeaders(result.url, result.headers, p.sessionName)
+
       return {
         providerId,
         providerName: p.name,
-        streams: [{ url: result.url, quality: 'auto', headers: result.headers }],
+        streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers }],
       }
     } catch (err) {
       return {
@@ -107,8 +731,10 @@ export function registerProvidersIpc(): void {
     }
   })
 
-  // Try all enabled providers with staggered parallel racing
-  ipcMain.handle('providers:getFirstStream', async (_e, req: StreamRequest): Promise<ProviderResult | null> => {
+  // Try all enabled providers with staggered parallel racing.
+  // Returns the best result immediately AND collects ALL successful results into
+  // `allStreams` so the renderer can offer instant source switching without re-extraction.
+  ipcMain.handle('providers:getFirstStream', async (_e, req: StreamRequest): Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null> => {
     logExtraction(`--- New Stream Search Request: ${req.title} (${req.type === 'tv' ? `S${req.season}E${req.episode}` : 'Movie'}) | IMDB: ${req.imdbId} | TMDB: ${req.tmdbId} ---`)
     const enabled = getEnabledProviders()
     if (enabled.length === 0) {
@@ -118,42 +744,89 @@ export function registerProvidersIpc(): void {
 
     const controller = new AbortController()
     const signal = controller.signal
+    try {
+      setMaxListeners(30, signal)
+    } catch { /* ignore */ }
 
-    let resolvedResult: ProviderResult | null = null
+    let bestResult: ProviderResult | null = null
+    let bestResolution = 0
+    let fallbackTimer: NodeJS.Timeout | null = null
+    const collectedStreams: ProviderResult[] = []
 
     const batchSize = 4
-    const staggerMs = 1500
-    const timeoutMs = 20000
+    const staggerMs = 400
+    const timeoutMs = 12000
 
-    return new Promise<ProviderResult | null>((resolve) => {
+    return new Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null>((resolve) => {
       let activeWorkers = 0
       let totalStarted = 0
       let resolved = false
       const timers: NodeJS.Timeout[] = []
 
+      // After the best stream is picked (resolved=true), we keep collecting additional
+      // results for up to 8 more seconds so the player has alternatives to offer.
+      let collectTimer: NodeJS.Timeout | null = null
+      let collectDone = false
+      let finalResolve: ((val: (ProviderResult & { allStreams?: ProviderResult[] }) | null) => void) | null = null
+
+      const finishCollecting = () => {
+        if (collectDone) return
+        collectDone = true
+        if (collectTimer) clearTimeout(collectTimer)
+        controller.abort()
+        timers.forEach(clearTimeout)
+
+        // Build the final result with all collected streams
+        if (bestResult && finalResolve) {
+          logExtraction(`COLLECTION DONE: ${collectedStreams.length} total streams collected`)
+          const result = { ...bestResult, allStreams: collectedStreams }
+          finalResolve(result)
+        }
+      }
+
       const checkFinish = () => {
-        if (activeWorkers === 0 && totalStarted === enabled.length && !resolved) {
-          logExtraction('SEARCH FINISHED: No streams found from any of the enabled providers.')
-          resolve(null)
+        if (activeWorkers === 0 && totalStarted === enabled.length) {
+          if (!resolved) {
+            // No stream found at all
+            if (fallbackTimer) clearTimeout(fallbackTimer)
+            if (bestResult) {
+              logExtraction(`RACING FINISHED: Returning best stream found (${bestResolution}p)`)
+              resolved = true
+              const result = { ...bestResult, allStreams: collectedStreams }
+              controller.abort()
+              timers.forEach(clearTimeout)
+              resolve(result)
+            } else {
+              logExtraction('SEARCH FINISHED: No streams found from any of the enabled providers.')
+              resolve(null)
+            }
+          } else {
+            // All workers done — no need to wait for the collect timer
+            finishCollecting()
+          }
         }
       }
 
       const runProvider = async (provider: typeof enabled[0]) => {
-        if (resolved || signal.aborted) return
+        if (signal.aborted) return
 
         activeWorkers++
-        const embedUrl = provider.getEmbedUrl(req)
-        if (!embedUrl) {
-          logExtraction(`Provider ${provider.name} skipped: failed to build embed URL.`)
-          activeWorkers--
-          checkFinish()
-          return
-        }
-
-        logExtraction(`Worker starting: ${provider.name} | URL: ${embedUrl}`)
-        const start = Date.now()
-
         try {
+          const embedUrl = provider.getEmbedUrl(req)
+          if (!embedUrl) {
+            logExtraction(`Provider ${provider.name} skipped: failed to build embed URL.`)
+            return
+          }
+
+          const resolves = await checkDomainResolves(embedUrl)
+          if (!resolves) {
+            logExtraction(`Provider ${provider.name} skipped: host ${new URL(embedUrl).hostname} did not resolve.`)
+            return
+          }
+
+          logExtraction(`Worker starting: ${provider.name} | EmbedURL: ${embedUrl}`)
+          const start = Date.now()
+
           const result = await extractStreamWithRetry(embedUrl, {
             maxAttempts: 1,
             timeoutMs,
@@ -162,28 +835,66 @@ export function registerProvidersIpc(): void {
           })
 
           const duration = Date.now() - start
-          if (result && !resolvedResult && !signal.aborted && !resolved) {
-            logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Stream: ${result.url}`)
-            resolved = true
-            resolvedResult = {
+          if (result && !signal.aborted) {
+            // Auto-register headers BEFORE checking resolution so the proxy can use them
+            autoRegisterHeaders(result.url, result.headers, provider.sessionName)
+
+            // Check resolution of the found stream
+            const resolution = await getMaxResolution(result.url, result.headers)
+            logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
+
+            const currentResult: ProviderResult = {
               providerId: provider.id,
               providerName: provider.name,
-              streams: [{ url: result.url, quality: 'auto', headers: result.headers }],
+              streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers }],
             }
-            controller.abort()
-            timers.forEach(clearTimeout)
-            resolve(resolvedResult)
-            return
+
+            // Always collect this stream for the source switcher
+            collectedStreams.push(currentResult)
+
+            if (!resolved) {
+              if (resolution >= 1080) {
+                logExtraction(`PERFECT STREAM (${resolution}p) found by ${provider.name}. Picking as best.`)
+                bestResolution = resolution
+                bestResult = currentResult
+                resolved = true
+                if (fallbackTimer) clearTimeout(fallbackTimer)
+
+                // Don't resolve yet — start a timer to collect more streams
+                finalResolve = resolve
+                collectTimer = setTimeout(finishCollecting, 8000)
+              } else if (resolution > bestResolution) {
+                bestResolution = resolution
+                bestResult = currentResult
+                logExtraction(`New best stream found (${resolution}p) from ${provider.name}`)
+                
+                // Start a fallback timer so we don't wait forever if a 1080p stream doesn't arrive
+                if (!fallbackTimer) {
+                  logExtraction('Starting 5.0s quality-wait timer in case a 1080p stream finishes...')
+                  fallbackTimer = setTimeout(() => {
+                    if (!resolved && bestResult) {
+                      logExtraction(`Quality-wait timer expired. Returning best stream found (${bestResolution}p)`)
+                      resolved = true
+                      finalResolve = resolve
+                      collectTimer = setTimeout(finishCollecting, 8000)
+                    }
+                  }, 5000)
+                }
+              }
+            }
           } else {
-            logExtraction(`FAIL: ${provider.name} returned no stream in ${duration}ms.`)
+            if (!resolved) {
+              logExtraction(`FAIL: ${provider.name} returned no stream in ${duration}ms.`)
+            }
           }
         } catch (err) {
-          const duration = Date.now() - start
-          logExtraction(`ERROR: ${provider.name} failed after ${duration}ms with error: ${String(err)}`)
+          if (!resolved) {
+            logExtraction(`ERROR: ${provider.name} failed with error: ${String(err)}`)
+          }
+        } finally {
+          activeWorkers--
+          checkFinish()
         }
-
-        activeWorkers--
-        checkFinish()
       }
 
       // Schedule batches
@@ -192,7 +903,7 @@ export function registerProvidersIpc(): void {
         const delay = (i / batchSize) * staggerMs
 
         const t = setTimeout(() => {
-          if (resolved || signal.aborted) return
+          if (signal.aborted) return
           batch.forEach((provider) => {
             totalStarted++
             runProvider(provider)

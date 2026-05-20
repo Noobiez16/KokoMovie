@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.2-beta] — 2026-05-20 — Source Switching & Availability Indicators
+
+### Added
+- **Source Availability Badges (A/S)**: "Select Source" dropdown now shows a green **A** badge for providers with a confirmed pre-extracted stream, and a dimmed red **S** badge for providers that returned nothing during the initial race. Available sources are listed first above a divider; shut-down entries remain clickable for on-demand re-extraction.
+
+### Fixed
+- **Source Switching Broken**: `VideoPlayer` accepted an `allStreams` prop from `Player.tsx` but it was missing from the TypeScript `Props` interface, causing it to be silently dropped. Every source switch triggered a fresh 30s extraction instead of using the pre-collected streams, making nearly all alternative sources appear broken.
+- **Instant Source Switching**: `handleSourceChange` now checks `allStreams` first. Providers collected during the initial race switch instantly with no IPC call; only uncached providers fall through to the slow extraction path.
+- **Duplicate Movie Keys**: `Movies.tsx` deduplicates entries by ID before rendering, resolving the React `key` warning when the catalog API returns duplicate records.
+
+---
+
+## [1.0.1-beta] — 2026-05-20 — High Quality Streaming Upgrades
+
+### Changed
+- **High-Quality Resolution Filtering**: Integrated resolution parsing into the HLS local proxy. The proxy automatically filters out stream variants below 720p (such as 360p or 480p) from HLS manifests, ensuring playback defaults to HD (720p/1080p).
+- **Auto 720p/1080p Selection**: Standardized stream levels so the player presents Auto, 720p, and 1080p, and defaults to 1080p when bandwidth is sufficient.
+
+### Fixed
+- **VidLink Extraction 404**: Corrected VidLink provider URL mapping by stripping the `/embed` route prefix, restoring instant stream extraction and high-quality 1080p streams.
+- **VidSrc.me Domain Update**: Swapped the defunct `vidsrc.me` with the active `vidsrcme.su` domain.
+- **VidSrc.in Domain Update**: Swapped the defunct `vidsrc.in` with the active `vsrc.su` domain.
+
+---
+
 ## [1.0.0-beta] — 2026-05-19 — UI, UX and Provider Expansion
 
 ### Added

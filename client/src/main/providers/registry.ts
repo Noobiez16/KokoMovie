@@ -67,13 +67,13 @@ export function listProviders(): Array<{ id: string; name: string; enabled: bool
   return ALL_PROVIDERS.map((p) => ({
     id: p.id,
     name: p.name,
-    enabled: prefs[p.id]?.enabled ?? true,
+    enabled: prefs[p.id]?.enabled ?? (p.defaultEnabled ?? true),
   }))
 }
 
 export function getEnabledProviders(): Provider[] {
   const prefs = loadPrefs()
-  return ALL_PROVIDERS.filter((p) => prefs[p.id]?.enabled ?? true)
+  return ALL_PROVIDERS.filter((p) => prefs[p.id]?.enabled ?? (p.defaultEnabled ?? true))
 }
 
 export function toggleProvider(id: string, enabled: boolean): void {

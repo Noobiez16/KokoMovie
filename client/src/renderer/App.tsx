@@ -50,8 +50,10 @@ export function App() {
         const res = await authApi.refresh(refreshToken)
         await window.electronAPI?.setAuthToken(res.data.accessToken)
         if (res.data.refreshToken) await window.electronAPI?.setRefreshToken(res.data.refreshToken)
-      } catch {
-        setAccount(null)
+      } catch (err: any) {
+        if (err && (err.status === 400 || err.status === 401 || err.status === 403)) {
+          setAccount(null)
+        }
       }
     }
     silentRefresh()

@@ -60,7 +60,7 @@ module "vpc" {
 module "ecr" {
   source      = "./modules/ecr"
   environment = var.environment
-  services    = ["auth", "catalog", "playback", "user", "recommendation", "billing"]
+  services    = ["auth", "catalog", "playback", "user", "recommendation"]
 }
 
 module "rds" {

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
@@ -7,6 +7,7 @@ import { userApi } from '../api/user'
 import { recommendationApi } from '../api/recommendation'
 import { downloadsApi } from '../api/downloads'
 import { providersApi } from '../api/providers'
+import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
 import type { ContentSummary } from '../api/catalog'
@@ -20,10 +21,24 @@ export function ContentDetailPage() {
   const [autoStreamState, setAutoStreamState] = useState<{
     loading: boolean
     episode?: Episode
+    seasonNumber?: number
+    resumeAtSeconds?: number
     error?: string
   }>({ loading: false })
 
   const cancelAutoStreamRef = useRef<(() => void) | null>(null)
+
+  const [prevId, setPrevId] = useState<string | undefined>(id)
+
+  if (id !== prevId) {
+    setPrevId(id)
+    setSelectedSeason(0)
+    setAutoStreamState({ loading: false })
+    if (cancelAutoStreamRef.current) {
+      cancelAutoStreamRef.current()
+      cancelAutoStreamRef.current = null
+    }
+  }
 
   const location = useLocation()
   const navState = location.state as { tmdbId?: number; tmdbType?: 'movie' | 'tv' } | null
@@ -48,6 +63,23 @@ export function ContentDetailPage() {
     staleTime: 10 * 60 * 1000,
   })
 
+  const content = data?.data
+  const sortedSeasons = content?.seasons
+    ? [...content.seasons].sort((a, b) => a.seasonNumber - b.seasonNumber)
+    : []
+
+  // Default selected season to Season 1 if available, otherwise 0
+  useEffect(() => {
+    if (sortedSeasons && sortedSeasons.length > 0) {
+      const s1Idx = sortedSeasons.findIndex((s) => s.seasonNumber === 1)
+      if (s1Idx !== -1) {
+        setSelectedSeason(s1Idx)
+      } else {
+        setSelectedSeason(0)
+      }
+    }
+  }, [content])
+
   const { data: watchlistData } = useQuery({
     queryKey: ['watchlist-check', id, profileId],
     queryFn: () => userApi.checkWatchlist(id, profileId),
@@ -64,6 +96,12 @@ export function ContentDetailPage() {
     queryKey: ['providers'],
     queryFn: () => providersApi.list(),
     staleTime: 60 * 1000,
+  })
+
+  const { data: continueWatchingData } = useQuery({
+    queryKey: ['continue-watching', profileId],
+    queryFn: () => playbackApi.getContinueWatching(profileId),
+    staleTime: 30 * 1000,
   })
 
   const inWatchlist = watchlistData?.data?.inWatchlist ?? false
@@ -100,11 +138,14 @@ export function ContentDetailPage() {
     }
   }
 
-  async function handleAutoStream(episode?: Episode) {
+  // seasonNumber is passed explicitly from the call site (the season the user is viewing) so
+  // we never have to re-derive it by searching c.seasons, which may be unsorted or have stale data.
+  // resumeAtSeconds is forwarded through navigation state so VideoPlayer can seek on load.
+  async function handleAutoStream(episode?: Episode, seasonNumber?: number, resumeAtSeconds?: number) {
     const c = data?.data
     if (!c) return
 
-    setAutoStreamState({ loading: true, episode, error: undefined })
+    setAutoStreamState({ loading: true, episode, seasonNumber, resumeAtSeconds, error: undefined })
 
     let cancelled = false
     cancelAutoStreamRef.current = () => {
@@ -119,29 +160,62 @@ export function ContentDetailPage() {
     }
 
     if (episode && c.type === 'series') {
-      for (const season of c.seasons) {
-        const found = season.episodes.find((ep) => ep.id === episode.id)
-        if (found) {
-          req.season = season.seasonNumber
-          req.episode = episode.episodeNumber
-          break
+      if (seasonNumber !== undefined) {
+        // Fast path: caller knows exactly which season was selected
+        req.season = seasonNumber
+        req.episode = episode.episodeNumber
+      } else {
+        // Fallback: search sortedSeasons (already ordered correctly)
+        for (const s of sortedSeasons) {
+          const found = s.episodes.find((ep) => ep.id === episode.id)
+          if (found) {
+            req.season = s.seasonNumber
+            req.episode = episode.episodeNumber
+            break
+          }
         }
       }
     }
+
+    console.log(
+      `[StreamSearch] ${c.title} · type=${req.type}` +
+      (req.type === 'tv' ? ` S${req.season}E${req.episode}` : '') +
+      ` | IMDB=${req.imdbId ?? 'none'} TMDB=${req.tmdbId ?? 'none'}`
+    )
 
     try {
       const result = await providersApi.getFirstStream(req)
       if (cancelled) return
 
       if (result && result.streams.length > 0) {
+        // Surface the winning provider in the console — if the wrong episode plays, the
+        // user can identify which provider returned bad content and disable it in
+        // Settings → Providers. (The provider's embed page sometimes ignores the
+        // season/episode URL params; nothing we send from this side can prevent that.)
+        console.log(
+          `[Stream] Source: ${result.providerName} (${result.providerId}) · ` +
+          (req.type === 'tv' ? `S${req.season}E${req.episode}` : 'Movie') +
+          ` · ${result.streams[0]!.url.slice(0, 100)}…`
+        )
+        if (result.allStreams) {
+          console.log(`[Stream] ${result.allStreams.length} alternative source(s) collected for switching`)
+        }
         setAutoStreamState({ loading: false })
         navigate(`/player/${c.id}${episode ? `/${episode.id}` : ''}`, {
-          state: { streamUrl: result.streams[0]!.url, streamHeaders: result.streams[0]!.headers },
+          state: {
+            streamUrl: result.streams[0]!.url,
+            streamHeaders: result.streams[0]!.headers,
+            providerId: result.providerId,
+            allStreams: result.allStreams || [],
+            resumeAtSeconds,
+          },
         })
       } else {
         setAutoStreamState({
           loading: false,
           episode,
+          seasonNumber,
+          resumeAtSeconds,
           error: 'No working stream found. The content may be unavailable or all providers are down.',
         })
       }
@@ -150,6 +224,8 @@ export function ContentDetailPage() {
       setAutoStreamState({
         loading: false,
         episode,
+        seasonNumber,
+        resumeAtSeconds,
         error: `Automatic search failed: ${String(err)}`,
       })
     }
@@ -175,9 +251,39 @@ export function ContentDetailPage() {
     )
   }
 
-  const content = data.data
-  const season: Season | undefined = content.seasons[selectedSeason]
+  const season: Season | undefined = sortedSeasons[selectedSeason] || sortedSeasons[0]
+  const sortedEpisodes = season?.episodes
+    ? [...season.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber)
+    : []
   const similarItems = (similarData?.data ?? []) as ContentSummary[]
+
+  // Find the most-recently-watched in-progress item for this content
+  const resumeItem = (() => {
+    const items = (continueWatchingData as any)?.data ?? []
+    if (!Array.isArray(items) || items.length === 0) return null
+    const matching = items
+      .filter((item: any) => item.contentId === id)
+      .sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    return (matching[0] as { contentId: string; episodeId: string | null; positionSeconds: number; durationSeconds: number; updatedAt: string } | undefined) ?? null
+  })()
+
+  // For series: find the season and episode object that correspond to the resume item
+  const resumeEpisodeInfo = (() => {
+    if (!resumeItem?.episodeId || !content) return null
+    for (const s of sortedSeasons) {
+      const ep = s.episodes.find((e) => e.id === resumeItem.episodeId)
+      if (ep) return { episode: ep, season: s }
+    }
+    return null
+  })()
+
+  function fmtSecs(secs: number): string {
+    const h = Math.floor(secs / 3600)
+    const m = Math.floor((secs % 3600) / 60)
+    const s = Math.floor(secs % 60)
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
   const enabledProviders = (providerList ?? []).filter((p) => p.enabled)
 
   const thumbnail = content.backdropUrl ?? content.s3Thumbnail
@@ -209,8 +315,8 @@ export function ContentDetailPage() {
             {content.type === 'movie' && content.durationMins && (
               <span>{Math.floor(content.durationMins / 60)}h {content.durationMins % 60}m</span>
             )}
-            {content.type === 'series' && content.seasons.length > 0 && (
-              <span>{content.seasons.length} Season{content.seasons.length !== 1 ? 's' : ''}</span>
+            {content.type === 'series' && sortedSeasons.length > 0 && (
+              <span>{sortedSeasons.length} Season{sortedSeasons.length !== 1 ? 's' : ''}</span>
             )}
           </div>
 
@@ -225,15 +331,38 @@ export function ContentDetailPage() {
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-3 mb-6">
+          <div className="flex flex-wrap gap-3 mb-6">
             <button
               onClick={() => handleAutoStream(
-                content.type === 'series' ? season?.episodes[0] : undefined
+                content.type === 'series' ? sortedEpisodes[0] : undefined,
+                content.type === 'series' ? season?.seasonNumber : undefined,
               )}
               className="flex items-center gap-2 bg-white text-black font-semibold px-8 py-3 rounded hover:bg-white/90 active:scale-95 transition-all"
             >
               <span>▶</span> Watch Now
             </button>
+
+            {/* Keep Watching — only shown when there is saved progress (5–95% watched) */}
+            {resumeItem && (
+              <button
+                onClick={() => {
+                  if (resumeEpisodeInfo) {
+                    handleAutoStream(resumeEpisodeInfo.episode, resumeEpisodeInfo.season.seasonNumber, resumeItem.positionSeconds)
+                  } else {
+                    handleAutoStream(undefined, undefined, resumeItem.positionSeconds)
+                  }
+                }}
+                className="flex items-center gap-2 bg-violet-600 text-white font-semibold px-8 py-3 rounded hover:bg-violet-500 active:scale-95 transition-all"
+              >
+                <span>▶</span>
+                <span>
+                  Keep Watching
+                  {resumeEpisodeInfo
+                    ? ` · S${resumeEpisodeInfo.season.seasonNumber}E${resumeEpisodeInfo.episode.episodeNumber} · ${fmtSecs(resumeItem.positionSeconds)}`
+                    : ` · ${fmtSecs(resumeItem.positionSeconds)}`}
+                </span>
+              </button>
+            )}
 
 
             <button
@@ -278,17 +407,17 @@ export function ContentDetailPage() {
           )}
 
           {/* Series — seasons & episodes */}
-          {content.type === 'series' && content.seasons.length > 0 && (
+          {content.type === 'series' && sortedSeasons.length > 0 && (
             <div className="mb-8">
               <div className="flex items-center gap-4 mb-4">
                 <h3 className="text-white font-semibold">Episodes</h3>
-                {content.seasons.length > 1 && (
+                {sortedSeasons.length > 1 && (
                   <select
                     value={selectedSeason}
                     onChange={(e) => setSelectedSeason(Number(e.target.value))}
                     className="bg-km-surface-2 border border-km-border text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer"
                   >
-                    {content.seasons.map((s, i) => {
+                    {sortedSeasons.map((s, i) => {
                       const isRedundant = s.title && s.title.toLowerCase().trim() === `season ${s.seasonNumber}`;
                       const titleSuffix = s.title && !isRedundant ? ` — ${s.title}` : '';
                       return (
@@ -302,11 +431,11 @@ export function ContentDetailPage() {
               </div>
 
               <div className="space-y-2 max-w-3xl">
-                {season?.episodes.map((ep) => (
+                {sortedEpisodes.map((ep) => (
                   <div
                     key={ep.id}
                     className="flex items-center gap-4 bg-km-card rounded-lg p-3 cursor-pointer hover:bg-white/10 transition-colors group"
-                    onClick={() => handleAutoStream(ep)}
+                    onClick={() => handleAutoStream(ep, season?.seasonNumber)}
                   >
                     <div className="w-8 text-center text-white/40 text-sm font-medium flex-shrink-0">
                       {ep.episodeNumber}
@@ -377,7 +506,7 @@ export function ContentDetailPage() {
                 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => handleAutoStream(autoStreamState.episode)}
+                    onClick={() => handleAutoStream(autoStreamState.episode, autoStreamState.seasonNumber, autoStreamState.resumeAtSeconds)}
                     className="px-6 py-2 rounded-full bg-white text-black font-semibold hover:bg-white/90 text-xs transition-colors"
                   >
                     Retry Search

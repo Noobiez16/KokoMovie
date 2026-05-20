@@ -6,7 +6,20 @@ import { registerAuthIpc } from './ipc/auth'
 import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads } from './ipc/download'
 import { registerAppIpc } from './ipc/app'
 import { registerApiProxy } from './ipc/api-proxy'
-import { registerProvidersIpc, initStreamHeaderInjector } from './ipc/providers'
+import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
+
+// Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
+// the pipe has been closed (e.g. when the parent process exits or during rapid
+// reload cycles in dev). Without this, the entire app crashes with
+// "Uncaught Exception: Error: write EPIPE".
+process.stdout?.on?.('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
+process.stderr?.on?.('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
 
 // Register offline:// before app is ready — required for privileged schemes
 protocol.registerSchemesAsPrivileged([
@@ -75,26 +88,55 @@ function createWindow() {
 
 // ─── Content Security Policy ──────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          isDev
-            ? "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* ws://localhost:* https:; media-src 'self' blob: https:; img-src 'self' data: blob: https:; frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com;"
-            : [
-                "default-src 'self'",
-                "script-src 'self'",
-                "style-src 'self' 'unsafe-inline'",
-                "media-src 'self' blob: https: http:",
-                "connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https:",
-                "img-src 'self' data: blob: https:",
-                "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
-              ].join('; '),
-        ],
-      },
-    })
+    const responseHeaders: Record<string, string[]> = {
+      ...details.responseHeaders as Record<string, string[]>,
+      'Content-Security-Policy': [
+        isDev
+          ? [
+              "default-src 'self' 'unsafe-inline'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
+              "style-src 'self' 'unsafe-inline' https:",
+              "connect-src 'self' http://localhost:* ws://localhost:* https:",
+              "media-src 'self' blob: https: http://localhost:*",
+              "img-src 'self' data: blob: https:",
+              "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com",
+              "font-src 'self' data: https:",
+            ].join('; ')
+          : [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
+              "style-src 'self' 'unsafe-inline' https:",
+              "media-src 'self' blob: https: http: http://localhost:*",
+              "connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https:",
+              "img-src 'self' data: blob: https:",
+              "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
+              "font-src 'self' data: https:",
+            ].join('; '),
+      ],
+    }
+
+    // Inject CORS headers for direct stream CDN fetches (fallback path).
+    // Skip localhost — the local HLS proxy already sets these headers, and adding a second
+    // copy here causes Chromium to reject the response with "*, *, but only one is allowed".
+    try {
+      const u = new URL(details.url)
+      const isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+      if (!isLocal && isStreamHost(details.url)) {
+        for (const k of Object.keys(responseHeaders)) {
+          const lk = k.toLowerCase()
+          if (lk === 'access-control-allow-origin' || lk === 'access-control-allow-headers' || lk === 'access-control-allow-methods') {
+            delete responseHeaders[k]
+          }
+        }
+        responseHeaders['Access-Control-Allow-Origin'] = ['*']
+        responseHeaders['Access-Control-Allow-Headers'] = ['*']
+        responseHeaders['Access-Control-Allow-Methods'] = ['GET, HEAD, OPTIONS']
+      }
+    } catch { /* not a parseable URL — leave headers alone */ }
+
+    callback({ responseHeaders })
   })
 
   // Serve encrypted offline segments via offline://downloadId/seg_N.enc
@@ -111,6 +153,10 @@ app.whenReady().then(() => {
       headers: { 'Content-Type': 'video/mp2t', 'Content-Length': String(decrypted.length) },
     })
   })
+
+  // Start the local stream proxy BEFORE creating the window
+  // This proxies HLS requests through Node.js to bypass CORS enforcement
+  await startStreamProxy()
 
   purgeExpiredDownloads()
   createWindow()

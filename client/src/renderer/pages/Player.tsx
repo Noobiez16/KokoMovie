@@ -16,9 +16,18 @@ export function PlayerPage() {
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | undefined>(episodeId)
 
   // Direct stream URL + headers injected by ContentDetail source picker (providers mode)
-  const locationState = location.state as { streamUrl?: string; streamHeaders?: Record<string, string> } | null
+  const locationState = location.state as {
+    streamUrl?: string
+    streamHeaders?: Record<string, string>
+    providerId?: string
+    allStreams?: Array<{ providerId: string; providerName: string; streams: Array<{ url: string; quality: string; headers?: Record<string, string> }> }>
+    resumeAtSeconds?: number
+  } | null
   const directStreamUrl: string | undefined = locationState?.streamUrl
   const directStreamHeaders: Record<string, string> | undefined = locationState?.streamHeaders
+  const resumeAtSeconds: number | undefined = locationState?.resumeAtSeconds
+  const initialProviderId: string | undefined = locationState?.providerId
+  const allStreams = locationState?.allStreams || []
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (!activeProfile) return <Navigate to="/profiles" replace />
@@ -33,11 +42,24 @@ export function PlayerPage() {
   })
 
   const content = contentData?.data
+  const sortedContent = (() => {
+    if (!content) return null
+    const sortedSeasons = [...content.seasons]
+      .sort((a, b) => a.seasonNumber - b.seasonNumber)
+      .map((s) => ({
+        ...s,
+        episodes: [...s.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber),
+      }))
+    return {
+      ...content,
+      seasons: sortedSeasons,
+    }
+  })()
 
   // Find current episode
   const currentEpisode: Episode | null = (() => {
-    if (!content || !currentEpisodeId) return null
-    for (const season of content.seasons) {
+    if (!sortedContent || !currentEpisodeId) return null
+    for (const season of sortedContent.seasons) {
       const ep = season.episodes.find((e) => e.id === currentEpisodeId)
       if (ep) return ep
     }
@@ -46,15 +68,17 @@ export function PlayerPage() {
 
   // Find next episode
   const nextEpisode: Episode | null = (() => {
-    if (!content || !currentEpisode) return null
-    for (const season of content.seasons) {
+    if (!sortedContent || !currentEpisode) return null
+    for (const season of sortedContent.seasons) {
       const idx = season.episodes.findIndex((e) => e.id === currentEpisode.id)
       if (idx === -1) continue
       if (idx + 1 < season.episodes.length) return season.episodes[idx + 1] ?? null
       // Check next season
-      const nextSeasonIdx = content.seasons.findIndex((s) => s.id === season.id) + 1
-      if (nextSeasonIdx < content.seasons.length) {
-        return content.seasons[nextSeasonIdx]?.episodes[0] ?? null
+      const nextSeasonIdx = sortedContent.seasons.findIndex((s) => s.id === season.id) + 1
+      if (nextSeasonIdx < sortedContent.seasons.length) {
+        const nextSeason = sortedContent.seasons[nextSeasonIdx]
+        const sortedNextSeasonEps = [...(nextSeason?.episodes || [])].sort((a, b) => a.episodeNumber - b.episodeNumber)
+        return sortedNextSeasonEps[0] ?? null
       }
       return null
     }
@@ -63,7 +87,7 @@ export function PlayerPage() {
 
   // Create playback session once content is loaded
   useEffect(() => {
-    if (!content) return
+    if (!sortedContent) return
 
     // If a direct stream URL was provided by a provider, create a synthetic session
     if (directStreamUrl) {
@@ -77,27 +101,27 @@ export function PlayerPage() {
     }
 
     const targetEpisode = currentEpisodeId
-      ? content.seasons.flatMap((s) => s.episodes).find((e) => e.id === currentEpisodeId)
+      ? sortedContent.seasons.flatMap((s) => s.episodes).find((e) => e.id === currentEpisodeId)
       : null
 
-    const s3HlsKey = targetEpisode?.s3HlsKey ?? content.s3HlsKey ?? `movies/${content.id}/hls/master.m3u8`
+    const s3HlsKey = targetEpisode?.s3HlsKey ?? sortedContent.s3HlsKey ?? `movies/${sortedContent.id}/hls/master.m3u8`
     const durationSeconds = targetEpisode?.durationMins
       ? targetEpisode.durationMins * 60
-      : (content.durationMins ?? 90) * 60
+      : (sortedContent.durationMins ?? 90) * 60
 
     playbackApi.createSession(
       {
-        contentId: content.id,
+        contentId: sortedContent.id,
         episodeId: currentEpisodeId,
         s3HlsKey,
-        drmKeyId: content.drmKeyId ?? undefined,
+        drmKeyId: sortedContent.drmKeyId ?? undefined,
         durationSeconds,
       },
       profileId
     )
       .then((res) => setSession(res.data))
       .catch((err: Error) => setSessionError(err.message ?? 'Failed to create playback session'))
-  }, [content?.id, currentEpisodeId, profileId, directStreamUrl])
+  }, [sortedContent?.id, currentEpisodeId, profileId, directStreamUrl])
 
   const handleNextEpisode = (ep: Episode) => {
     setSession(null)
@@ -137,11 +161,14 @@ export function PlayerPage() {
 
   return (
     <VideoPlayer
-      content={content}
+      content={sortedContent!}
       episode={currentEpisode}
       session={session}
       streamHeaders={directStreamHeaders}
+      initialProviderId={initialProviderId}
+      allStreams={allStreams}
       profileId={profileId}
+      resumeAtSeconds={resumeAtSeconds}
       onClose={() => navigate(`/content/${contentId}`)}
       onNextEpisode={handleNextEpisode}
       nextEpisode={nextEpisode}

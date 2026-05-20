@@ -33,10 +33,10 @@ export const vidsrcMeProvider: Provider = {
     if (!req.tmdbId) return null
 
     if (req.type === 'movie') {
-      return `https://vidsrc.me/embed/movie?tmdb=${req.tmdbId}`
+      return `https://vidsrcme.su/embed/movie?tmdb=${req.tmdbId}`
     }
     if (req.type === 'tv' && req.season != null && req.episode != null) {
-      return `https://vidsrc.me/embed/tv?tmdb=${req.tmdbId}&season=${req.season}&episode=${req.episode}`
+      return `https://vidsrcme.su/embed/tv?tmdb=${req.tmdbId}&season=${req.season}&episode=${req.episode}`
     }
     return null
   },

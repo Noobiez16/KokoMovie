@@ -48,7 +48,7 @@ export function ProvidersPage() {
                 <div>
                   <p className="text-white font-medium flex items-center gap-2">
                     {p.name}
-                    {['vidbinge', 'embedsu', 'vidsrc'].includes(p.id) && (
+                    {['vidbinge', 'vidsrc', 'vidsrc-su'].includes(p.id) && (
                       <span className="text-km-accent text-[10px] font-semibold bg-km-accent/15 px-1.5 py-0.5 rounded border border-km-accent/25 uppercase tracking-wider">
                         Recommended
                       </span>
@@ -57,6 +57,14 @@ export function ProvidersPage() {
                   <p className="text-white/40 text-xs mt-0.5">
                     {p.id === 'vidsrc' && 'vidsrc.to — large catalog via IMDB or TMDB ID'}
                     {p.id === 'vidsrc-me' && 'vidsrc.me — movies & TV via TMDB ID'}
+                    {p.id === 'vidsrc-su' && 'vidsrcme.su — active VidSrc mirror (vidsrc.su)'}
+                    {p.id === 'vidsrc-pm' && 'vidsrc.pm — active VidSrc mirror'}
+                    {p.id === 'vidsrc-in' && 'vsrc.su — active VidSrc mirror (vidsrc.in)'}
+                    {p.id === 'vidlink' && 'vidlink.pro — fast playback, auto-embed (TMDB ID)'}
+                    {p.id === 'vidsrccc' && 'vidsrc.cc — clean player interface (IMDB ID)'}
+                    {p.id === 'multiembed' && 'multiembed.mov — alternative multi-source aggregator (TMDB ID)'}
+                    {p.id === 'vidsrc-pro' && 'vidsrc.pro — high quality streaming server (TMDB ID)'}
+                    {p.id === 'vidsrc-rip' && 'vidsrc.rip — alternative player link (TMDB ID)'}
                     {p.id === '2embed' && '2embed.cc — wide catalog, IMDB or TMDB ID'}
                     {p.id === 'superembed' && 'multiembed.mov — aggregates multiple sub-sources (TMDB ID)'}
                     {p.id === 'embedsu' && 'embed.su — clean player, TMDB ID'}
@@ -70,14 +78,34 @@ export function ProvidersPage() {
                 <button
                   onClick={() => toggleMutation.mutate({ id: p.id, enabled: !p.enabled })}
                   disabled={toggleMutation.isPending}
-                  className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
-                    p.enabled ? 'bg-km-accent' : 'bg-white/20'
-                  }`}
+                  style={{
+                    width: '48px',
+                    height: '24px',
+                    borderRadius: '9999px',
+                    position: 'relative',
+                    transition: 'all 0.3s ease',
+                    border: 'none',
+                    padding: '0',
+                    cursor: 'pointer',
+                    backgroundColor: p.enabled ? 'var(--km-accent, #a855f7)' : 'rgba(255,255,255,0.1)',
+                    boxShadow: p.enabled ? '0 0 12px rgba(168,85,247,0.4)' : 'none',
+                  }}
+                  className="shrink-0 focus:outline-none disabled:opacity-50"
                 >
                   <span
-                    className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                      p.enabled ? 'translate-x-7' : 'translate-x-1'
-                    }`}
+                    style={{
+                      position: 'absolute',
+                      top: '3px',
+                      left: '3px',
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      display: 'block',
+                      transition: 'transform 0.3s ease, opacity 0.3s ease',
+                      transform: p.enabled ? 'translateX(24px)' : 'translateX(0)',
+                      opacity: p.enabled ? 1 : 0.7,
+                    }}
                   />
                 </button>
               </div>

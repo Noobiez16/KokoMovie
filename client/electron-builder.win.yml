@@ -18,7 +18,7 @@ compression: maximum
 
 win:
   target:
-    - target: zip
+    - target: nsis
       arch: [x64]
   icon: build/icons/icon.ico
   sign: false
@@ -29,9 +29,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: KokoMovie
+  artifactName: KokoMovie-Setup-${version}.exe
 
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
+  owner: Noobiez16
   repo: kokomovie-pc
   releaseType: release

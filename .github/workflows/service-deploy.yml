@@ -1,4 +1,4 @@
-name: Service CI/CD
+name: Service CI
 
 on:
   push:
@@ -13,10 +13,6 @@ on:
       - 'services/**'
       - 'packages/**'
 
-env:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-
 jobs:
   test:
     name: Test ${{ matrix.service }}
@@ -24,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [auth, catalog, playback, user, recommendation, billing]
+        service: [auth, catalog, playback, user, recommendation]
 
     services:
       postgres:
@@ -64,95 +60,3 @@ jobs:
 
       - name: Type check
         run: npx tsc --noEmit --project services/${{ matrix.service }}/tsconfig.json
-
-  build-push:
-    name: Build & push ${{ matrix.service }}
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    strategy:
-      matrix:
-        service: [auth, catalog, playback, user, recommendation, billing]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push
-        run: |
-          IMAGE=$ECR_REGISTRY/kokomovie-${{ matrix.service }}:${{ github.sha }}
-          docker build -t $IMAGE -f services/${{ matrix.service }}/Dockerfile .
-          docker push $IMAGE
-          docker tag $IMAGE $ECR_REGISTRY/kokomovie-${{ matrix.service }}:latest
-          docker push $ECR_REGISTRY/kokomovie-${{ matrix.service }}:latest
-
-  deploy-staging:
-    name: Deploy to staging
-    needs: build-push
-    runs-on: ubuntu-latest
-    environment: staging
-
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update ECS services
-        run: |
-          for svc in auth catalog playback user recommendation billing; do
-            aws ecs update-service \
-              --cluster kokomovie-staging \
-              --service kokomovie-$svc \
-              --force-new-deployment \
-              --region ${{ env.AWS_REGION }}
-          done
-
-      - name: Wait for deployment
-        run: |
-          for svc in auth catalog playback user recommendation billing; do
-            aws ecs wait services-stable \
-              --cluster kokomovie-staging \
-              --services kokomovie-$svc \
-              --region ${{ env.AWS_REGION }}
-          done
-
-  deploy-prod:
-    name: Deploy to production
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update ECS services
-        run: |
-          for svc in auth catalog playback user recommendation billing; do
-            aws ecs update-service \
-              --cluster kokomovie-prod \
-              --service kokomovie-$svc \
-              --force-new-deployment \
-              --region ${{ env.AWS_REGION }}
-          done
-
-      - name: Wait for deployment
-        run: |
-          for svc in auth catalog playback user recommendation billing; do
-            aws ecs wait services-stable \
-              --cluster kokomovie-prod \
-              --services kokomovie-$svc \
-              --region ${{ env.AWS_REGION }}
-          done

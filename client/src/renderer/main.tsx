@@ -17,7 +17,7 @@ createRoot(root).render(
       <HashRouter>
         <App />
       </HashRouter>
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} buttonPosition="top-left" />}
     </QueryClientProvider>
   </StrictMode>,
 )
