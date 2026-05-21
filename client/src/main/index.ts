@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell, protocol, net } from 'electron'
+import { app, BrowserWindow, session, shell, protocol } from 'electron'
 import { join } from 'path'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
@@ -56,10 +56,28 @@ function createWindow() {
     },
   })
 
-  // Show only when ready to avoid white flash
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
-    if (isDev) mainWindow?.webContents.openDevTools({ mode: 'detach' })
+  // Show when ready to avoid white flash — with fallbacks for Windows/Linux
+  // packaged builds where ready-to-show can fail to fire if the renderer
+  // page doesn't load (e.g. missing dist/index.html, renderer crash).
+  const showWindow = () => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.show()
+      if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
+  }
+
+  mainWindow.once('ready-to-show', showWindow)
+
+  // Force-show after 8 s if ready-to-show never fires
+  const showFallback = setTimeout(showWindow, 8000)
+  mainWindow.once('ready-to-show', () => clearTimeout(showFallback))
+
+  // Show immediately on renderer load failure so the user isn't left with
+  // an invisible process in the task manager
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    console.error(`[window] Renderer failed to load: ${code} ${desc}`)
+    clearTimeout(showFallback)
+    showWindow()
   })
 
   // E1-S5: Certificate pinning
@@ -148,7 +166,7 @@ app.whenReady().then(async () => {
     if (!decrypted) {
       return new Response(null, { status: 404 })
     }
-    return new Response(decrypted, {
+    return new Response(new Uint8Array(decrypted), {
       status: 200,
       headers: { 'Content-Type': 'video/mp2t', 'Content-Length': String(decrypted.length) },
     })
