@@ -11,7 +11,8 @@ Thumbs.db
 
 # Electron
 client/dist-electron/
-client/release/
+client/release/*
+!client/release/README.md
 client/*.asar
 
 # Generated RSA keys

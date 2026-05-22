@@ -482,5 +482,32 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 - Feed progressive video `offline://` URLs to HLS.js, or wrap them in HLS-specific blob URLs in the player.
 - Omit Range header handling and 206 Partial Content responses, as this breaks seeking/scrubbing.
 
+---
 
+## DN-032: Cross-compiling the Windows `.exe` on Linux ships Linux `.node` binaries silently
+
+**Date:** 2026-05-22
+**Area:** `client/electron-builder.win.yml`, the build process (no source-tree file), `node_modules/better-sqlite3`, `node_modules/keytar`
+**Symptom:** A Windows `.exe` built on a Linux host (via `electronuserland/builder:wine`) packages and signs cleanly, but at runtime on Windows the app fails to launch — Electron can't load `better_sqlite3.node` or `keytar.node`. From the user's side this looks identical to the v1.0.2-beta Windows release: "installer ran, app does not work."
+**Root cause:** Three independent silent failures stack into one broken installer.
+1. **`electron-builder --config electron-builder.win.yml` is not enough on Linux.** Without an explicit `--win` flag, electron-builder defaults to the *host* OS regardless of what the config file specifies. The `win:` section in the config is honoured only when `--win` (or `--mac`/`--linux`) is on the CLI. On Windows CI the host *is* `win32`, so this latent bug never surfaces.
+2. **`prebuild-install` ignores `npm_config_target_platform` / `npm_config_target_arch`.** Those env vars are read by `@mapbox/node-pre-gyp`, but `better-sqlite3` and `keytar` use `prebuild-install`, which reads the *unprefixed* `npm_config_platform` / `npm_config_arch`. Setting the prefixed names looks correct but is silently a no-op — `prebuild-install` falls back to host detection and downloads Linux prebuilts.
+3. **`keytar` ships NAPI prebuilds, not Electron-runtime prebuilds.** Even calling `prebuild-install` directly with `--runtime=electron --target=31.7.7` fails for keytar with `No prebuilt binaries found`. keytar publishes `keytar-vX.Y.Z-napi-v3-win32-x64.tar.gz`, so the right invocation is `--runtime=napi --target=3`. `better-sqlite3`, by contrast, does ship Electron-runtime prebuilds and wants `--runtime=electron --target=31.7.7`.
+**Fix:**
+1. Pass `--win` to electron-builder when packaging from a non-Windows host.
+2. Fetch Windows prebuilds *per native module* with the right runtime, after `npm install` and before electron-builder:
+   ```
+   cd node_modules/better-sqlite3 && npx prebuild-install --platform=win32 --arch=x64 --runtime=electron --target=31.7.7
+   cd node_modules/keytar         && npx prebuild-install --platform=win32 --arch=x64 --runtime=napi     --target=3
+   ```
+3. **Always verify** the packaged `.node` files are Windows PE, not Linux ELF, before declaring the build done:
+   `file client/release/windows/win-unpacked/resources/app/node_modules/*/build/Release/*.node` must report `PE32+ executable (DLL)`, not `ELF 64-bit LSB`.
+
+**DO NOT:**
+- Run `electron-builder --config electron-builder.win.yml` from a Linux host without also passing `--win` — the command "succeeds" but produces a Linux build dropped into `release/windows/`.
+- Set `npm_config_target_platform` / `npm_config_target_arch` and assume prebuild-install respects them. For prebuild-install, use the unprefixed `npm_config_platform` / `npm_config_arch`, or call `prebuild-install` directly with `--platform` / `--arch`.
+- Use the same `--runtime`/`--target` for every native module. Each module's `package.json` `binary` block (or absence of one + `prebuild-install` in `scripts.install`) tells you whether it ships NAPI or Electron-runtime prebuilds.
+- Ship a Windows installer without running `file` over every `.node` inside `win-unpacked/resources/app/node_modules/*/build/Release/`. A correctly packaged but binary-mismatched `.exe` is the same failure shape as the v1.0.2-beta breakage.
+
+---
 
