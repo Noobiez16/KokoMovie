@@ -18,13 +18,24 @@ interface ElectronAPI {
     durationMins?: number
     manifestUrl: string
     drmKeyId?: string
+    customDownloadPath?: string
+    headers?: Record<string, string>
   }) => Promise<{ id: string; expiresAt: string }>
   cancelDownload: (id: string) => Promise<boolean>
   deleteDownload: (id: string) => Promise<boolean>
   listDownloads: () => Promise<unknown[]>
   getOfflineManifest: (id: string) => Promise<{ manifestContent: string; drmKeyId: string | null } | null>
+  selectDirectory: () => Promise<string | null>
+  getDefaultDownloadsDir: () => Promise<string>
   onDownloadProgress: (
-    callback: (progress: { id: string; percent: number }) => void,
+    callback: (progress: {
+      id: string
+      percent: number
+      status?: 'pending' | 'downloading' | 'completed' | 'cancelled' | 'error'
+      completedSegments?: number
+      totalSegments?: number
+      errorMessage?: string
+    }) => void,
   ) => () => void
 
   // App
@@ -69,6 +80,7 @@ interface ProviderResult {
   providerName: string
   streams: StreamSource[]
   error?: string
+  allStreams?: ProviderResult[]
 }
 
 interface Window {

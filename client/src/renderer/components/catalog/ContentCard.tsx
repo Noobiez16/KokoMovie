@@ -12,13 +12,27 @@ export function ContentCard({ content, size = 'md' }: Props) {
   const [imgError, setImgError] = useState(false)
 
   const widths = { sm: 'w-28', md: 'w-36', lg: 'w-48' }
+  const cw = content as any
+  const hasProgress = cw.positionSeconds !== undefined && cw.durationSeconds !== undefined && cw.durationSeconds > 0
+  const progressPercent = hasProgress ? (cw.positionSeconds / cw.durationSeconds) * 100 : 0
 
-  const go = () =>
+  const go = () => {
+    const navState: any = {}
+    if (content.tmdbId) {
+      navState.tmdbId = content.tmdbId
+      navState.tmdbType = content.type === 'series' ? 'tv' : 'movie'
+    }
+    if (cw.positionSeconds !== undefined) {
+      navState.resumePosition = cw.positionSeconds
+    }
+    if (cw.episodeId !== undefined) {
+      navState.resumeEpisodeId = cw.episodeId
+    }
+
     navigate(`/content/${content.id}`, {
-      state: content.tmdbId
-        ? { tmdbId: content.tmdbId, tmdbType: content.type === 'series' ? 'tv' : 'movie' }
-        : undefined,
+      state: Object.keys(navState).length > 0 ? navState : undefined,
     })
+  }
 
   return (
     <div
@@ -67,6 +81,16 @@ export function ContentCard({ content, size = 'md' }: Props) {
           <div className="absolute top-1.5 right-1.5 bg-black/75 rounded-md px-1.5 py-0.5 flex items-center gap-0.5 backdrop-blur-sm">
             <span className="text-yellow-400 text-[10px]">★</span>
             <span className="text-white text-[10px] font-semibold">{parseFloat(content.imdbScore).toFixed(1)}</span>
+          </div>
+        )}
+
+        {/* Progress Bar for Continue Watching */}
+        {hasProgress && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+            <div
+              className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+              style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+            />
           </div>
         )}
       </div>

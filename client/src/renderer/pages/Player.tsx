@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { catalogApi, type Episode } from '../api/catalog'
 import { playbackApi, type PlaybackSession } from '../api/playback'
+import { downloadsApi } from '../api/downloads'
 import { VideoPlayer } from '../components/player/VideoPlayer'
 
 export function PlayerPage() {
@@ -85,9 +86,45 @@ export function PlayerPage() {
     return null
   })()
 
+  const [offlineManifestUrl, setOfflineManifestUrl] = useState<string | null>(null)
+
+  // Clean up offline blob URL on unmount or URL change
+  useEffect(() => {
+    return () => {
+      if (offlineManifestUrl) {
+        URL.revokeObjectURL(offlineManifestUrl)
+      }
+    }
+  }, [offlineManifestUrl])
+
   // Create playback session once content is loaded
   useEffect(() => {
     if (!sortedContent) return
+
+    const offlineId = new URLSearchParams(location.search).get('offline')
+
+    if (offlineId) {
+      downloadsApi.getManifest(offlineId)
+        .then((res) => {
+          if (!res) {
+            setSessionError('Offline download not found')
+            return
+          }
+          const blob = new Blob([res.manifestContent], { type: 'application/x-mpegURL' })
+          const url = URL.createObjectURL(blob)
+          setOfflineManifestUrl(url)
+          setSession({
+            sessionId: offlineId,
+            manifestUrl: url,
+            drmKeyId: res.drmKeyId,
+            expiresIn: 14400,
+          })
+        })
+        .catch((err: Error) => {
+          setSessionError(err.message ?? 'Failed to load offline manifest')
+        })
+      return
+    }
 
     // If a direct stream URL was provided by a provider, create a synthetic session
     if (directStreamUrl) {
@@ -121,7 +158,7 @@ export function PlayerPage() {
     )
       .then((res) => setSession(res.data))
       .catch((err: Error) => setSessionError(err.message ?? 'Failed to create playback session'))
-  }, [sortedContent?.id, currentEpisodeId, profileId, directStreamUrl])
+  }, [sortedContent?.id, currentEpisodeId, profileId, directStreamUrl, location.search])
 
   const handleNextEpisode = (ep: Episode) => {
     setSession(null)

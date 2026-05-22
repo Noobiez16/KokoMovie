@@ -25,9 +25,12 @@ class ApiClient {
     const { method = 'GET', body, profileId, skipAuth = false } = opts
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       'X-Client-Version': '1.0.0',
       'X-Platform': `electron-${navigator.platform.toLowerCase().includes('win') ? 'windows' : navigator.platform.toLowerCase().includes('mac') ? 'macos' : 'linux'}`,
+    }
+
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
     }
 
     if (!skipAuth) {
@@ -47,7 +50,10 @@ class ApiClient {
         const refreshed = await this.refreshAccessToken()
         if (refreshed) return this.request<T>(path, opts)
       }
-      throw Object.assign(new Error(errData.error?.message ?? 'Request failed'), {
+      const errorMessage = (typeof errData.error === 'object' && errData.error?.message)
+        || (errData as any).message
+        || 'Request failed'
+      throw Object.assign(new Error(errorMessage), {
         code: errData.error?.code,
         status: result.status,
       })

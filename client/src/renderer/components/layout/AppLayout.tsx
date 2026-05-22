@@ -115,14 +115,14 @@ export function AppLayout({ children, transparentNav = false }: Props) {
 
   const headerBg = transparentNav
     ? scrolled
-      ? 'bg-km-bg/90 backdrop-blur-md border-b border-km-border/20'
+      ? 'bg-km-bg/90 backdrop-blur-md'
       : 'bg-gradient-to-b from-km-bg/80 to-transparent'
-    : 'bg-km-surface/40 backdrop-blur-md border-b border-km-border/20'
+    : 'bg-km-surface/40 backdrop-blur-md'
 
   return (
     <div className="flex h-screen bg-km-bg overflow-hidden text-km-text">
       {/* Left Sidebar */}
-      <aside className="w-64 flex-shrink-0 flex flex-col bg-km-surface/50 border-r border-km-border/30 backdrop-blur-xl z-50">
+      <aside className="w-64 flex-shrink-0 flex flex-col bg-km-surface/50 backdrop-blur-xl z-50">
         {/* Logo */}
         <div className="h-16 px-6 flex items-center select-none">
           <button
@@ -193,7 +193,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
 
         {/* Profile Card / Sign Out */}
         {activeProfile && (
-          <div className="p-4 border-t border-km-border/30 bg-km-surface/20" ref={dropdownRef}>
+          <div className="p-4 bg-km-surface/20" ref={dropdownRef}>
             <div className="relative">
               <button
                 onClick={() => setProfileOpen((v) => !v)}
@@ -233,7 +233,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
                   </button>
                   <button
                     onClick={() => { setProfileOpen(false); logout() }}
-                    className="w-full text-left px-4 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs font-medium transition-colors border-t border-km-border/30 mt-1 pt-1.5"
+                    className="w-full text-left px-4 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs font-medium transition-colors mt-1 pt-1.5"
                   >
                     Sign Out
                   </button>

@@ -21,7 +21,7 @@ KokoMovie PC is **not** a self-hosted Netflix. It is a content aggregator:
 - Built-in HLS player with quality selection, subtitles, Picture-in-Picture, and keyboard shortcuts
 - Watchlist and continue watching across multiple profiles
 - Multi-profile support per account
-- Offline download queue (HLS segments, AES-128 encrypted)
+- Offline download queue (HLS segments, AES-256-GCM encrypted)
 - Works on Linux, Windows, macOS
 
 ---

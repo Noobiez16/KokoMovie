@@ -36,13 +36,21 @@ function migrate(db: Database.Database): void {
       manifest_path   TEXT,
       downloaded_at   TEXT,
       expires_at      TEXT NOT NULL,
-      error_message   TEXT
+      error_message   TEXT,
+      headers         TEXT
     );
 
     CREATE INDEX IF NOT EXISTS downloads_content_id_idx ON downloads (content_id);
     CREATE INDEX IF NOT EXISTS downloads_status_idx ON downloads (status);
     CREATE INDEX IF NOT EXISTS downloads_expires_at_idx ON downloads (expires_at);
   `)
+
+  // Check if headers column exists in downloads table (for backward compatibility)
+  const tableInfo = db.prepare("PRAGMA table_info(downloads)").all() as Array<{ name: string }>
+  const hasHeaders = tableInfo.some((col) => col.name === 'headers')
+  if (!hasHeaders) {
+    db.exec(`ALTER TABLE downloads ADD COLUMN headers TEXT;`)
+  }
 }
 
 export interface DownloadRow {
@@ -65,4 +73,5 @@ export interface DownloadRow {
   downloaded_at: string | null
   expires_at: string
   error_message: string | null
+  headers: string | null
 }

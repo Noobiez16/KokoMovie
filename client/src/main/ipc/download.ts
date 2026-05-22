@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, app } from 'electron'
+import { ipcMain, BrowserWindow, app, dialog } from 'electron'
 import {
   createCipheriv,
   createDecipheriv,
@@ -10,6 +10,7 @@ import { createWriteStream, mkdirSync, rmSync, readFileSync, writeFileSync, exis
 import { join, dirname } from 'path'
 import https from 'https'
 import http from 'http'
+import zlib from 'zlib'
 import { getDb, type DownloadRow } from '../db/sqlite.js'
 
 const MAX_CONCURRENT = 3
@@ -54,10 +55,122 @@ export function decryptSegment(encrypted: Buffer, key: Buffer): Buffer {
 
 // ─── HTTP fetch helper ────────────────────────────────────────────────────────
 
-function fetchBuffer(url: string, onProgress?: (received: number, total: number) => void): Promise<Buffer> {
+import { getStreamHeaders, mergeHeadersCaseInsensitive, getStandardHeight } from './providers.js'
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 32,
+  keepAliveMsecs: 30000,
+})
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 32,
+  keepAliveMsecs: 30000,
+  rejectUnauthorized: false,
+})
+
+const activeRequests = new Map<string, http.ClientRequest[]>()
+
+function normalizeUrl(url: string): string {
+  if (url.startsWith('http://localhost:') || url.startsWith('http://127.0.0.1:')) {
+    const idx = url.indexOf('/proxy/')
+    if (idx !== -1) {
+      const rest = url.slice(idx + '/proxy/'.length)
+      if (rest.startsWith('http/') || rest.startsWith('https/')) {
+        const firstSlash = rest.indexOf('/')
+        const proto = rest.slice(0, firstSlash)
+        const actualRest = rest.slice(firstSlash + 1)
+        return `${proto}://${actualRest}`
+      }
+      return 'https://' + rest
+    }
+  }
+  return url
+}
+
+function abortActiveRequests(id: string): void {
+  const reqs = activeRequests.get(id)
+  if (reqs) {
+    for (const req of reqs) {
+      try {
+        req.destroy(new Error('cancelled'))
+      } catch { /* ignore */ }
+    }
+    activeRequests.delete(id)
+  }
+}
+
+function fetchBuffer(
+  url: string,
+  id?: string,
+  customHeaders?: Record<string, string>,
+  onProgress?: (received: number, total: number) => void,
+  redirectsCount = 0
+): Promise<Buffer> {
+  if (redirectsCount > 5) {
+    return Promise.reject(new Error('Too many redirects'))
+  }
+
+  const normalizedUrl = normalizeUrl(url)
+
   return new Promise((resolve, reject) => {
-    const get = url.startsWith('https') ? https.get : http.get
-    get(url, (res) => {
+    let host = ''
+    try {
+      host = new URL(normalizedUrl).host
+    } catch {}
+
+    const streamHeaders = mergeHeadersCaseInsensitive(
+      getStreamHeaders(host),
+      customHeaders || {}
+    )
+    const reqHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(streamHeaders)) {
+      const lowerK = k.toLowerCase()
+      if (
+        lowerK !== 'host' &&
+        !lowerK.startsWith('sec-') &&
+        lowerK !== 'connection'
+      ) {
+        reqHeaders[k] = String(v)
+      }
+    }
+
+    if (!reqHeaders['Accept-Encoding'] && !reqHeaders['accept-encoding']) {
+      reqHeaders['Accept-Encoding'] = 'gzip, deflate'
+    }
+
+    if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
+      reqHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
+
+    const isHttps = normalizedUrl.startsWith('https')
+    const get = isHttps ? https.get : http.get
+
+    const options = {
+      headers: reqHeaders,
+      rejectUnauthorized: false,
+      agent: isHttps ? httpsAgent : httpAgent,
+    }
+
+    const req = get(normalizedUrl, options, (res) => {
+      const statusCode = res.statusCode ?? 200
+      if ([301, 302, 303, 307, 308].includes(statusCode)) {
+        const location = res.headers.location
+        if (location) {
+          cleanUpReq()
+          const absoluteLocation = new URL(location, normalizedUrl).toString()
+          resolve(fetchBuffer(absoluteLocation, id, customHeaders, onProgress, redirectsCount + 1))
+          return
+        }
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        cleanUpReq()
+        reject(new Error(`Request failed with status code ${statusCode}`))
+        return
+      }
+
       const total = parseInt(res.headers['content-length'] ?? '0', 10)
       const chunks: Buffer[] = []
       let received = 0
@@ -68,10 +181,100 @@ function fetchBuffer(url: string, onProgress?: (received: number, total: number)
         onProgress?.(received, total)
       })
 
-      res.on('end', () => resolve(Buffer.concat(chunks)))
-      res.on('error', reject)
-    }).on('error', reject)
+      res.on('end', () => {
+        cleanUpReq()
+        if (total > 0 && received < total) {
+          reject(new Error(`Response terminated early: received ${received} of ${total} bytes`))
+          return
+        }
+        let buffer = Buffer.concat(chunks)
+        const encoding = res.headers['content-encoding']
+        if (encoding === 'gzip') {
+          try {
+            buffer = zlib.gunzipSync(buffer)
+          } catch (e) {
+            reject(new Error(`Gzip decompression failed: ${e instanceof Error ? e.message : e}`))
+            return
+          }
+        } else if (encoding === 'deflate') {
+          try {
+            buffer = zlib.inflateSync(buffer)
+          } catch (e) {
+            reject(new Error(`Deflate decompression failed: ${e instanceof Error ? e.message : e}`))
+            return
+          }
+        }
+        resolve(buffer)
+      })
+      res.on('error', (err) => {
+        cleanUpReq()
+        reject(err)
+      })
+    })
+
+    if (id) {
+      const reqs = activeRequests.get(id) || []
+      reqs.push(req)
+      activeRequests.set(id, reqs)
+    }
+
+    const cleanUpReq = () => {
+      if (id) {
+        const reqs = activeRequests.get(id)
+        if (reqs) {
+          const idx = reqs.indexOf(req)
+          if (idx >= 0) {
+            reqs.splice(idx, 1)
+            if (reqs.length === 0) {
+              activeRequests.delete(id)
+            } else {
+              activeRequests.set(id, reqs)
+            }
+          }
+        }
+      }
+    }
+
+    req.on('error', (err) => {
+      cleanUpReq()
+      reject(err)
+    })
+    req.setTimeout(30000, () => {
+      cleanUpReq()
+      req.destroy(new Error('Request timeout after 30s'))
+    })
   })
+}
+
+async function fetchBufferWithRetry(
+  url: string,
+  id?: string,
+  customHeaders?: Record<string, string>,
+  onProgress?: (received: number, total: number) => void,
+  maxAttempts = 3,
+  initialDelayMs = 1000
+): Promise<Buffer> {
+  let attempt = 0
+  while (true) {
+    attempt++
+    try {
+      if (id && cancelSignals.get(id)) throw new Error('cancelled')
+      return await fetchBuffer(url, id, customHeaders, onProgress)
+    } catch (err) {
+      if (err instanceof Error && err.message === 'cancelled') {
+        throw err
+      }
+      if (id && cancelSignals.get(id)) {
+        throw new Error('cancelled')
+      }
+      if (attempt >= maxAttempts) {
+        throw err
+      }
+      const delay = initialDelayMs * Math.pow(2, attempt - 1)
+      console.log(`[downloader] Attempt ${attempt} failed for ${url}. Retrying in ${delay}ms... Error: ${err instanceof Error ? err.message : err}`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
 }
 
 // ─── HLS manifest parser ──────────────────────────────────────────────────────
@@ -92,24 +295,68 @@ function resolveUrl(base: string, relative: string): string {
   return `${url.protocol}//${url.host}${url.pathname.replace(/\/[^/]*$/, '/')}${relative}`
 }
 
-async function parseManifest(manifestUrl: string): Promise<HlsManifest> {
-  const text = (await fetchBuffer(manifestUrl)).toString('utf-8')
+function getVariantScore(line: string): { stdHeight: number; bandwidth: number } {
+  let bandwidth = 0
+  let stdHeight = 0
+
+  const bwMatch = line.match(/BANDWIDTH=(\d+)/i)
+  if (bwMatch) {
+    bandwidth = parseInt(bwMatch[1]!, 10)
+  }
+
+  const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/i)
+  if (resMatch) {
+    const w = parseInt(resMatch[1]!, 10)
+    const h = parseInt(resMatch[2]!, 10)
+    if (!isNaN(w) && !isNaN(h)) {
+      stdHeight = getStandardHeight(w, h)
+    }
+  }
+
+  return { stdHeight, bandwidth }
+}
+
+async function parseManifest(manifestUrl: string, customHeaders?: Record<string, string>, id?: string): Promise<HlsManifest> {
+  const normalizedManifestUrl = normalizeUrl(manifestUrl)
+  const text = (await fetchBufferWithRetry(normalizedManifestUrl, id, customHeaders)).toString('utf-8')
 
   // Is this a master playlist?
   if (text.includes('#EXT-X-STREAM-INF')) {
-    // Pick the highest bandwidth variant
     const lines = text.split('\n')
-    let bestBandwidth = 0
+    let bestScore: { stdHeight: number; bandwidth: number } | null = null
     let bestUri = ''
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? ''
       if (line.startsWith('#EXT-X-STREAM-INF')) {
-        const bwMatch = line.match(/BANDWIDTH=(\d+)/)
-        const bw = bwMatch ? parseInt(bwMatch[1]!, 10) : 0
+        const score = getVariantScore(line)
         const next = lines[i + 1]?.trim() ?? ''
-        if (bw >= bestBandwidth && next && !next.startsWith('#')) {
-          bestBandwidth = bw
-          bestUri = resolveUrl(manifestUrl, next)
+        if (next && !next.startsWith('#')) {
+          const uri = normalizeUrl(resolveUrl(normalizedManifestUrl, next))
+          if (!bestScore) {
+            bestScore = score
+            bestUri = uri
+          } else {
+            let isBetter = false
+            if (score.stdHeight === 1080 && bestScore.stdHeight !== 1080) {
+              isBetter = true
+            } else if (bestScore.stdHeight === 1080 && score.stdHeight !== 1080) {
+              isBetter = false
+            } else if (score.stdHeight === 1080 && bestScore.stdHeight === 1080) {
+              isBetter = score.bandwidth > bestScore.bandwidth
+            } else {
+              if (score.stdHeight !== bestScore.stdHeight) {
+                isBetter = score.stdHeight > bestScore.stdHeight
+              } else {
+                isBetter = score.bandwidth > bestScore.bandwidth
+              }
+            }
+
+            if (isBetter) {
+              bestScore = score
+              bestUri = uri
+            }
+          }
         }
       }
     }
@@ -121,7 +368,7 @@ async function parseManifest(manifestUrl: string): Promise<HlsManifest> {
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (trimmed && !trimmed.startsWith('#')) {
-      segments.push(resolveUrl(manifestUrl, trimmed))
+      segments.push(normalizeUrl(resolveUrl(normalizedManifestUrl, trimmed)))
     }
   }
 
@@ -144,45 +391,64 @@ async function downloadContent(id: string): Promise<void> {
 
   const key = deriveSegmentKey(row.drm_key_id)
   const localDir = row.local_dir
+  const customHeaders = row.headers ? JSON.parse(row.headers) : undefined
 
   try {
     // Parse manifest (may be master or variant)
-    let variantUrl = row.s3_hls_key
-    let rawPlaylist: string
+    let variantUrl = normalizeUrl(row.s3_hls_key)
+    let rawPlaylist = ''
+    let variantSegments: string[] = []
 
-    const master = await parseManifest(variantUrl)
+    const master = await parseManifest(variantUrl, customHeaders, id)
     if (master.isMaster && master.variantUrl) {
       variantUrl = master.variantUrl
-      const variant = await parseManifest(variantUrl)
+      const variant = await parseManifest(variantUrl, customHeaders, id)
+      variantSegments = variant.segments
       rawPlaylist = variant.rawPlaylist
-      db.prepare(`UPDATE downloads SET total_segments = ? WHERE id = ?`).run(variant.segments.length, id)
+    } else if (!master.isMaster && master.segments.length > 0) {
+      variantSegments = master.segments
+      rawPlaylist = master.rawPlaylist
+    }
+
+    if (variantSegments.length > 0) {
+      db.prepare(`UPDATE downloads SET total_segments = ? WHERE id = ?`).run(variantSegments.length, id)
 
       let completed = 0
-      for (const segUrl of variant.segments) {
+      for (const segUrl of variantSegments) {
         if (cancelSignals.get(id)) throw new Error('cancelled')
 
         const segName = `seg_${completed}.enc`
         const segPath = join(localDir, segName)
 
-        const plain = await fetchBuffer(segUrl, (recv, total) => {
+        const startTime = Date.now()
+        const plain = await fetchBufferWithRetry(segUrl, id, customHeaders, (recv, total) => {
+          const elapsedSec = (Date.now() - startTime) / 1000
+          const speedKbps = elapsedSec > 0 ? Math.round((recv / 1024) / elapsedSec) : 0
+
+          let overallPct = Math.round((completed / variantSegments.length) * 100)
           if (total > 0) {
-            const overallPct = Math.round(((completed + recv / total) / variant.segments.length) * 100)
-            db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ? WHERE id = ?`).run(overallPct, Math.round(recv / 1024), id)
-            notifyProgress(id, overallPct)
+            overallPct = Math.round(((completed + (recv / total)) / variantSegments.length) * 100)
           }
+          db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ? WHERE id = ?`).run(overallPct, speedKbps, id)
+          notifyProgress(id, overallPct, 'downloading', completed, variantSegments.length)
         })
 
         const encrypted = encryptSegment(plain, key)
         writeFileSync(segPath, encrypted)
         completed++
-        db.prepare(`UPDATE downloads SET completed_segments = ? WHERE id = ?`).run(completed, id)
+
+        const finalPct = Math.round((completed / variantSegments.length) * 100)
+        db.prepare(`UPDATE downloads SET completed_segments = ?, progress_percent = ? WHERE id = ?`).run(completed, finalPct, id)
+        notifyProgress(id, finalPct, 'downloading', completed, variantSegments.length)
       }
 
       // Write local manifest with offline:// segment paths
       const offlinePlaylist = rawPlaylist.replace(
-        /^(?!#)(.+\.ts.*)$/gm,
-        (_: string, seg: string) => {
-          const idx = variant.segments.findIndex((s) => s.endsWith(seg.trim()) || seg.trim().endsWith(s.split('/').pop()!))
+        /^(?!#)(.+)$/gm,
+        (line: string) => {
+          const trimmed = line.trim()
+          if (!trimmed) return ''
+          const idx = variantSegments.findIndex((s) => s.endsWith(trimmed) || trimmed.endsWith(s.split('/').pop()!))
           const segIndex = idx >= 0 ? idx : completed - 1
           return `offline://${id}/seg_${segIndex}.enc`
         },
@@ -194,27 +460,33 @@ async function downloadContent(id: string): Promise<void> {
         UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?
         WHERE id = ?
       `).run(new Date().toISOString(), manifestPath, id)
+
+      notifyProgress(id, 100, 'completed', completed, variantSegments.length)
     } else {
       // No HLS segments found (dev/mock scenario) — mark complete with empty manifest
       const manifestPath = join(localDir, 'manifest.m3u8')
       writeFileSync(manifestPath, master.rawPlaylist)
       db.prepare(`UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ? WHERE id = ?`)
         .run(new Date().toISOString(), manifestPath, id)
+
+      notifyProgress(id, 100, 'completed', 0, 0)
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    if (message === 'cancelled') {
-      db.prepare(`UPDATE downloads SET status = 'cancelled' WHERE id = ?`).run(id)
+    if (message === 'cancelled' || cancelSignals.get(id)) {
+      notifyProgress(id, 0, 'cancelled')
     } else {
-      db.prepare(`UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?`).run(message, id)
+      const exists = db.prepare('SELECT 1 FROM downloads WHERE id = ?').get(id)
+      if (exists) {
+        db.prepare(`UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?`).run(message, id)
+      }
+      notifyProgress(id, 0, 'error')
     }
   } finally {
     cancelSignals.delete(id)
     activeCount--
     processQueue()
   }
-
-  notifyProgress(id, 100)
 }
 
 function processQueue(): void {
@@ -226,14 +498,32 @@ function processQueue(): void {
   downloadContent(next.id)
 }
 
-function notifyProgress(id: string, percent: number): void {
-  BrowserWindow.getAllWindows()[0]?.webContents.send('download:progress', { id, percent })
+function notifyProgress(
+  id: string,
+  percent: number,
+  status?: string,
+  completedSegments?: number,
+  totalSegments?: number
+): void {
+  BrowserWindow.getAllWindows()[0]?.webContents.send('download:progress', {
+    id,
+    percent,
+    status,
+    completedSegments,
+    totalSegments,
+  })
 }
 
 // ─── IPC registration ─────────────────────────────────────────────────────────
 
 export function registerDownloadIpc(): void {
   const db = getDb()
+
+  // Reset any interrupted downloads (status = 'downloading') back to 'pending' on startup
+  db.prepare(`UPDATE downloads SET status = 'pending' WHERE status = 'downloading'`).run()
+
+  // Trigger processQueue() once on startup to resume download queue
+  processQueue()
 
   ipcMain.handle('download:start', async (
     _event,
@@ -246,22 +536,26 @@ export function registerDownloadIpc(): void {
       durationMins?: number
       manifestUrl: string
       drmKeyId?: string
+      customDownloadPath?: string
+      headers?: Record<string, string>
     },
   ) => {
     const id = crypto.randomUUID()
-    const localDir = join(app.getPath('userData'), 'downloads', id)
+    const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
+    const localDir = join(baseDir, id)
     mkdirSync(localDir, { recursive: true })
 
     const expiresAt = new Date(Date.now() + DOWNLOAD_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
     db.prepare(`
       INSERT INTO downloads (id, content_id, episode_id, title, content_type, thumbnail_url, duration_mins,
-        s3_hls_key, drm_key_id, status, local_dir, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        s3_hls_key, drm_key_id, status, local_dir, expires_at, headers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
     `).run(
       id, opts.contentId, opts.episodeId ?? null, opts.title, opts.contentType,
       opts.thumbnailUrl ?? null, opts.durationMins ?? null,
       opts.manifestUrl, opts.drmKeyId ?? null, localDir, expiresAt,
+      opts.headers ? JSON.stringify(opts.headers) : null
     )
 
     processQueue()
@@ -270,16 +564,27 @@ export function registerDownloadIpc(): void {
 
   ipcMain.handle('download:cancel', (_event, id: string) => {
     cancelSignals.set(id, true)
-    db.prepare(`UPDATE downloads SET status = 'cancelled' WHERE id = ? AND status IN ('pending','downloading')`).run(id)
+    abortActiveRequests(id)
+    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?').get(id) as { local_dir: string } | undefined
+    db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
+    if (row) {
+      setTimeout(() => {
+        try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }, 500)
+    }
     return true
   })
 
   ipcMain.handle('download:delete', (_event, id: string) => {
+    cancelSignals.set(id, true)
+    abortActiveRequests(id)
     const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?').get(id) as { local_dir: string } | undefined
-    if (row) {
-      try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
-    }
     db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
+    if (row) {
+      setTimeout(() => {
+        try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }, 500)
+    }
     return true
   })
 
@@ -299,6 +604,21 @@ export function registerDownloadIpc(): void {
   )
   ipcMain.handle('download:segment', async (_event, _url: string, _path: string) => {
     return { error: 'Use download:start instead' }
+  })
+
+  // Directory selection & default downloads directory IPCs
+  ipcMain.handle('dialog:select-directory', async () => {
+    const windows = BrowserWindow.getAllWindows()
+    const parentWindow = windows[0]
+    const result = parentWindow
+      ? await dialog.showOpenDialog(parentWindow, { properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
+
+  ipcMain.handle('download:get-default-dir', () => {
+    return join(app.getPath('userData'), 'downloads')
   })
 }
 

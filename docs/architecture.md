@@ -294,6 +294,29 @@ session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (de
 
 Headers are registered via `providers:registerStreamHeaders` IPC with a 4-hour expiry.
 
+### Local Stream Proxy
+
+To bypass Chromium's strict Cross-Origin Resource Sharing (CORS) enforcement and handle forbidden HTTP headers (such as `Referer` or `Origin` demanded by stream CDNs), the Electron Main process hosts a lightweight local HTTP streaming proxy.
+
+1. **Proxy Startup**: A local HTTP server is initialized on a dynamic port during application bootstrap.
+2. **CORS Bypassing via `fetchNode`**: Instead of Electron's `net.fetch` (which strips forbidden headers), the proxy uses a custom `fetchNode` module backed by Node's native `http`/`https` engines. This permits absolute control over headers like `Referer` and `Origin`.
+3. **Keep-Alive Connections**: Global persistent HTTP/HTTPS agents with `keepAlive: true` and a 30s connection timeout are configured to minimize the latency overhead of continuous TCP/TLS handshakes during HLS segment fetches.
+4. **Manifest Parsing & Rewriting**: The proxy intercepts HLS `.m3u8` manifest requests, parses them, and rewrites all segment URLs (both absolute and relative) to point back to the local proxy URL. It also filters out low-resolution stream variants (below 720p) if high-quality streams are available.
+5. **Direct Segment Piping**: To prevent micro-stuttering and memory bloat, video segment files (`.ts`, `.mp4`) are piped directly to the player as they stream in, bypassing any full-payload buffering.
+6. **On-the-Fly Subtitle Conversion**: Sideloaded SubRip (`.srt`) subtitle tracks are requested through the proxy with a `format=vtt` flag, which converts them on-the-fly to browser-compatible WebVTT (`.vtt`) format before serving.
+
+### Offline Downloads
+
+The offline download system allows users to download movies and TV episodes for offline viewing. It is designed to be resilient to network drops, CDN throttling, and application restarts.
+
+1. **Persistent SQLite Queue**: All download records (URLs, target file paths, status, custom CDN headers, and progress details) are saved in the local SQLite database.
+2. **Resilient Download Loop**:
+   - Downloads fetch the HLS manifest and download segments concurrently (up to 3 parallel workers).
+   - If a segment request fails due to temporary network drops, the downloader retries the segment up to 3 times with exponential backoff (1s, 2s, 4s).
+   - Segment fetch timeout is set to 30 seconds to support throttled CDN networks.
+3. **AES-256-GCM Encryption**: To protect content, each downloaded segment is encrypted using AES-256-GCM. The key is derived on-the-fly using HKDF-SHA256 based on a unique device fingerprint (composed of user data path, OS platform, and local hostname) and a random salt. The key is never persisted to disk.
+4. **Privileged `offline://` Scheme**: Playback of downloaded content is routed through Electron's custom `offline:` protocol. This scheme acts as a secure local protocol that intercepts requests, decrypts the local `.enc` segment files on-the-fly, and returns standard video streams to the player.
+
 ---
 
 ## 6. Backend Microservices

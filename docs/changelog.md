@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.3-beta] — 2026-05-22 — Custom Settings, Offline Support & Downloader Stabilisation
+
+### Added
+- **Offline Playback & Custom Protocol**: Registered `offline://` custom protocol scheme to securely fetch and decrypt downloaded segments on-the-fly, enabling smooth video playback without internet access.
+- **Custom Download Location**: Added configuration settings to type or browse (via native directory picker) a custom download path, stored persistently in `localStorage`.
+- **Viewing History List Tab**: Added a "+ My List" watchlist tab inside the Watch History page to easily browse bookmarked movies and series.
+- **Episode-Level & Multi-Season Downloads**: Introduced a 3-dots actions menu next to "+ My List" on movie/series details and next to episode play buttons, enabling download of individual episodes, movies, or all seasons.
+- **Watchlist Optimistic Updates**: Implemented React Query optimistic cache mutations for instant visual toggling of "+ My List" / "✓ In My List" buttons.
+- **HLS Stream Quality Optimization (1080p Target)**: Master HLS manifest parser now grades and selects standard height 1080p variants first, using standard aspect-ratio mapping (getStandardHeight), before falling back to highest bandwidth or standard resolutions.
+- **Startup Queue Auto-Resume**: Interrupted active downloads are automatically reset to 'pending' and resumed on application start.
+
+### Fixed
+- **Picture-in-Picture Removal**: Disabled Picture-in-Picture globally in the media player and removed its buttons/handlers to maintain layout integrity.
+- **Downloader Timeout & Progress Calculations**: Added a 30-second request timeout to prevent hanging connections, and fixed progress percentage tracking for segments with unknown/chunked HTTP content lengths.
+- **Immediate Cancel Deletion**: Updated cancel behavior to instantly abort running segment fetches, delete the corresponding local files/folders, and wipe the sqlite database record.
+- **Header Merging & Casing Conflicts**: Merges scraper and custom headers case-insensitively, preventing duplicate cased header keys (e.g. Referer vs referer) that caused CDN 403 Forbidden blocks.
+- **Original Protocol Preservation**: Proxy URLs and downloaded segment requests correctly preserve HTTP vs HTTPS protocols, preventing timeouts and socket connection errors on HTTP-only stream variants.
+
+---
+
 ## [1.0.2-beta] — 2026-05-20 — Source Switching & Availability Indicators
 
 ### Added

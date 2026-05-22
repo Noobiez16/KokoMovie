@@ -27,7 +27,6 @@ interface Props {
   onSubtitleChange: (id: number) => void
   onSubtitleSizeChange: (size: 'small' | 'medium' | 'large') => void
   onFullscreen: () => void
-  onPiP: () => void
   introEndSecs: number | null
   creditsStartSecs: number | null
   sources?: Array<{ id: string; name: string; enabled: boolean }>
@@ -49,7 +48,7 @@ export function PlayerControls({
   hls, isPlaying, isMuted, volume, currentTime, duration, buffered,
   currentLevel, levels, subtitleTracks, currentSubtitle, subtitleSize,
   onPlayPause, onMute, onVolumeChange, onSeek, onLevelChange, onSubtitleChange, onSubtitleSizeChange,
-  onFullscreen, onPiP, introEndSecs, creditsStartSecs,
+  onFullscreen, introEndSecs, creditsStartSecs,
   sources = [], availableSourceIds, activeSourceId = null, onSourceChange, switchingSource = false,
 }: Props) {
   const [showQuality, setShowQuality] = useState(false)
@@ -119,10 +118,10 @@ export function PlayerControls({
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-3 pt-8">
         {/* Seek bar */}
         <div
-          className="relative h-1 rounded-full bg-white/20 cursor-pointer mb-3 group/seek hover:h-1.5 transition-all"
+          className="relative h-1 rounded-full bg-km-accent/20 cursor-pointer mb-3 group/seek hover:h-1.5 transition-all"
           onClick={handleSeekClick}
         >
-          <div className="absolute h-full bg-white/30 rounded-full" style={{ width: `${bufferedPct}%` }} />
+          <div className="absolute h-full bg-km-accent/45 rounded-full" style={{ width: `${bufferedPct}%` }} />
           <div className="absolute h-full bg-km-accent rounded-full transition-all" style={{ width: `${progress}%` }} />
           <div
             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-km-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity"
@@ -385,13 +384,7 @@ export function PlayerControls({
               </div>
             )}
 
-            {/* PiP */}
-            <button onClick={onPiP} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center" title="Picture in Picture">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-                <rect x="2" y="3" width="20" height="14" rx="2" />
-                <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" />
-              </svg>
-            </button>
+
 
             {/* Fullscreen */}
             <button onClick={onFullscreen} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center" title="Fullscreen">

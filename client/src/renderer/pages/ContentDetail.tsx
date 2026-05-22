@@ -24,6 +24,7 @@ export function ContentDetailPage() {
     seasonNumber?: number
     resumeAtSeconds?: number
     error?: string
+    isDownload?: boolean
   }>({ loading: false })
 
   const cancelAutoStreamRef = useRef<(() => void) | null>(null)
@@ -41,17 +42,20 @@ export function ContentDetailPage() {
   }
 
   const location = useLocation()
-  const navState = location.state as { tmdbId?: number; tmdbType?: 'movie' | 'tv' } | null
+  const navState = location.state as {
+    tmdbId?: number
+    tmdbType?: 'movie' | 'tv'
+    resumePosition?: number
+    resumeEpisodeId?: string | null
+  } | null
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
-  if (!id) return <Navigate to="/browse" replace />
+  const profileId = activeProfile?.id ?? ''
 
-  const profileId = activeProfile.id
-
-  const { data, isLoading, isError } = useQuery({
+  // Fetch content metadata
+  const { data, isLoading } = useQuery({
     queryKey: ['content', id, profileId],
     queryFn: async () => {
+      if (!profileId || !id) throw new Error('Not authenticated')
       // For TMDB items not yet in DB, sync first then fetch
       if (navState?.tmdbId && navState?.tmdbType) {
         try {
@@ -61,12 +65,107 @@ export function ContentDetailPage() {
       return catalogApi.getContent(id, profileId)
     },
     staleTime: 10 * 60 * 1000,
+    enabled: !!profileId && !!id,
   })
 
   const content = data?.data
   const sortedSeasons = content?.seasons
     ? [...content.seasons].sort((a, b) => a.seasonNumber - b.seasonNumber)
     : []
+
+  const { data: watchlistData } = useQuery({
+    queryKey: ['watchlist-check', id, profileId],
+    queryFn: () => {
+      if (!id || !profileId) throw new Error('Missing parameters')
+      return userApi.checkWatchlist(id, profileId)
+    },
+    staleTime: 30 * 1000,
+    enabled: !!profileId && !!id,
+  })
+
+  const { data: similarData } = useQuery({
+    queryKey: ['similar', id, profileId],
+    queryFn: () => {
+      if (!id || !profileId) throw new Error('Missing parameters')
+      return recommendationApi.getSimilar(id, profileId)
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: !!profileId && !!id,
+  })
+
+
+
+  const { data: continueWatchingData } = useQuery({
+    queryKey: ['continue-watching', profileId],
+    queryFn: () => {
+      if (!profileId) throw new Error('Missing parameters')
+      return playbackApi.getContinueWatching(profileId)
+    },
+    staleTime: 30 * 1000,
+    enabled: !!profileId,
+  })
+
+  const inWatchlist = watchlistData?.data?.inWatchlist ?? false
+
+  const addMutation = useMutation({
+    mutationFn: () => {
+      if (!id || !profileId) throw new Error('Missing parameters')
+      return userApi.addToWatchlist(id, content?.type ?? 'movie', profileId)
+    },
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['watchlist-check', id, profileId] })
+      const previousWatchlistCheck = qc.getQueryData(['watchlist-check', id, profileId])
+      qc.setQueryData(['watchlist-check', id, profileId], {
+        success: true,
+        data: { inWatchlist: true }
+      })
+      return { previousWatchlistCheck }
+    },
+    onError: (err, _variables, context) => {
+      console.error('Failed to add to watchlist:', err)
+      if (context?.previousWatchlistCheck) {
+        qc.setQueryData(['watchlist-check', id, profileId], context.previousWatchlistCheck)
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] })
+      qc.invalidateQueries({ queryKey: ['watchlist', profileId] })
+    },
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: () => {
+      if (!id || !profileId) throw new Error('Missing parameters')
+      return userApi.removeFromWatchlist(id, profileId)
+    },
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['watchlist-check', id, profileId] })
+      const previousWatchlistCheck = qc.getQueryData(['watchlist-check', id, profileId])
+      qc.setQueryData(['watchlist-check', id, profileId], {
+        success: true,
+        data: { inWatchlist: false }
+      })
+      return { previousWatchlistCheck }
+    },
+    onError: (err, _variables, context) => {
+      console.error('Failed to remove from watchlist:', err)
+      if (context?.previousWatchlistCheck) {
+        qc.setQueryData(['watchlist-check', id, profileId], context.previousWatchlistCheck)
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] })
+      qc.invalidateQueries({ queryKey: ['watchlist', profileId] })
+    },
+  })
+
+  const [downloading, setDownloading] = useState(false)
+  const [downloadDone, setDownloadDone] = useState(false)
+
+  const [showActionsDropdown, setShowActionsDropdown] = useState(false)
+  const [activeEpisodeDropdownId, setActiveEpisodeDropdownId] = useState<string | null>(null)
+  const [episodeDownloadingMap, setEpisodeDownloadingMap] = useState<Record<string, boolean>>({})
+  const [episodeDownloadDoneMap, setEpisodeDownloadDoneMap] = useState<Record<string, boolean>>({})
 
   // Default selected season to Season 1 if available, otherwise 0
   useEffect(() => {
@@ -80,61 +179,230 @@ export function ContentDetailPage() {
     }
   }, [content])
 
-  const { data: watchlistData } = useQuery({
-    queryKey: ['watchlist-check', id, profileId],
-    queryFn: () => userApi.checkWatchlist(id, profileId),
-    staleTime: 30 * 1000,
-  })
+  // Auto-resume from router state if resumePosition is present
+  useEffect(() => {
+    if (!content) return
+    const resumePosition = navState?.resumePosition
+    const resumeEpisodeId = navState?.resumeEpisodeId
 
-  const { data: similarData } = useQuery({
-    queryKey: ['similar', id, profileId],
-    queryFn: () => recommendationApi.getSimilar(id, profileId),
-    staleTime: 5 * 60 * 1000,
-  })
+    if (resumePosition !== undefined && resumePosition > 0) {
+      // Clear navigation state to prevent auto-resume loops
+      navigate(location.pathname, {
+        replace: true,
+        state: {
+          ...navState,
+          resumePosition: undefined,
+          resumeEpisodeId: undefined,
+        },
+      })
 
-  const { data: providerList } = useQuery({
-    queryKey: ['providers'],
-    queryFn: () => providersApi.list(),
-    staleTime: 60 * 1000,
-  })
+      if (content.type === 'series' && resumeEpisodeId) {
+        // Find the episode and its seasonNumber
+        let foundEpisode: Episode | undefined
+        let foundSeasonNumber: number | undefined
 
-  const { data: continueWatchingData } = useQuery({
-    queryKey: ['continue-watching', profileId],
-    queryFn: () => playbackApi.getContinueWatching(profileId),
-    staleTime: 30 * 1000,
-  })
+        for (const s of sortedSeasons) {
+          const ep = s.episodes.find((e) => e.id === resumeEpisodeId)
+          if (ep) {
+            foundEpisode = ep
+            foundSeasonNumber = s.seasonNumber
+            break
+          }
+        }
 
-  const inWatchlist = watchlistData?.data?.inWatchlist ?? false
+        if (foundEpisode && foundSeasonNumber !== undefined) {
+          handleAutoStream(foundEpisode, foundSeasonNumber, resumePosition)
+        }
+      } else if (content.type === 'movie') {
+        handleAutoStream(undefined, undefined, resumePosition)
+      }
+    }
+  }, [content, navState])
 
-  const addMutation = useMutation({
-    mutationFn: () => userApi.addToWatchlist(id, content?.type ?? 'movie', profileId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] }),
-  })
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (!activeProfile) return <Navigate to="/profiles" replace />
+  if (!id) return <Navigate to="/browse" replace />
 
-  const removeMutation = useMutation({
-    mutationFn: () => userApi.removeFromWatchlist(id, profileId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] }),
-  })
+  async function getOrScrapeManifestUrl(
+    c: any,
+    s3HlsKey?: string | null,
+    episode?: Episode,
+    seasonNumber?: number
+  ): Promise<{ url: string; headers?: Record<string, string> } | null> {
+    if (s3HlsKey) return { url: s3HlsKey }
 
-  const [downloading, setDownloading] = useState(false)
-  const [downloadDone, setDownloadDone] = useState(false)
+    setAutoStreamState({
+      loading: true,
+      episode,
+      seasonNumber,
+      error: undefined,
+      isDownload: true,
+    })
+
+    let cancelled = false
+    cancelAutoStreamRef.current = () => {
+      cancelled = true
+    }
+
+    const req: StreamRequest = {
+      imdbId: c.imdbId ?? undefined,
+      tmdbId: c.tmdbId ?? undefined,
+      type: c.type === 'series' ? 'tv' : 'movie',
+      title: c.title,
+    }
+
+    if (episode && c.type === 'series') {
+      if (seasonNumber !== undefined) {
+        req.season = seasonNumber
+        req.episode = episode.episodeNumber
+      } else {
+        for (const s of sortedSeasons) {
+          const found = s.episodes.find((ep) => ep.id === episode.id)
+          if (found) {
+            req.season = s.seasonNumber
+            req.episode = episode.episodeNumber
+            break
+          }
+        }
+      }
+    }
+
+    try {
+      const result = await providersApi.getFirstStream(req)
+      if (cancelled) return null
+
+      if (result && result.streams.length > 0) {
+        setAutoStreamState({ loading: false })
+        return {
+          url: result.streams[0].url,
+          headers: result.streams[0].headers,
+        }
+      } else {
+        setAutoStreamState({
+          loading: false,
+          episode,
+          seasonNumber,
+          error: 'No working stream found. The content may be unavailable or all providers are down.',
+          isDownload: true,
+        })
+        return null
+      }
+    } catch (err) {
+      if (cancelled) return null
+      setAutoStreamState({
+        loading: false,
+        episode,
+        seasonNumber,
+        error: `Automatic search failed: ${String(err)}`,
+        isDownload: true,
+      })
+      return null
+    }
+  }
 
   async function handleDownload() {
     const c = data?.data
-    if (!c || downloading || downloadDone || !c.s3HlsKey) return
+    if (!c || downloading || downloadDone) return
     setDownloading(true)
     try {
+      const result = await getOrScrapeManifestUrl(c, c.s3HlsKey)
+      if (!result) return
+      const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       await downloadsApi.start({
         contentId: c.id,
         title: c.title,
         contentType: c.type,
         thumbnailUrl: c.s3Thumbnail ?? undefined,
         durationMins: c.durationMins ?? undefined,
-        manifestUrl: c.s3HlsKey,
+        manifestUrl: result.url,
+        customDownloadPath,
+        headers: result.headers,
       })
       setDownloadDone(true)
     } finally {
       setDownloading(false)
+    }
+  }
+
+  async function handleSeriesDownload() {
+    const c = data?.data
+    if (!c || c.type !== 'series') return
+
+    const downloadableEpisodes: { ep: Episode; seasonNum: number }[] = []
+    c.seasons.forEach((season) => {
+      season.episodes.forEach((ep) => {
+        downloadableEpisodes.push({ ep, seasonNum: season.seasonNumber })
+      })
+    })
+
+    if (downloadableEpisodes.length === 0) return
+
+    setDownloading(true)
+    try {
+      const updatedDoneMap = { ...episodeDownloadDoneMap }
+      let allSucceeded = true
+      const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
+      for (const { ep, seasonNum } of downloadableEpisodes) {
+        if (!updatedDoneMap[ep.id]) {
+          const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNum)
+          if (!result) {
+            allSucceeded = false
+            break
+          }
+          try {
+            await downloadsApi.start({
+              contentId: c.id,
+              episodeId: ep.id,
+              title: `${c.title} - S${seasonNum}E${ep.episodeNumber} - ${ep.title}`,
+              contentType: 'series',
+              thumbnailUrl: ep.s3ThumbnailKey || c.s3Thumbnail || undefined,
+              durationMins: ep.durationMins || undefined,
+              manifestUrl: result.url,
+              customDownloadPath,
+              headers: result.headers,
+            })
+            updatedDoneMap[ep.id] = true
+            setEpisodeDownloadDoneMap((prev) => ({ ...prev, [ep.id]: true }))
+          } catch (err) {
+            console.error(`Failed to download episode S${seasonNum}E${ep.episodeNumber}:`, err)
+            allSucceeded = false
+          }
+        }
+      }
+      if (allSucceeded) {
+        setDownloadDone(true)
+      }
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  async function handleEpisodeDownload(ep: Episode, seasonNumber?: number) {
+    const c = data?.data
+    if (!c) return
+    const epId = ep.id
+
+    setEpisodeDownloadingMap((prev) => ({ ...prev, [epId]: true }))
+    try {
+      const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNumber)
+      if (!result) return
+      const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
+      await downloadsApi.start({
+        contentId: c.id,
+        episodeId: epId,
+        title: `${c.title} - S${seasonNumber ?? 1}E${ep.episodeNumber} - ${ep.title}`,
+        contentType: 'series',
+        thumbnailUrl: ep.s3ThumbnailKey || c.s3Thumbnail || undefined,
+        durationMins: ep.durationMins || undefined,
+        manifestUrl: result.url,
+        customDownloadPath,
+        headers: result.headers,
+      })
+      setEpisodeDownloadDoneMap((prev) => ({ ...prev, [epId]: true }))
+    } catch (err) {
+      console.error('Episode download failed:', err)
+    } finally {
+      setEpisodeDownloadingMap((prev) => ({ ...prev, [epId]: false }))
     }
   }
 
@@ -241,11 +509,11 @@ export function ContentDetailPage() {
     )
   }
 
-  if (isError || !data?.data) {
+  if (!content) {
     return (
       <AppLayout>
-        <div className="min-h-screen flex items-center justify-center text-white/60">
-          Content not found.
+        <div className="min-h-screen flex items-center justify-center text-white/50">
+          Content not found
         </div>
       </AppLayout>
     )
@@ -284,7 +552,6 @@ export function ContentDetailPage() {
     if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     return `${m}:${String(s).padStart(2, '0')}`
   }
-  const enabledProviders = (providerList ?? []).filter((p) => p.enabled)
 
   const thumbnail = content.backdropUrl ?? content.s3Thumbnail
 
@@ -377,14 +644,55 @@ export function ContentDetailPage() {
               {inWatchlist ? '✓ In My List' : '+ My List'}
             </button>
 
-            {content.s3HlsKey && (
-              <button
-                onClick={handleDownload}
-                disabled={downloading || downloadDone}
-                className="flex items-center gap-2 font-semibold px-6 py-3 rounded border border-white/40 text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-              >
-                {downloadDone ? '✓ Queued' : downloading ? '...' : '⬇ Download'}
-              </button>
+            {/* 3-dots Actions Dropdown next to + My List */}
+            {content && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowActionsDropdown(!showActionsDropdown)}
+                  className="flex items-center justify-center w-12 h-12 rounded bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
+                  title="Options"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white/70 hover:text-white transition-colors">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                  </svg>
+                </button>
+
+                {showActionsDropdown && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowActionsDropdown(false)}
+                    />
+                    <div className="absolute left-0 mt-2 w-48 rounded bg-km-surface-2/95 backdrop-blur-md border border-white/10 shadow-2xl z-20 overflow-hidden py-1">
+                      {content.type === 'movie' ? (
+                        <button
+                          onClick={() => {
+                            setShowActionsDropdown(false)
+                            handleDownload()
+                          }}
+                          disabled={downloading || downloadDone}
+                          className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
+                        >
+                          <span>{downloadDone ? '✓' : '⬇'}</span>
+                          <span>{downloadDone ? 'Queued' : downloading ? 'Queuing...' : 'Download'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setShowActionsDropdown(false)
+                            handleSeriesDownload()
+                          }}
+                          disabled={downloading || downloadDone}
+                          className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
+                        >
+                          <span>{downloadDone ? '✓' : '⬇'}</span>
+                          <span>{downloadDone ? 'Queued' : downloading ? 'Queuing All...' : 'Download All Seasons'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
@@ -453,10 +761,54 @@ export function ContentDetailPage() {
                         <p className="text-white/50 text-xs mt-0.5 line-clamp-2">{ep.description}</p>
                       )}
                     </div>
-                    <div className="flex-shrink-0">
-                      {ep.durationMins && <span className="text-white/40 text-xs">{ep.durationMins}m</span>}
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      {ep.durationMins && <span className="text-white/40 text-xs mr-2">{ep.durationMins}m</span>}
+                      
+                      <span className="text-white/20 group-hover:text-white/60 transition-colors">▶</span>
+                      
+                      {true && (
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setActiveEpisodeDropdownId(activeEpisodeDropdownId === ep.id ? null : ep.id)
+                            }}
+                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-white/50 hover:text-white"
+                            title="Episode Options"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                              <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                            </svg>
+                          </button>
+
+                          {activeEpisodeDropdownId === ep.id && (
+                            <>
+                              <div 
+                                className="fixed inset-0 z-10" 
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActiveEpisodeDropdownId(null)
+                                }}
+                              />
+                              <div className="absolute right-0 mt-1 w-36 rounded bg-km-surface-2 shadow-2xl z-20 overflow-hidden py-1 border border-white/10">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setActiveEpisodeDropdownId(null)
+                                    handleEpisodeDownload(ep, season?.seasonNumber)
+                                  }}
+                                  disabled={episodeDownloadingMap[ep.id] || episodeDownloadDoneMap[ep.id]}
+                                  className="w-full text-left px-3 py-2 text-xs font-semibold text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                                >
+                                  <span>{episodeDownloadDoneMap[ep.id] ? '✓' : '⬇'}</span>
+                                  <span>{episodeDownloadDoneMap[ep.id] ? 'Queued' : episodeDownloadingMap[ep.id] ? 'Queuing...' : 'Download'}</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-white/20 group-hover:text-white/60 transition-colors">▶</span>
                   </div>
                 ))}
               </div>
@@ -506,7 +858,20 @@ export function ContentDetailPage() {
                 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => handleAutoStream(autoStreamState.episode, autoStreamState.seasonNumber, autoStreamState.resumeAtSeconds)}
+                    onClick={() => {
+                      if (autoStreamState.isDownload) {
+                        setAutoStreamState({ loading: false })
+                        if (autoStreamState.episode) {
+                          handleEpisodeDownload(autoStreamState.episode, autoStreamState.seasonNumber)
+                        } else if (content.type === 'series') {
+                          handleSeriesDownload()
+                        } else {
+                          handleDownload()
+                        }
+                      } else {
+                        handleAutoStream(autoStreamState.episode, autoStreamState.seasonNumber, autoStreamState.resumeAtSeconds)
+                      }
+                    }}
                     className="px-6 py-2 rounded-full bg-white text-black font-semibold hover:bg-white/90 text-xs transition-colors"
                   >
                     Retry Search

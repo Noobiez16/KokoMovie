@@ -136,6 +136,7 @@ export interface HistoryItem {
   completedAt: string | null
   watchedAt: string
   ttl: number
+  episodeId?: string | null
 }
 
 const HISTORY_TTL_SECS = 90 * 24 * 60 * 60 // 90 days

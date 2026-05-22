@@ -23,7 +23,7 @@ process.stderr?.on?.('error', (err: NodeJS.ErrnoException) => {
 
 // Register offline:// before app is ready — required for privileged schemes
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'offline', privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
+  { scheme: 'offline', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ])
 
 const isDev = !app.isPackaged || process.env['NODE_ENV'] === 'development'
@@ -116,8 +116,8 @@ app.whenReady().then(async () => {
               "default-src 'self' 'unsafe-inline'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
               "style-src 'self' 'unsafe-inline' https:",
-              "connect-src 'self' http://localhost:* ws://localhost:* https:",
-              "media-src 'self' blob: https: http://localhost:*",
+              "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
+              "media-src 'self' blob: https: http://localhost:* offline:",
               "img-src 'self' data: blob: https:",
               "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com",
               "font-src 'self' data: https:",
@@ -126,8 +126,8 @@ app.whenReady().then(async () => {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
               "style-src 'self' 'unsafe-inline' https:",
-              "media-src 'self' blob: https: http: http://localhost:*",
-              "connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https:",
+              "media-src 'self' blob: https: http: http://localhost:* offline:",
+              "connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https: offline:",
               "img-src 'self' data: blob: https:",
               "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
               "font-src 'self' data: https:",
@@ -159,16 +159,38 @@ app.whenReady().then(async () => {
 
   // Serve encrypted offline segments via offline://downloadId/seg_N.enc
   protocol.handle('offline', (request) => {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        },
+      })
+    }
+
     const url = new URL(request.url)
     const downloadId = url.hostname
     const filename = url.pathname.slice(1) // strip leading /
     const decrypted = decryptLocalSegment(downloadId, filename)
     if (!decrypted) {
-      return new Response(null, { status: 404 })
+      return new Response(null, {
+        status: 404,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
     }
     return new Response(new Uint8Array(decrypted), {
       status: 200,
-      headers: { 'Content-Type': 'video/mp2t', 'Content-Length': String(decrypted.length) },
+      headers: {
+        'Content-Type': 'video/mp2t',
+        'Content-Length': String(decrypted.length),
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      },
     })
   })
 

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { catalogApi, type ContentSummary } from '../api/catalog'
 import { recommendationApi } from '../api/recommendation'
+import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { HeroBanner } from '../components/catalog/HeroBanner'
 import { ContentRow } from '../components/catalog/ContentRow'
@@ -26,6 +27,12 @@ export function BrowsePage() {
     queryKey: ['recommendations', profileId],
     queryFn: () => recommendationApi.getHomeRows(profileId),
     staleTime: 2 * 60 * 1000,
+  })
+
+  const { data: cwData } = useQuery({
+    queryKey: ['continue-watching', profileId],
+    queryFn: () => playbackApi.getContinueWatching(profileId),
+    refetchOnWindowFocus: 'always',
   })
 
   if (isLoading) {
@@ -54,6 +61,26 @@ export function BrowsePage() {
   const trending: ContentSummary[] = homeData?.trending ?? []
   const featured = homeData?.featured as import('../api/catalog').ContentDetail | null | undefined
 
+  const cwItems = cwData?.data ?? []
+  const mappedCw = cwItems.map((item) => ({
+    id: item.contentId,
+    title: item.title,
+    type: item.type,
+    releaseYear: item.releaseYear,
+    s3Thumbnail: item.s3Thumbnail,
+    backdropUrl: item.backdropUrl,
+    rating: null,
+    imdbScore: null,
+    durationMins: null,
+    imdbId: null,
+    tmdbId: null,
+    planMinimum: 'basic',
+    // Custom progress properties processed by ContentCard
+    positionSeconds: item.positionSeconds,
+    durationSeconds: item.durationSeconds,
+    episodeId: item.episodeId,
+  })) as unknown as ContentSummary[]
+
   const hasContent = featured || trending.length > 0 || (homeData?.rows?.length ?? 0) > 0
 
   if (!hasContent) {
@@ -81,6 +108,13 @@ export function BrowsePage() {
 
       {/* Content rows */}
       <div className="pt-6 pb-12">
+        {mappedCw.length > 0 && (
+          <ContentRow
+            title="Continue Watching"
+            items={mappedCw}
+          />
+        )}
+
         {trending.length > 0 && (
           <ContentRow
             title="Trending Now"

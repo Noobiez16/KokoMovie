@@ -35,6 +35,10 @@ export interface WatchlistItem {
   contentId: string
   addedAt: string
   contentType: string
+  title?: string
+  s3Thumbnail?: string | null
+  backdropUrl?: string | null
+  releaseYear?: number | null
 }
 
 export interface HistoryItem {
@@ -47,6 +51,7 @@ export interface HistoryItem {
   durationSeconds: number
   completedAt: string | null
   watchedAt: string
+  episodeId?: string | null
 }
 
 export interface Preferences {

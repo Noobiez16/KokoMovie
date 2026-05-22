@@ -334,3 +334,95 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 **DO NOT:**
 - Replace the TTL-aware cache with a plain boolean `Map` — transient failures would permanently blacklist legitimate CDN hosts.
 - Set the TTL so long (e.g., hours) that a recovered CDN still gets blocked for the entire session.
+
+---
+
+## DN-021: HTTP Keep-Alive Connection and HLS.js Buffer Space Optimization
+
+**Date:** 2026-05-21  
+**Area:** `client/src/main/ipc/providers.ts`, `client/src/renderer/components/player/VideoPlayer.tsx`  
+**Symptom:** Constant `bufferStalledError` / `mediaError` stalls in the renderer console (video stops playing and buffers constantly) despite high bandwidth (e.g., 300 Mbps download).  
+**Root cause:**  
+1. **TCP Handshake Overhead:** Fetching HLS segment chunks (`.ts` / `.mp4` chunks) via `fetchNode` without persistent HTTP/HTTPS connections created a new TCP connection (and TLS handshake) for every single segment. This caused request queues to stall and delay chunk delivery.  
+2. **Insufficient Buffer Size:** The default Hls.js buffer capacity (30MB / 30 seconds max length) was too low to absorb temporary network or proxy latency spikes, causing the buffer to run dry frequently.  
+**Fix:**  
+1. **Persistent Keep-Alive Agent:** Implemented global persistent `http.Agent` and `https.Agent` with `keepAlive: true`, `maxSockets: 64`, and `keepAliveMsecs: 30000` inside `providers.ts` to reuse TCP connections for all HTTP-based segment proxying.  
+2. **Buffer capacity increased:** Configured Hls.js client properties to allow a larger cushion: `maxBufferLength: 60`, `maxMaxBufferLength: 120`, and `maxBufferSize: 180 * 1024 * 1024` (180MB of memory buffer), allowing the player to cache ahead much more aggressively.  
+
+**DO NOT:**
+- Remove the persistent `httpAgent` or `httpsAgent` configurations from segment fetch requests.
+- Reduce the Hls.js buffer lengths or sizes below high-capacity values, as it will reintroduce buffer stalls on standard networks.
+
+---
+
+## DN-022: Case-Insensitive Header Merging in Proxying & Downloading
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/providers.ts`, `client/src/main/ipc/download.ts`  
+**Symptom:** Cloudflare 403 Forbidden errors when loading media segments or downloading. Duplicate, conflict-cased headers (e.g. `Referer` vs `referer` or `User-Agent` vs `user-agent`) sent in the same request, leading to CDN blocking.  
+**Root cause:** Standard object spreads (`{ ...base, ...overrides }`) do not merge keys with different case variations, resulting in duplicate headers with inconsistent casing being transmitted.  
+**Fix:** Implemented `mergeHeadersCaseInsensitive(base, overrides)` to clean up headers and merge them using lowercased keys, ensuring uniqueness of keys.  
+**DO NOT:**
+- Use standard JavaScript object spread operators when overriding or merging stream headers where casing conflicts might exist.
+
+---
+
+## DN-023: Reconstructing Original URLs and Protocols in Stream Proxies and Downloader
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/providers.ts`, `client/src/main/ipc/download.ts`  
+**Symptom:** Manifest rewriting fails or streams stay stuck loading when original files use HTTP instead of HTTPS. Downloader incorrectly downloads stream segments or fails to find playlists.  
+**Root cause:** The proxy rewrote absolute paths and full URLs to proxy endpoints but did not include the original stream protocol (HTTP vs HTTPS). The downloader and proxy then defaulted all requests to HTTPS (`https://`), causing socket connection timeouts or errors on HTTP streams.  
+**Fix:** Encoded the original protocol as part of the proxy path `/proxy/${proto}/${rest}`. Updated the downloader's `normalizeUrl` and the stream proxy to parse the protocol from this prefix to reconstruct the original URLs correctly.  
+**DO NOT:**
+- Hardcode `https://` when reconstructing proxy paths or manifest locations, as some providers stream over standard `http://`.
+
+---
+
+## DN-024: Target 1080p Resolution First Using Widescreen Normalization
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/download.ts`  
+**Symptom:** Movies or episodes download in lower quality (e.g. 720p or 480p) despite 1080p variant availability, or widescreen resolutions (such as `1920x800` or `1920x816`) are filtered out or skipped.  
+**Root cause:** Simple height checks (e.g. `height === 1080`) failed to recognize widescreen/cinema 1080p stream heights. Additionally, the master HLS playlist parser simply chose the highest bandwidth variant, which did not guarantee 1080p resolution.  
+**Fix:** Implemented `getVariantScore` using `getStandardHeight` to correctly normalize aspect ratios (e.g. height >= 800 maps to 1080p). Built a comparator to prioritize standard height 1080p variants over others, falling back to the highest available resolution/bandwidth if 1080p is not present in the master manifest.  
+**DO NOT:**
+- Use strict height checks for quality resolution identification. Always use `getStandardHeight(width, height)` for aspect-ratio-safe comparisons.
+
+---
+
+## DN-025: Auto-Resume of Interrupted and Pending Downloads on Application Startup
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/download.ts`  
+**Symptom:** When the application is closed or crashes during an active download, the download gets stuck in `'downloading'` state indefinitely and never resumes.  
+**Root cause:** Active downloads were flagged as `'downloading'` in the SQLite database but there was no startup handler to reset and restart these active queues when the application was reopened.  
+**Fix:** Updated `registerDownloadIpc` to reset all rows with status `'downloading'` back to `'pending'` on startup, and invoked `processQueue()` once to start the download queue automatically.  
+**DO NOT:**
+- Leave active download records in `'downloading'` status on app start, or require user manual action to resume interrupted downloads.
+
+---
+
+## DN-026: Do not strip `cookie` in segment fetching
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/download.ts`  
+**Symptom:** Downloads fail or get stuck around 8%.  
+**Root cause:** `fetchBuffer` stripped the `cookie` and `accept-encoding` headers. Since CDNs require token cookies for segment authentication and sometimes return compressed data (`gzip` / `deflate`), omitting cookies caused authentication blocks, and lack of decompression caused corrupt downloads or failures.  
+**Fix:** Kept the cookie header and allowed `Accept-Encoding: gzip, deflate`, implementing synchronous decompression via `zlib` if responses are encoded.  
+**DO NOT:**
+- Strip cookies or encoding headers from segment requests, and always support gzip/deflate decoding in the downloader.
+
+---
+
+## DN-027: Do not update database rows after cancellation/deletion to avoid re-creation
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/download.ts`  
+**Symptom:** Cancelled downloads remain in the list as "Play and Delete" or "Cancelled / Failed" cards, instead of being removed entirely.  
+**Root cause:** When a user cancelled, the asynchronous downloader's catch block caught the aborted request error and wrote the status back to `'cancelled'` or `'error'` in the database after the rows were deleted, effectively recreating or leaving them.  
+**Fix:** Updated the `download:cancel` IPC handler to delete the row and clean up files immediately. Modified the downloader's catch block to skip database writes entirely if the cancellation signal was active, preventing residual rows from being updated.  
+**DO NOT:**
+- Write status updates to the database from the downloader catch block if the download was cancelled or deleted.
+
+

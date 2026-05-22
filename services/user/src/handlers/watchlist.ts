@@ -12,6 +12,59 @@ function meta(request: FastifyRequest) {
   return { requestId: request.id, timestamp: new Date().toISOString() }
 }
 
+interface CatalogContentMetadata {
+  title: string
+  type: string
+  s3Thumbnail: string | null
+  backdropUrl: string | null
+  releaseYear: number | null
+}
+
+const catalogCache = new Map<string, CatalogContentMetadata>()
+
+async function getCatalogMetadata(contentId: string, authorizationHeader: string | undefined): Promise<CatalogContentMetadata | null> {
+  if (catalogCache.has(contentId)) {
+    return catalogCache.get(contentId)!
+  }
+
+  try {
+    const headers: Record<string, string> = {}
+    if (authorizationHeader) {
+      headers['Authorization'] = authorizationHeader
+    }
+    const response = await fetch(`http://localhost:3002/catalog/content/${contentId}`, {
+      headers,
+    })
+    if (!response.ok) {
+      return null
+    }
+    const json = (await response.json()) as {
+      success: boolean
+      data?: {
+        title: string
+        type: string
+        s3Thumbnail: string | null
+        backdropUrl: string | null
+        releaseYear: number | null
+      }
+    }
+    if (json.success && json.data) {
+      const metadata: CatalogContentMetadata = {
+        title: json.data.title,
+        type: json.data.type,
+        s3Thumbnail: json.data.s3Thumbnail ?? null,
+        backdropUrl: json.data.backdropUrl ?? null,
+        releaseYear: json.data.releaseYear ?? null,
+      }
+      catalogCache.set(contentId, metadata)
+      return metadata
+    }
+  } catch (error) {
+    console.error('Error fetching catalog metadata in user service:', error)
+  }
+  return null
+}
+
 export async function getWatchlistHandler(request: FastifyRequest, reply: FastifyReply) {
   const req = request as AuthenticatedRequest
   if (!req.profileId) {
@@ -19,7 +72,21 @@ export async function getWatchlistHandler(request: FastifyRequest, reply: Fastif
   }
 
   const items = await getWatchlist(req.profileId)
-  return reply.send({ success: true, data: items, meta: meta(request) })
+  
+  const enriched = await Promise.all(
+    items.map(async (item) => {
+      const metaData = await getCatalogMetadata(item.contentId, request.headers.authorization)
+      return {
+        ...item,
+        title: metaData?.title ?? 'Unknown Content',
+        s3Thumbnail: metaData?.s3Thumbnail ?? null,
+        backdropUrl: metaData?.backdropUrl ?? null,
+        releaseYear: metaData?.releaseYear ?? null,
+      }
+    })
+  )
+
+  return reply.send({ success: true, data: enriched, meta: meta(request) })
 }
 
 const addSchema = z.object({ contentType: z.enum(['movie', 'series']).default('movie') })

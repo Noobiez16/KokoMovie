@@ -26,6 +26,8 @@ export interface StartDownloadOpts {
   durationMins?: number
   manifestUrl: string
   drmKeyId?: string
+  customDownloadPath?: string
+  headers?: Record<string, string>
 }
 
 export const downloadsApi = {

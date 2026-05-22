@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
@@ -20,6 +20,38 @@ export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [avatarUploading, setAvatarUploading] = useState(false)
+  const [downloadPath, setDownloadPath] = useState('')
+  const [defaultDownloadPath, setDefaultDownloadPath] = useState('')
+
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.getDefaultDownloadsDir().then((dir) => {
+        setDefaultDownloadPath(dir)
+        const custom = localStorage.getItem('custom_download_path')
+        setDownloadPath(custom || dir)
+      })
+    }
+  }, [])
+
+  const handleBrowseFolder = async () => {
+    if (!window.electronAPI) return
+    const dir = await window.electronAPI.selectDirectory()
+    if (dir) {
+      setDownloadPath(dir)
+      localStorage.setItem('custom_download_path', dir)
+      setSaveStatus('saved')
+      setTimeout(() => setSaveStatus('idle'), 2000)
+    }
+  }
+
+  const handleManualPathChange = (val: string) => {
+    setDownloadPath(val)
+    if (val.trim()) {
+      localStorage.setItem('custom_download_path', val.trim())
+    } else {
+      localStorage.removeItem('custom_download_path')
+    }
+  }
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (!activeProfile) return <Navigate to="/profiles" replace />
@@ -206,6 +238,48 @@ export function SettingsPage() {
               </div>
             </section>
 
+            {/* Downloads Settings */}
+            <section className="mb-8 space-y-4 pt-6 border-t border-white/5">
+              <h2 className="text-white/40 text-xs uppercase tracking-widest mb-4">Downloads</h2>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-white text-sm">Download Location</label>
+                  {downloadPath !== defaultDownloadPath && (
+                    <button
+                      onClick={() => {
+                        setDownloadPath(defaultDownloadPath)
+                        localStorage.removeItem('custom_download_path')
+                        setSaveStatus('saved')
+                        setTimeout(() => setSaveStatus('idle'), 2000)
+                      }}
+                      className="text-violet-400 hover:text-violet-300 text-xs transition-colors"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={downloadPath}
+                    onChange={(e) => handleManualPathChange(e.target.value)}
+                    className="bg-km-card border border-white/20 text-white text-sm rounded px-3 py-1.5 flex-1 focus:border-violet-500 focus:outline-none transition-colors"
+                    placeholder="Default download folder"
+                  />
+                  <button
+                    onClick={handleBrowseFolder}
+                    className="bg-white/10 hover:bg-white/20 text-white text-sm font-semibold px-4 py-1.5 rounded transition-colors active:scale-95 duration-200"
+                  >
+                    Browse...
+                  </button>
+                </div>
+                <p className="text-white/30 text-[11px] leading-relaxed">
+                  All downloaded movies/series segments will be saved to this folder.
+                </p>
+              </div>
+            </section>
+
             {saveStatus === 'saved' && (
               <p className="text-green-400/80 text-sm mb-4">Preferences saved.</p>
             )}
@@ -216,7 +290,7 @@ export function SettingsPage() {
         )}
 
         {/* GDPR */}
-        <section className="border-t border-white/10 pt-8">
+        <section className="pt-8">
           <h2 className="text-white/40 text-xs uppercase tracking-widest mb-4">Privacy</h2>
           <button
             onClick={handleExport}

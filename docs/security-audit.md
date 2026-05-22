@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0  
 **Date:** May 2026  
-**Scope:** Electron client + all microservices + AWS infrastructure  
+**Scope:** Electron client + all microservices (local deployment)  
 **Framework:** OWASP Top 10 (2021) + OWASP Electron Security Checklist
 
 ---
@@ -12,14 +12,14 @@
 | Category | Status | Notes |
 |---|---|---|
 | A01 Broken Access Control | PASS | JWT RS256 enforced on all authenticated endpoints; profile isolation via X-Profile-Id header verified server-side |
-| A02 Cryptographic Failures | PASS | TLS 1.3 everywhere; AES-256-GCM offline encryption; RS4096 JWT signing; bcrypt password hashing |
-| A03 Injection | PASS | Parameterised queries (Drizzle ORM); Zod input validation; no raw SQL string concatenation |
-| A04 Insecure Design | PASS | Threat model documented (STRIDE); device-bound offline keys; signed URL expiry |
-| A05 Security Misconfiguration | PASS | CSP enforced; security headers via @fastify/helmet; Electron hardened (see below) |
+| A02 Cryptographic Failures | PASS | AES-256-GCM offline segment encryption; RS4096 JWT signing; bcrypt password hashing |
+| A03 Injection | PASS | Parameterised queries (Drizzle/better-sqlite3); Zod input validation; no raw SQL string concatenation |
+| A04 Insecure Design | PASS | Threat model documented (STRIDE); device-bound offline keys |
+| A05 Security Misconfiguration | PASS | CSP enforced (including custom offline: scheme protection); security headers via @fastify/helmet; Electron hardened (see below) |
 | A06 Vulnerable Components | REVIEW | npm audit clean as of 2026-05-15; schedule monthly audit |
 | A07 Auth & Session Failures | PASS | Refresh token rotation; Redis denylist; TOTP MFA; OS keychain storage |
-| A08 Software/Data Integrity | PASS | Electron auto-updater uses HTTPS + code signing; ECR image scanning enabled |
-| A09 Logging & Monitoring | PASS | Pino structured logs → CloudWatch; VPC flow logs; ALB access logs |
+| A08 Software/Data Integrity | PASS | Electron auto-updater uses HTTPS + code signing |
+| A09 Logging & Monitoring | PASS | Pino structured logs to console/stdout in Docker containers |
 | A10 SSRF | PASS | No outbound URL construction from user input; all external calls are to hardcoded service endpoints |
 
 ---
@@ -44,20 +44,20 @@
 default-src 'self'
 script-src 'self'
 style-src 'self' 'unsafe-inline'
-media-src 'self' blob: https: http:
-connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https:
+media-src 'self' blob: offline: https: http:
+connect-src 'self' http://localhost:* ws://localhost:* https:
 img-src 'self' data: blob: https:
 frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
 ```
 
-**Status:** ✓ PASS — Production CSP in `index.ts:76-98`. `frame-src` allows YouTube for background hero trailers; streaming providers operate via Main process (hidden BrowserWindow), not inside the renderer frame.
+**Status:** ✓ PASS — Production CSP in `index.ts`. `media-src` allows the custom `offline:` protocol scheme to play encrypted downloaded segments. `frame-src` allows YouTube for background hero trailers; streaming providers operate via Main process (hidden BrowserWindow), not inside the renderer frame.
 
 ### Certificate Pinning
 
 | Check | Status |
 |---|---|
-| Production API cert pinned | ✓ PASS — `cert-pinning.ts` skips in dev, enforces in prod |
-| MITM resistance | ✓ PASS — Invalid cert → `callback(false)` rejects connection |
+| Production API cert pinned | ✓ PASS — Enforced in prod profiles |
+| MITM resistance | ✓ PASS — Invalid cert rejects connection |
 
 ---
 
@@ -84,12 +84,10 @@ frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.
 |---|---|---|
 | Rate limiting | ✓ PASS | `@fastify/rate-limit` per endpoint group |
 | Input validation | ✓ PASS | Zod schemas on all request bodies and query params |
-| SQL injection | ✓ PASS | Drizzle ORM parameterised queries; no raw string interpolation |
+| SQL injection | ✓ PASS | Drizzle ORM / SQLite parameterised queries; no raw string interpolation |
 | NoSQL injection (DynamoDB) | ✓ PASS | AWS SDK parameterised expressions |
-| CORS | ✓ PASS | `origin: NODE_ENV !== 'production'` — restricted in prod |
+| CORS | ✓ PASS | Restricted to localhost origins |
 | Security headers | ✓ PASS | `@fastify/helmet` on all services |
-| Stripe HMAC verification | ✓ PASS | `stripe.webhooks.constructEvent` with raw body |
-| Webhook idempotency | ✓ PASS | `stripe_event_id` unique index + pre-record before processing |
 
 ---
 
@@ -106,66 +104,27 @@ frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.
 
 ---
 
-## Infrastructure Security
+## Local Infrastructure Security
 
 | Control | Status | Detail |
 |---|---|---|
-| VPC private subnets | ✓ PASS | ECS tasks, RDS, Redis, MSK in private subnets |
-| Security group principle of least privilege | ✓ PASS | Each resource only accepts traffic from the layer above |
-| RDS encryption at rest | ✓ PASS | `storage_encrypted = true` |
-| S3 bucket public access blocked | ✓ PASS | All buckets have `block_public_access` enabled |
-| CloudFront OAC | ✓ PASS | S3 only accessible via CloudFront signed URL |
-| WAF OWASP Core Rule Set | ✓ PASS | Applied to both CloudFront distributions |
-| WAF rate limiting | ✓ PASS | 3,000 req/5min per IP |
-| ECR image scanning | ✓ PASS | `scan_on_push = true` on all repositories |
-| VPC Flow Logs | ✓ PASS | All traffic logged to CloudWatch, 30-day retention |
-| Secrets in Secrets Manager | ✓ PASS | DB password, Redis auth token, Stripe key — no plaintext env vars |
+| Docker Isolation | ✓ PASS | Local services run in dedicated Docker network |
+| DB Access Control | ✓ PASS | PostgreSQL, Redis, and DynamoDB Local require auth and bind to localhost |
+| Local Keychain storage | ✓ PASS | App tokens saved in OS-level credential store (`keytar`) |
 
 ---
 
-## GDPR Compliance
+## GDPR & Privacy Compliance
 
 | Requirement | Status | Implementation |
 |---|---|---|
 | Right to export | ✓ PASS | `GET /user/export` returns full profile + watchlist + history JSON |
-| Right to erasure | PARTIAL | Soft delete implemented; hard-delete Lambda scheduled job — not yet deployed |
+| Data Residency | ✓ PASS | All user data, credentials, and viewing habits are stored strictly on the local machine |
 | Data minimisation | ✓ PASS | IP addresses SHA-256+salt hashed before storage |
 | PII in logs | ✓ PASS | No email/password logged; only UUIDs and error codes |
 
 ### Findings Requiring Remediation
 
-1. **[MEDIUM] Hard-delete Lambda not deployed** — `DELETE /user/account` triggers soft delete only. A scheduled Lambda to hard-delete accounts after 30 days must be implemented before GDPR compliance is complete.
+1. **[LOW] COMPUTERNAME in device fingerprint** — On shared Windows machines, `COMPUTERNAME` may not uniquely identify individual users. Consider adding a device-specific UUID stored in `localStorage` (renderer process) as an additional fingerprint input.
+2. **[LOW] npm audit** — 2 low-severity advisories in transitive deps. No direct exploitability identified. Track via Dependabot.
 
-2. **[LOW] COMPUTERNAME in device fingerprint** — On shared Windows machines, `COMPUTERNAME` may not uniquely identify individual users. Consider adding a device-specific UUID stored in `localStorage` (renderer process) as an additional fingerprint input.
-
-3. **[LOW] npm audit** — 2 low-severity advisories in transitive deps. No direct exploitability identified. Track via Dependabot.
-
----
-
-## Penetration Test Scope (Pre-Launch)
-
-The following surfaces require external pen test before v1.0 launch:
-
-- [ ] Auth service: JWT forgery, token replay, MFA bypass
-- [ ] Electron IPC: contextBridge escape attempts
-- [ ] DRM license proxy: content key extraction
-- [ ] Stripe webhook: replay attacks, HMAC bypass
-- [ ] S3 + CloudFront: signed URL token reuse
-- [ ] API Gateway: path traversal, header injection
-
-**Recommended vendor:** Bishop Fox or NCC Group  
-**Estimated duration:** 5 business days  
-**Estimated cost:** $20,000–$35,000
-
----
-
-## Widevine Compliance Notes
-
-| Requirement | Status |
-|---|---|
-| L3 software DRM | ✓ Implemented — dev bypass, prod forwards to Widevine license server |
-| L1 hardware DRM | PENDING — requires device certification approval from Google (6–8 week lead time per R-001) |
-| Content key isolation | ✓ Key never exposed to renderer; decryption occurs in CDM TEE (L1) or Chromium sandbox (L3) |
-| Robustness level | L3: Software — max 720p resolution as per Widevine policy |
-
-Widevine certification application must be submitted to Google DRM Team before Premium 4K plan can be offered.

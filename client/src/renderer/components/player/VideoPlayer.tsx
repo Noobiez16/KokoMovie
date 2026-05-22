@@ -547,9 +547,9 @@ export function VideoPlayer({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 30,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 60 * 1024 * 1024,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 180 * 1024 * 1024,
         startPosition: resumeAtSeconds && resumeAtSeconds > 0 ? resumeAtSeconds : -1,
         startLevel: -1,
         abrEwmaFastLive: 3.0,
@@ -671,6 +671,18 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
+    // Sync initial states from video element on mount or url change
+    setIsPlaying(!video.paused)
+    setIsMuted(video.muted)
+    setVolume(video.volume)
+    setCurrentTime(video.currentTime)
+    setDuration(isNaN(video.duration) ? 0 : video.duration)
+    if (video.buffered.length > 0) {
+      setBuffered(video.buffered.end(video.buffered.length - 1))
+    } else {
+      setBuffered(0)
+    }
+
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
     const onTimeUpdate = () => {
@@ -683,13 +695,15 @@ export function VideoPlayer({
         setShowNextEpisode(true)
       }
     }
-    const onDurationChange = () => setDuration(video.duration || 0)
+    const onDurationChange = () => setDuration(isNaN(video.duration) ? 0 : video.duration)
+    const onLoadedMetadata = () => setDuration(isNaN(video.duration) ? 0 : video.duration)
     const onVolumeChange = () => { setIsMuted(video.muted); setVolume(video.volume) }
 
     video.addEventListener('play', onPlay)
     video.addEventListener('pause', onPause)
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
+    video.addEventListener('loadedmetadata', onLoadedMetadata)
     video.addEventListener('volumechange', onVolumeChange)
 
     return () => {
@@ -697,6 +711,7 @@ export function VideoPlayer({
       video.removeEventListener('pause', onPause)
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('durationchange', onDurationChange)
+      video.removeEventListener('loadedmetadata', onLoadedMetadata)
       video.removeEventListener('volumechange', onVolumeChange)
     }
   }, [nextEpisode, activeStreamUrl])
@@ -786,12 +801,6 @@ export function VideoPlayer({
     if (!document.fullscreenElement) containerRef.current?.requestFullscreen()
     else document.exitFullscreen()
   }
-  const handlePiP = async () => {
-    const video = videoRef.current
-    if (!video) return
-    if (document.pictureInPictureElement) await document.exitPictureInPicture()
-    else await video.requestPictureInPicture().catch(() => {})
-  }
 
   // HLS error state
   if (hlsError) {
@@ -871,6 +880,7 @@ export function VideoPlayer({
         autoPlay
         crossOrigin="anonymous"
         onClick={handlePlayPause}
+        disablePictureInPicture
       >
         <SubtitleTracks
           externalSubs={externalSubs}
@@ -909,7 +919,6 @@ export function VideoPlayer({
           onSubtitleChange={handleSubtitleChange}
           onSubtitleSizeChange={setSubtitleSize}
           onFullscreen={handleFullscreen}
-          onPiP={handlePiP}
           introEndSecs={episode?.introEndSecs ?? content.introEndSecs ?? null}
           creditsStartSecs={episode?.creditsStartSecs ?? content.creditsStartSecs ?? null}
           sources={sources}

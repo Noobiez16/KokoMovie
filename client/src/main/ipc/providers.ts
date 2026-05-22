@@ -10,6 +10,19 @@ import * as zlib from 'zlib'
 import { setMaxListeners } from 'events'
 import { lookup } from 'dns'
 
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 64,
+  keepAliveMsecs: 30000,
+})
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 64,
+  keepAliveMsecs: 30000,
+  rejectUnauthorized: false,
+})
+
 function logExtraction(msg: string) {
   try {
     const logPath = join(app.getPath('userData'), 'extraction.log')
@@ -119,6 +132,7 @@ function fetchNode(
           headers: reqHeaders,
           timeout: 15000,
           rejectUnauthorized: false,
+          agent: isHttps ? httpsAgent : httpAgent,
         }
 
         const req = reqModule.request(currentUrl, reqOpts, (res) => {
@@ -222,6 +236,7 @@ function streamSegment(
       headers: reqHeaders,
       timeout: 30000,
       rejectUnauthorized: false,
+      agent: isHttps ? httpsAgent : httpAgent,
     }, (clientRes) => {
       if (req.destroyed) {
         clientReq.destroy()
@@ -332,6 +347,32 @@ function srtToVtt(raw: string): string {
   return text
 }
 
+export function mergeHeadersCaseInsensitive(
+  base: Record<string, string | number | boolean>,
+  override: Record<string, string | number | boolean>
+): Record<string, string> {
+  const result: Record<string, string> = {}
+  const keyMap = new Map<string, string>()
+
+  for (const [k, v] of Object.entries(base)) {
+    const lowerK = k.toLowerCase()
+    result[k] = String(v)
+    keyMap.set(lowerK, k)
+  }
+
+  for (const [k, v] of Object.entries(override)) {
+    const lowerK = k.toLowerCase()
+    const existingKey = keyMap.get(lowerK)
+    if (existingKey) {
+      delete result[existingKey]
+    }
+    result[k] = String(v)
+    keyMap.set(lowerK, k)
+  }
+
+  return result
+}
+
 export async function startStreamProxy(): Promise<void> {
   return new Promise((resolve) => {
     const server = http.createServer(async (req, res) => {
@@ -353,8 +394,17 @@ export async function startStreamProxy(): Promise<void> {
         return
       }
 
-      // Reconstruct original HTTPS URL from path
-      let realUrl = 'https://' + req.url.slice('/proxy/'.length)
+      // Reconstruct original HTTPS/HTTP URL from path
+      const pathClean = req.url.slice('/proxy/'.length)
+      let realUrl = ''
+      if (pathClean.startsWith('http/') || pathClean.startsWith('https/')) {
+        const firstSlash = pathClean.indexOf('/')
+        const proto = pathClean.slice(0, firstSlash)
+        const rest = pathClean.slice(firstSlash + 1)
+        realUrl = `${proto}://${rest}`
+      } else {
+        realUrl = 'https://' + pathClean
+      }
       realUrl = realUrl.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
       logExtraction(`[Proxy] Fetching: ${realUrl}`)
 
@@ -367,26 +417,36 @@ export async function startStreamProxy(): Promise<void> {
         }
 
         const host = urlObj.host
-        const streamHeaders = { ...getStreamHeaders(host) }
+        const baseHeaders = { ...getStreamHeaders(host) }
+        let streamHeaders = { ...baseHeaders }
 
         // Extract and inject headers from the URL's query parameters if present (e.g. VidLink headers)
         const qHeaders = urlObj.searchParams.get('headers')
         if (qHeaders) {
           try {
             const parsed = JSON.parse(qHeaders)
-            for (const [k, v] of Object.entries(parsed)) {
-              // Only set if not already present in the captured headers to avoid decoy headers!
-              const lowerK = k.toLowerCase()
-              const existingKey = Object.keys(streamHeaders).find(ex => ex.toLowerCase() === lowerK)
-              if (!existingKey) {
-                streamHeaders[k] = String(v)
+            const hasHostHeaders = streamHeadersRegistry.has(host)
+            if (!hasHostHeaders) {
+              // If there are no host-specific headers in the registry, let qHeaders override everything case-insensitively
+              streamHeaders = mergeHeadersCaseInsensitive(baseHeaders, parsed)
+            } else {
+              // If there are host-specific headers, only add missing ones (to avoid decoy headers)
+              for (const [k, v] of Object.entries(parsed)) {
+                const lowerK = k.toLowerCase()
+                const existingKey = Object.keys(streamHeaders).find(ex => ex.toLowerCase() === lowerK)
+                if (!existingKey) {
+                  streamHeaders[k] = String(v)
+                }
               }
             }
           } catch {}
         }
 
+        // Deduplicate and clean headers case-insensitively
+        streamHeaders = mergeHeadersCaseInsensitive({}, streamHeaders)
+
         // Clean headers and prepare for fetchNode
-        const fetchHeaders: Record<string, string> = {}
+        const rawFetchHeaders: Record<string, string> = {}
         for (const [k, v] of Object.entries(streamHeaders)) {
           const lowerK = k.toLowerCase()
           // Do not send Host header as Node http/https module handles it.
@@ -398,12 +458,14 @@ export async function startStreamProxy(): Promise<void> {
             lowerK !== 'accept-encoding' &&
             lowerK !== 'cookie'
           ) {
-            fetchHeaders[k] = String(v)
+            rawFetchHeaders[k] = String(v)
           }
         }
 
-        // Force a real browser User-Agent
-        fetchHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        // Force a real browser User-Agent while preserving case uniqueness
+        const fetchHeaders = mergeHeadersCaseInsensitive(rawFetchHeaders, {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        })
 
         const isManifest = realUrl.includes('.m3u')
         if (!isManifest && !isVtt) {
@@ -422,11 +484,6 @@ export async function startStreamProxy(): Promise<void> {
         let contentType = response.headers['content-type'] ?? 'application/octet-stream'
 
         // Convert SRT to WebVTT format on-the-fly.
-        // A proper block parser is used instead of a simple regex so that:
-        // 1. SRT sequence numbers are stripped (VTT doesn't use them)
-        // 2. Every cue gets explicit bottom-center positioning (line:90% position:50% align:center)
-        //    so cues never float to the middle of the screen regardless of the source file's settings
-        // 3. BOM, mixed line endings, and blank-body cues are all handled cleanly
         if (isVtt) {
           const raw = buffer.toString('utf8')
           // If it's already a VTT file, rewrite cue position settings but skip SRT parsing
@@ -450,7 +507,6 @@ export async function startStreamProxy(): Promise<void> {
           let text = buffer.toString('utf8')
 
           // DIAGNOSTIC: detect encryption, master vs. media playlist, variant + segment counts.
-          // EXT-X-KEY with an unrewritten URI is a known root cause for "0:00 stuck" playback.
           const hasEncKey = text.includes('#EXT-X-KEY')
           const isMaster = text.includes('#EXT-X-STREAM-INF')
           const variantCount = (text.match(/#EXT-X-STREAM-INF/g) || []).length
@@ -502,9 +558,10 @@ export async function startStreamProxy(): Promise<void> {
           }
 
           // Rewrite absolute paths (starting with / but not //)
-          text = text.replace(/^(\/[^\/].*)$/gm, `/proxy/${host}$1`)
-          // Rewrite full URLs (https://...)
-          text = text.replace(/^(https?:\/\/(.*))$/gm, '/proxy/$2')
+          const currentProto = urlObj.protocol.replace(':', '')
+          text = text.replace(/^(\/[^\/][^\r\n]*)$/gm, `/proxy/${currentProto}/${host}$1`)
+          // Rewrite full URLs (https://... or http://...)
+          text = text.replace(/^(https?):\/\/([^\r\n]+)$/gm, '/proxy/$1/$2')
           buffer = Buffer.from(text, 'utf8')
         }
 
@@ -538,15 +595,15 @@ export async function startStreamProxy(): Promise<void> {
 function toProxyUrl(url: string): string {
   try {
     const parsed = new URL(url)
-    const proto = parsed.protocol // "https:" or "http:"
-    const rest = url.slice(proto.length + 2) // everything after "https://"
-    return `http://localhost:${proxyPort}/proxy/${rest}`.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+    const proto = parsed.protocol.replace(':', '') // "https" or "http"
+    const rest = url.slice(parsed.protocol.length + 2) // everything after "https://" or "http://"
+    return `http://localhost:${proxyPort}/proxy/${proto}/${rest}`.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
   } catch {
     return url.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
   }
 }
 
-function getStandardHeight(width: number, height: number): number {
+export function getStandardHeight(width: number, height: number): number {
   const w = width || 0
   const h = height || 0
   if (w >= 3840 || h >= 2160) return 2160

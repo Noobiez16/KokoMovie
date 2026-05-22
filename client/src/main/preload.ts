@@ -19,14 +19,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     durationMins?: number
     manifestUrl: string
     drmKeyId?: string
+    customDownloadPath?: string
+    headers?: Record<string, string>
   }) => ipcRenderer.invoke('download:start', opts),
   cancelDownload: (id: string) => ipcRenderer.invoke('download:cancel', id),
   deleteDownload: (id: string) => ipcRenderer.invoke('download:delete', id),
   listDownloads: () => ipcRenderer.invoke('download:list'),
   getOfflineManifest: (id: string) => ipcRenderer.invoke('download:get-manifest', id),
-  onDownloadProgress: (callback: (progress: { id: string; percent: number }) => void) => {
-    const handler = (_: Electron.IpcRendererEvent, progress: { id: string; percent: number }) =>
-      callback(progress)
+  selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
+  getDefaultDownloadsDir: () => ipcRenderer.invoke('download:get-default-dir'),
+  onDownloadProgress: (
+    callback: (progress: {
+      id: string
+      percent: number
+      status?: string
+      completedSegments?: number
+      totalSegments?: number
+      errorMessage?: string
+    }) => void
+  ) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      progress: {
+        id: string
+        percent: number
+        status?: string
+        completedSegments?: number
+        totalSegments?: number
+        errorMessage?: string
+      }
+    ) => callback(progress)
     ipcRenderer.on('download:progress', handler)
     return () => ipcRenderer.removeListener('download:progress', handler)
   },

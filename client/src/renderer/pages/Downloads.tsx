@@ -38,12 +38,23 @@ export function DownloadsPage() {
       setLoading(false)
     })
 
-    const unsub = window.electronAPI?.onDownloadProgress(({ id, percent }) => {
-      setItems((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, progress_percent: percent, status: percent >= 100 ? 'completed' : 'downloading' } : item,
-        ),
-      )
+    const unsub = window.electronAPI?.onDownloadProgress(({ id, percent, status, completedSegments, totalSegments }) => {
+      setItems((prev) => {
+        if (status === 'cancelled') {
+          return prev.filter((item) => item.id !== id)
+        }
+        return prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                progress_percent: percent,
+                status: status || (percent >= 100 ? 'completed' : 'downloading'),
+                completed_segments: completedSegments ?? item.completed_segments,
+                total_segments: totalSegments ?? item.total_segments,
+              }
+            : item,
+        )
+      })
     })
 
     return () => unsub?.()
@@ -56,7 +67,8 @@ export function DownloadsPage() {
 
   async function handleCancel(id: string) {
     await downloadsApi.cancel(id)
-    setItems((prev) => prev.map((item) => item.id === id ? { ...item, status: 'cancelled' } : item))
+    await downloadsApi.delete(id)
+    setItems((prev) => prev.filter((item) => item.id !== id))
   }
 
   async function handlePlay(item: DownloadItem) {
@@ -93,7 +105,7 @@ export function DownloadsPage() {
         {active.length > 0 && (
           <section className="mb-8">
             <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">In Progress</h2>
-            <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {active.map((item) => (
                 <DownloadCard
                   key={item.id}
@@ -124,7 +136,7 @@ export function DownloadsPage() {
         {other.length > 0 && (
           <section>
             <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">Cancelled / Failed</h2>
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {other.map((item) => (
                 <DownloadCard
                   key={item.id}
@@ -154,55 +166,62 @@ function DownloadCard({
   const days = daysUntil(item.expires_at)
 
   return (
-    <div className="bg-km-card rounded-lg overflow-hidden">
-      {item.thumbnail_url ? (
-        <img src={item.thumbnail_url} alt={item.title} className="w-full aspect-video object-cover" />
-      ) : (
-        <div className="w-full aspect-video bg-white/5 flex items-center justify-center text-white/20 text-3xl">⬇</div>
-      )}
-
-      <div className="p-3">
-        <p className="text-white text-sm font-medium line-clamp-2 mb-1">{item.title}</p>
-
-        <p className={`text-xs font-medium mb-2 ${STATUS_COLOR[item.status] ?? 'text-white/40'}`}>
-          {STATUS_LABEL[item.status] ?? item.status}
-          {item.status === 'error' && item.error_message ? ` — ${item.error_message}` : ''}
-        </p>
-
-        {(item.status === 'pending' || item.status === 'downloading') && (
-          <div className="mb-2">
-            <div className="flex justify-between text-xs text-white/40 mb-1">
-              <span>{item.progress_percent}%</span>
-              {item.total_segments > 0 && (
-                <span>{item.completed_segments}/{item.total_segments} segments</span>
-              )}
-            </div>
-            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-km-accent transition-all duration-300"
-                style={{ width: `${item.progress_percent}%` }}
-              />
-            </div>
-          </div>
+    <div className="bg-white/[0.03] backdrop-blur-md rounded-xl overflow-hidden shadow-lg transition-all duration-300 hover:scale-[1.02] hover:bg-white/[0.08] hover:shadow-violet-500/5 group flex flex-col justify-between">
+      <div>
+        {item.thumbnail_url ? (
+          <img src={item.thumbnail_url} alt={item.title} className="w-full aspect-video object-cover transition-transform duration-500 group-hover:scale-103" />
+        ) : (
+          <div className="w-full aspect-video bg-white/5 flex items-center justify-center text-white/20 text-3xl">⬇</div>
         )}
 
-        {item.status === 'completed' && days > 0 && (
-          <p className="text-xs text-white/30 mb-2">Expires in {days}d</p>
-        )}
+        <div className="p-3">
+          <p className="text-white text-sm font-medium line-clamp-2 mb-1 group-hover:text-violet-400 transition-colors">{item.title}</p>
 
-        <div className="flex gap-2 mt-2">
+          <p className={`text-xs font-semibold mb-2 ${STATUS_COLOR[item.status] ?? 'text-white/40'}`}>
+            {STATUS_LABEL[item.status] ?? item.status}
+            {item.status === 'error' && item.error_message ? ` — ${item.error_message}` : ''}
+          </p>
+
+          {(item.status === 'pending' || item.status === 'downloading') && (
+            <div className="mb-2">
+              <div className="flex justify-between text-[10px] text-white/40 mb-1">
+                <span>{item.progress_percent}%</span>
+                {item.total_segments > 0 && (
+                  <span>{item.completed_segments}/{item.total_segments}</span>
+                )}
+              </div>
+              <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300"
+                  style={{ width: `${item.progress_percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {item.status === 'completed' && days > 0 && (
+            <p className="text-xs text-white/30 mb-2">Expires in {days}d</p>
+          )}
+        </div>
+      </div>
+
+      <div className="p-3 pt-0">
+        <div className="flex gap-2">
           {item.status === 'completed' && onPlay && (
             <button
               onClick={onPlay}
-              className="flex-1 bg-white text-black text-xs font-semibold py-1.5 rounded hover:bg-white/90 transition-colors"
+              className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white text-xs font-bold py-1.5 rounded-xl shadow-md shadow-violet-600/15 transition-all duration-300 hover:scale-[1.03] active:scale-95 flex items-center justify-center gap-1"
             >
-              ▶ Play
+              <svg className="w-2.5 h-2.5 fill-current ml-0.5" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Play
             </button>
           )}
           {(item.status === 'pending' || item.status === 'downloading') && onCancel && (
             <button
               onClick={onCancel}
-              className="flex-1 border border-white/20 text-white/60 text-xs py-1.5 rounded hover:text-white hover:border-white/40 transition-colors"
+              className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
               Cancel
             </button>
@@ -210,7 +229,7 @@ function DownloadCard({
           {onDelete && item.status !== 'pending' && item.status !== 'downloading' && (
             <button
               onClick={onDelete}
-              className="flex-1 border border-red-500/30 text-red-400/70 text-xs py-1.5 rounded hover:text-red-400 hover:border-red-500/60 transition-colors"
+              className="flex-1 bg-red-500/10 text-red-400/80 hover:bg-red-500/20 hover:text-red-300 text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
               Delete
             </button>

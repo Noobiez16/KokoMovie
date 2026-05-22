@@ -20,6 +20,11 @@ export interface ContinueWatchingItem {
   durationSeconds: number
   contentEpisodeId: string
   updatedAt: string
+  title: string
+  type: 'movie' | 'series'
+  s3Thumbnail: string | null
+  backdropUrl: string | null
+  releaseYear: number | null
 }
 
 export const playbackApi = {

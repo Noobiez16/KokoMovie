@@ -125,3 +125,28 @@ export async function getPositionsForProfile(profileId: string): Promise<Playbac
   }))
   return (result.Items as PlaybackPosition[]) ?? []
 }
+
+export interface HistoryItem {
+  profileId: string
+  contentId: string
+  contentTitle: string
+  contentType: string
+  thumbnailUrl: string | null
+  positionSeconds: number
+  durationSeconds: number
+  completedAt: string | null
+  watchedAt: string
+  episodeId?: string | null
+}
+
+const HISTORY_TTL_SECS = 90 * 24 * 60 * 60
+
+export async function recordHistory(item: HistoryItem): Promise<void> {
+  const now = item.watchedAt
+  const watchedAtContentId = `${now}#${item.contentId}`
+  const ttl = Math.floor(Date.now() / 1000) + HISTORY_TTL_SECS
+  await dynamo.send(new PutCommand({
+    TableName: 'viewing_history',
+    Item: { ...item, watchedAtContentId, ttl },
+  }))
+}

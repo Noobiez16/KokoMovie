@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { upsertPosition, getPosition, getPositionsForProfile } from '../db/dynamo.js'
+import { upsertPosition, getPosition, getPositionsForProfile, getSession, recordHistory } from '../db/dynamo.js'
 import { emitPlaybackEvent } from '../kafka/producer.js'
 import type { AuthenticatedRequest } from '../lib/auth.js'
 
@@ -17,6 +17,59 @@ const getPositionParamsSchema = z.object({ contentId: z.string().uuid() })
 const getPositionQuerySchema = z.object({ episodeId: z.string().uuid().optional() })
 
 const TTL_90_DAYS = 90 * 24 * 60 * 60
+
+interface CatalogContentMetadata {
+  title: string
+  type: string
+  s3Thumbnail: string | null
+  backdropUrl: string | null
+  releaseYear: number | null
+}
+
+const catalogCache = new Map<string, CatalogContentMetadata>()
+
+async function getCatalogMetadata(contentId: string, authorizationHeader: string | undefined): Promise<CatalogContentMetadata | null> {
+  if (catalogCache.has(contentId)) {
+    return catalogCache.get(contentId)!
+  }
+
+  try {
+    const headers: Record<string, string> = {}
+    if (authorizationHeader) {
+      headers['Authorization'] = authorizationHeader
+    }
+    const response = await fetch(`http://localhost:3002/catalog/content/${contentId}`, {
+      headers,
+    })
+    if (!response.ok) {
+      return null
+    }
+    const json = (await response.json()) as {
+      success: boolean
+      data?: {
+        title: string
+        type: string
+        s3Thumbnail: string | null
+        backdropUrl: string | null
+        releaseYear: number | null
+      }
+    }
+    if (json.success && json.data) {
+      const meta: CatalogContentMetadata = {
+        title: json.data.title,
+        type: json.data.type,
+        s3Thumbnail: json.data.s3Thumbnail ?? null,
+        backdropUrl: json.data.backdropUrl ?? null,
+        releaseYear: json.data.releaseYear ?? null,
+      }
+      catalogCache.set(contentId, meta)
+      return meta
+    }
+  } catch (error) {
+    console.error('Error fetching catalog metadata:', error)
+  }
+  return null
+}
 
 export async function heartbeatHandler(request: FastifyRequest, reply: FastifyReply) {
   const body = heartbeatSchema.safeParse(request.body)
@@ -45,6 +98,29 @@ export async function heartbeatHandler(request: FastifyRequest, reply: FastifyRe
     updatedAt: now,
     ttl: Math.floor(Date.now() / 1000) + TTL_90_DAYS,
   })
+
+  // Record history directly to DynamoDB viewing_history table since Kafka events are disabled
+  try {
+    const session = await getSession(sessionId)
+    const watchedAt = session?.createdAt ?? now
+    const meta = await getCatalogMetadata(contentId, request.headers.authorization)
+    if (meta) {
+      await recordHistory({
+        profileId,
+        contentId,
+        contentTitle: meta.title,
+        contentType: meta.type,
+        thumbnailUrl: meta.s3Thumbnail,
+        positionSeconds,
+        durationSeconds,
+        completedAt: isCompleted ? now : null,
+        watchedAt,
+        episodeId: episodeId ?? null,
+      })
+    }
+  } catch (historyErr) {
+    request.log.error(historyErr, 'Failed to record watch history directly to DynamoDB')
+  }
 
   await emitPlaybackEvent({
     profileId,
@@ -103,9 +179,32 @@ export async function getContinueWatchingHandler(request: FastifyRequest, reply:
     .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1))
     .slice(0, 20)
 
+  const enriched = (await Promise.all(
+    continueWatching.map(async (p) => {
+      const [contentId, episodePart] = p.contentEpisodeId.split('#')
+      if (!contentId) return null
+      const episodeId = episodePart === 'movie' ? null : (episodePart ?? null)
+      const meta = await getCatalogMetadata(contentId, request.headers.authorization)
+      return {
+        contentId,
+        episodeId,
+        positionSeconds: p.positionSeconds,
+        durationSeconds: p.durationSeconds,
+        contentEpisodeId: p.contentEpisodeId,
+        updatedAt: p.updatedAt,
+        // Enriched catalog fields
+        title: meta?.title ?? 'Unknown Content',
+        type: (meta?.type as 'movie' | 'series') ?? 'movie',
+        s3Thumbnail: meta?.s3Thumbnail ?? null,
+        backdropUrl: meta?.backdropUrl ?? null,
+        releaseYear: meta?.releaseYear ?? null,
+      }
+    })
+  )).filter((item): item is NonNullable<typeof item> => item !== null)
+
   return reply.send({
     success: true,
-    data: continueWatching,
+    data: enriched,
     meta: { requestId: request.id, timestamp: new Date().toISOString() },
   })
 }
