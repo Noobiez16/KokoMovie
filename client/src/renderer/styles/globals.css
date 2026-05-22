@@ -4,12 +4,12 @@
 
 @layer base {
   :root {
-    --km-bg-rgb: 9, 6, 17;
-    --km-surface-rgb: 16, 11, 33;
-    --km-surface-2-rgb: 27, 19, 51;
-    --km-border-rgb: 39, 27, 74;
-    --km-accent-rgb: 139, 92, 246;
-    --km-accent-hover-rgb: 167, 139, 250;
+    --km-bg-rgb: 9 6 17;
+    --km-surface-rgb: 16 11 33;
+    --km-surface-2-rgb: 27 19 51;
+    --km-border-rgb: 39 27 74;
+    --km-accent-rgb: 139 92 246;
+    --km-accent-hover-rgb: 167 139 250;
 
     --km-bg: rgb(var(--km-bg-rgb));
     --km-surface: rgb(var(--km-surface-rgb));

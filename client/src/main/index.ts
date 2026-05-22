@@ -3,7 +3,7 @@ import { join } from 'path'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
 import { registerAuthIpc } from './ipc/auth'
-import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads } from './ipc/download'
+import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange } from './ipc/download'
 import { registerAppIpc } from './ipc/app'
 import { registerApiProxy } from './ipc/api-proxy'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
@@ -173,6 +173,16 @@ app.whenReady().then(async () => {
     const url = new URL(request.url)
     const downloadId = url.hostname
     const filename = url.pathname.slice(1) // strip leading /
+
+    if (filename.startsWith('video.')) {
+      const rangeHeader = request.headers.get('range') || request.headers.get('Range')
+      const result = decryptLocalDirectVideoRange(downloadId, rangeHeader)
+      return new Response(result.data ? new Uint8Array(result.data) : null, {
+        status: result.status,
+        headers: result.headers,
+      })
+    }
+
     const decrypted = decryptLocalSegment(downloadId, filename)
     if (!decrypted) {
       return new Response(null, {

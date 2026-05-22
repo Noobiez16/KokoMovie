@@ -89,6 +89,17 @@ function normalizeUrl(url: string): string {
   return url
 }
 
+function isDirectVideoUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    const pathname = parsed.pathname.toLowerCase()
+    return pathname.endsWith('.mp4') || pathname.endsWith('.webm') || pathname.endsWith('.mkv')
+  } catch {
+    const lower = url.toLowerCase()
+    return lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.mkv')
+  }
+}
+
 function abortActiveRequests(id: string): void {
   const reqs = activeRequests.get(id)
   if (reqs) {
@@ -380,6 +391,243 @@ async function parseManifest(manifestUrl: string, customHeaders?: Record<string,
 const cancelSignals = new Map<string, boolean>()
 let activeCount = 0
 
+async function downloadDirectVideo(
+  id: string,
+  row: DownloadRow,
+  key: Buffer,
+  localDir: string,
+  customHeaders?: Record<string, string>
+): Promise<void> {
+  const db = getDb()
+  const url = row.s3_hls_key
+  const normalizedUrl = normalizeUrl(url)
+
+  let currentUrl = normalizedUrl
+  let redirectsCount = 0
+  let responseStream: http.IncomingMessage | null = null
+
+  while (redirectsCount <= 5) {
+    if (cancelSignals.get(id)) throw new Error('cancelled')
+
+    let host = ''
+    try {
+      host = new URL(currentUrl).host
+    } catch {}
+
+    const streamHeaders = mergeHeadersCaseInsensitive(
+      getStreamHeaders(host),
+      customHeaders || {}
+    )
+
+    const reqHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(streamHeaders)) {
+      const lowerK = k.toLowerCase()
+      if (
+        lowerK !== 'host' &&
+        !lowerK.startsWith('sec-') &&
+        lowerK !== 'connection'
+      ) {
+        reqHeaders[k] = String(v)
+      }
+    }
+
+    if (!reqHeaders['Accept-Encoding'] && !reqHeaders['accept-encoding']) {
+      reqHeaders['Accept-Encoding'] = 'gzip, deflate'
+    }
+
+    if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
+      reqHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
+
+    const isHttps = currentUrl.startsWith('https')
+    const get = isHttps ? https.get : http.get
+
+    const options = {
+      headers: reqHeaders,
+      rejectUnauthorized: false,
+      agent: isHttps ? httpsAgent : httpAgent,
+    }
+
+    const res: http.IncomingMessage = await new Promise((resolve, reject) => {
+      const req = get(currentUrl, options, (res) => {
+        resolve(res)
+      })
+
+      const reqs = activeRequests.get(id) || []
+      reqs.push(req)
+      activeRequests.set(id, reqs)
+
+      req.on('error', reject)
+      req.setTimeout(30000, () => {
+        req.destroy(new Error('Request timeout after 30s'))
+      })
+    })
+
+    const statusCode = res.statusCode ?? 200
+    if ([301, 302, 303, 307, 308].includes(statusCode)) {
+      const location = res.headers.location
+      if (location) {
+        currentUrl = new URL(location, currentUrl).toString()
+        redirectsCount++
+        res.resume() // consume stream
+        continue
+      }
+    }
+
+    if (statusCode < 200 || statusCode >= 300) {
+      res.resume()
+      throw new Error(`Request failed with status code ${statusCode}`)
+    }
+
+    responseStream = res
+    break
+  }
+
+  if (!responseStream) {
+    throw new Error('Too many redirects or no stream returned')
+  }
+
+  const total = parseInt(responseStream.headers['content-length'] ?? '0', 10)
+  const contentType = responseStream.headers['content-type'] || 'video/mp4'
+
+  let received = 0
+  let completed = 0
+  const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunk size
+
+  let chunkBuffer = Buffer.alloc(CHUNK_SIZE)
+  let bytesInChunk = 0
+
+  const startTime = Date.now()
+
+  // Setup decompression if response is encoded
+  let decompressor: any = null
+  const encoding = responseStream.headers['content-encoding']
+  if (encoding === 'gzip') {
+    decompressor = zlib.createGunzip()
+  } else if (encoding === 'deflate') {
+    decompressor = zlib.createInflate()
+  }
+
+  const inputStream: NodeJS.ReadableStream = decompressor 
+    ? responseStream.pipe(decompressor)
+    : responseStream
+
+  // Wait for data chunk by chunk
+  await new Promise<void>((resolve, reject) => {
+    const onData = (chunk: Buffer) => {
+      if (cancelSignals.get(id)) {
+        cleanup()
+        reject(new Error('cancelled'))
+        return
+      }
+
+      let offset = 0
+      while (offset < chunk.length) {
+        const spaceLeft = CHUNK_SIZE - bytesInChunk
+        const bytesToCopy = Math.min(spaceLeft, chunk.length - offset)
+        chunk.copy(chunkBuffer, bytesInChunk, offset, offset + bytesToCopy)
+        bytesInChunk += bytesToCopy
+        offset += bytesToCopy
+
+        if (bytesInChunk === CHUNK_SIZE) {
+          // Encrypt and write chunk
+          const encrypted = encryptSegment(chunkBuffer, key)
+          const segPath = join(localDir, `seg_${completed}.enc`)
+          writeFileSync(segPath, encrypted)
+          completed++
+
+          // Reset chunk
+          chunkBuffer = Buffer.alloc(CHUNK_SIZE)
+          bytesInChunk = 0
+        }
+      }
+
+      received += chunk.length
+      const elapsedSec = (Date.now() - startTime) / 1000
+      const speedKbps = elapsedSec > 0 ? Math.round((received / 1024) / elapsedSec) : 0
+
+      let overallPct = 0
+      if (total > 0) {
+        overallPct = Math.round((received / total) * 100)
+      } else {
+        overallPct = Math.min(99, Math.round(completed * 2))
+      }
+      if (overallPct > 100) overallPct = 100
+
+      db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ? WHERE id = ?`).run(overallPct, speedKbps, id)
+      notifyProgress(id, overallPct, 'downloading', completed, 0)
+    }
+
+    const onEnd = () => {
+      cleanup()
+      resolve()
+    }
+
+    const onError = (err: Error) => {
+      cleanup()
+      reject(err)
+    }
+
+    const cleanup = () => {
+      inputStream.removeListener('data', onData)
+      inputStream.removeListener('end', onEnd)
+      inputStream.removeListener('error', onError)
+      if (cancelSignals.get(id)) {
+        try { responseStream?.destroy() } catch {}
+        try { decompressor?.destroy() } catch {}
+      }
+    }
+
+    inputStream.on('data', onData)
+    inputStream.on('end', onEnd)
+    inputStream.on('error', onError)
+  })
+
+  // Write the last chunk if any
+  if (bytesInChunk > 0) {
+    const finalPlain = chunkBuffer.subarray(0, bytesInChunk)
+    const encrypted = encryptSegment(finalPlain, key)
+    const segPath = join(localDir, `seg_${completed}.enc`)
+    writeFileSync(segPath, encrypted)
+    completed++
+  }
+
+  // Determine standard file extension based on content-type or original URL
+  let ext = 'mp4'
+  if (contentType.includes('webm')) ext = 'webm'
+  else if (contentType.includes('x-matroska') || contentType.includes('mkv')) ext = 'mkv'
+  else {
+    try {
+      const pathname = new URL(normalizedUrl).pathname.toLowerCase()
+      if (pathname.endsWith('.webm')) ext = 'webm'
+      else if (pathname.endsWith('.mkv')) ext = 'mkv'
+    } catch {}
+  }
+
+  // Write metadata JSON
+  const metadataPath = join(localDir, 'metadata.json')
+  const metadata = {
+    type: 'direct',
+    totalSize: total > 0 ? total : received,
+    chunkSize: CHUNK_SIZE,
+    chunkCount: completed,
+    contentType,
+    filename: `video.${ext}`
+  }
+  writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
+
+  // Write local manifest with direct: prefix
+  const manifestPath = join(localDir, 'manifest.m3u8')
+  writeFileSync(manifestPath, `direct:offline://${id}/video.${ext}`)
+
+  db.prepare(`
+    UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?
+    WHERE id = ?
+  `).run(new Date().toISOString(), manifestPath, id)
+
+  notifyProgress(id, 100, 'completed', completed, completed)
+}
+
 // ─── Core download logic ──────────────────────────────────────────────────────
 
 async function downloadContent(id: string): Promise<void> {
@@ -394,6 +642,11 @@ async function downloadContent(id: string): Promise<void> {
   const customHeaders = row.headers ? JSON.parse(row.headers) : undefined
 
   try {
+    if (isDirectVideoUrl(row.s3_hls_key)) {
+      await downloadDirectVideo(id, row, key, localDir, customHeaders)
+      return
+    }
+
     // Parse manifest (may be master or variant)
     let variantUrl = normalizeUrl(row.s3_hls_key)
     let rawPlaylist = ''
@@ -638,6 +891,123 @@ export function decryptLocalSegment(downloadId: string, segmentFilename: string)
     return decryptSegment(encrypted, key)
   } catch {
     return null
+  }
+}
+
+export interface DirectVideoRangeResult {
+  status: number
+  headers: Record<string, string>
+  data: Buffer | null
+}
+
+export function decryptLocalDirectVideoRange(
+  downloadId: string,
+  rangeHeader: string | null
+): DirectVideoRangeResult {
+  try {
+    const db = getDb()
+    const row = db.prepare('SELECT local_dir, drm_key_id FROM downloads WHERE id = ?').get(downloadId) as { local_dir: string; drm_key_id: string | null } | undefined
+    if (!row) {
+      return { status: 404, headers: {}, data: null }
+    }
+
+    const metadataPath = join(row.local_dir, 'metadata.json')
+    if (!existsSync(metadataPath)) {
+      return { status: 404, headers: {}, data: null }
+    }
+
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'))
+    const totalSize = metadata.totalSize
+    const chunkSize = metadata.chunkSize ?? 2097152
+    const contentType = metadata.contentType ?? 'video/mp4'
+
+    let start = 0
+    let end = totalSize - 1
+    let isRange = false
+
+    if (rangeHeader && rangeHeader.startsWith('bytes=')) {
+      isRange = true
+      const parts = rangeHeader.substring(6).split('-')
+      const startVal = parts[0] ? parseInt(parts[0], 10) : NaN
+      const endVal = parts[1] ? parseInt(parts[1], 10) : NaN
+
+      if (!isNaN(startVal) && isNaN(endVal)) {
+        start = startVal
+        end = totalSize - 1
+      } else if (isNaN(startVal) && !isNaN(endVal)) {
+        start = totalSize - endVal
+        end = totalSize - 1
+      } else if (!isNaN(startVal) && !isNaN(endVal)) {
+        start = startVal
+        end = endVal
+      }
+    }
+
+    if (start < 0) start = 0
+    if (end >= totalSize) end = totalSize - 1
+
+    if (start >= totalSize) {
+      return {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${totalSize}`,
+          'Access-Control-Allow-Origin': '*',
+        },
+        data: null
+      }
+    }
+
+    // Limit maximum response size to prevent Out of Memory
+    const MAX_RESPONSE_SIZE = 4 * 1024 * 1024 // 4MB
+    if (end - start + 1 > MAX_RESPONSE_SIZE) {
+      end = start + MAX_RESPONSE_SIZE - 1
+    }
+    if (end >= totalSize) {
+      end = totalSize - 1
+    }
+
+    const responseLength = end - start + 1
+    const startChunk = Math.floor(start / chunkSize)
+    const endChunk = Math.floor(end / chunkSize)
+
+    const key = deriveSegmentKey(row.drm_key_id)
+    const decryptedChunks: Buffer[] = []
+
+    for (let c = startChunk; c <= endChunk; c++) {
+      const segName = `seg_${c}.enc`
+      const segPath = join(row.local_dir, segName)
+      if (!existsSync(segPath)) {
+        return { status: 404, headers: {}, data: null }
+      }
+      const encrypted = readFileSync(segPath)
+      const decrypted = decryptSegment(encrypted, key)
+      decryptedChunks.push(decrypted)
+    }
+
+    const fullBuffer = Buffer.concat(decryptedChunks)
+    const offsetInFull = start - startChunk * chunkSize
+    const sliced = fullBuffer.subarray(offsetInFull, offsetInFull + responseLength)
+
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Content-Length': String(sliced.length),
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    }
+
+    if (isRange) {
+      headers['Content-Range'] = `bytes ${start}-${end}/${totalSize}`
+    }
+
+    return {
+      status: isRange ? 206 : 200,
+      headers,
+      data: sliced,
+    }
+  } catch (err) {
+    console.error('[decryptLocalDirectVideoRange] error:', err)
+    return { status: 500, headers: {}, data: null }
   }
 }
 

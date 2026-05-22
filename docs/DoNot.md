@@ -464,5 +464,23 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 **DO NOT:**
 - Serve raw SRT subtitle tracks directly to the renderer's video element.
 
+---
+
+## DN-031: Offline playback for direct progressive video files must use range-request chunk decryption
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/download.ts`, `client/src/main/index.ts`, `client/src/renderer/pages/Player.tsx`  
+**Symptom:** Playing downloaded direct progressive videos (.mp4, .webm, .mkv) causes application crashes due to Out of Memory (OOM) errors, or fails seeking/scrubbing entirely.  
+**Root cause:** Progressive video files can be very large (gigabytes). Attempting to read and decrypt the entire video into a single buffer results in OOM crashes. Additionally, HLS.js cannot play progressive videos, so they must be played natively by the browser, which requires range requests (`Range` headers) to support seeking.  
+**Fix:**  
+1. In the downloader, save direct progressive videos in encrypted 2MB chunks (`seg_N.enc`) on disk and write a manifest with a `direct:` prefix.  
+2. In the offline protocol handler, route `video.*` requests to `decryptLocalDirectVideoRange`.  
+3. In `decryptLocalDirectVideoRange`, parse the client's `Range` header, cap response buffer size to a max of 4MB to prevent OOM, read/decrypt only the overlapping 2MB chunks, slice to the exact byte range requested, and return the partial buffer with a 206 status and correct `Content-Range`/`Content-Length` headers.  
+4. In the Player page, if the manifest starts with `direct:`, skip wrapping it in a local Blob URL and set the video source directly to the parsed `offline://` URL.  
+**DO NOT:**
+- Attempt to read or decrypt an entire progressive video file into memory at once.
+- Feed progressive video `offline://` URLs to HLS.js, or wrap them in HLS-specific blob URLs in the player.
+- Omit Range header handling and 206 Partial Content responses, as this breaks seeking/scrubbing.
+
 
 

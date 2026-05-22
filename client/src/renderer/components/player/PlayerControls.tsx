@@ -118,10 +118,10 @@ export function PlayerControls({
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-3 pt-8">
         {/* Seek bar */}
         <div
-          className="relative h-1 rounded-full bg-km-accent/20 cursor-pointer mb-3 group/seek hover:h-1.5 transition-all"
+          className="relative h-1 rounded-full bg-white/20 cursor-pointer mb-3 group/seek hover:h-1.5 transition-all"
           onClick={handleSeekClick}
         >
-          <div className="absolute h-full bg-km-accent/45 rounded-full" style={{ width: `${bufferedPct}%` }} />
+          <div className="absolute h-full bg-white/35 rounded-full" style={{ width: `${bufferedPct}%` }} />
           <div className="absolute h-full bg-km-accent rounded-full transition-all" style={{ width: `${progress}%` }} />
           <div
             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-km-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity"

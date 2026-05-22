@@ -110,15 +110,25 @@ export function PlayerPage() {
             setSessionError('Offline download not found')
             return
           }
-          const blob = new Blob([res.manifestContent], { type: 'application/x-mpegURL' })
-          const url = URL.createObjectURL(blob)
-          setOfflineManifestUrl(url)
-          setSession({
-            sessionId: offlineId,
-            manifestUrl: url,
-            drmKeyId: res.drmKeyId,
-            expiresIn: 14400,
-          })
+          if (res.manifestContent.startsWith('direct:')) {
+            const url = res.manifestContent.substring(7)
+            setSession({
+              sessionId: offlineId,
+              manifestUrl: url,
+              drmKeyId: res.drmKeyId,
+              expiresIn: 14400,
+            })
+          } else {
+            const blob = new Blob([res.manifestContent], { type: 'application/x-mpegURL' })
+            const url = URL.createObjectURL(blob)
+            setOfflineManifestUrl(url)
+            setSession({
+              sessionId: offlineId,
+              manifestUrl: url,
+              drmKeyId: res.drmKeyId,
+              expiresIn: 14400,
+            })
+          }
         })
         .catch((err: Error) => {
           setSessionError(err.message ?? 'Failed to load offline manifest')
