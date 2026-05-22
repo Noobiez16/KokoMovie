@@ -425,4 +425,44 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 **DO NOT:**
 - Write status updates to the database from the downloader catch block if the download was cancelled or deleted.
 
+---
+
+## DN-028: Custom Protocol Schemes must be explicitly registered and permitted in CSP
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/index.ts`  
+**Symptom:** Playing offline content shows a black screen or fails silently, and browser console displays CSP violation errors blocking the custom protocol (e.g. `offline://`).  
+**Root cause:** Custom protocols like `offline://` used for serving local encrypted segments run inside Chromium. Without registering the scheme as standard/secure/corsEnabled, and without explicitly adding `offline:` to `connect-src` and `media-src` in the Content Security Policy, Chromium rejects the request as a security violation.  
+**Fix:**  
+1. Register `offline` with `standard: true`, `secure: true`, and `corsEnabled: true` in `protocol.registerSchemesAsPrivileged` at startup.  
+2. Explicitly add `offline:` to both `connect-src` and `media-src` directives in the CSP header for both development and production profiles.  
+**DO NOT:**
+- Remove the `offline:` protocol scheme from the `connect-src` or `media-src` CSP directives.
+- Omit `corsEnabled: true` or `standard: true` when registering the scheme.
+
+---
+
+## DN-029: Watchlist modifications must support empty request bodies on DELETE requests
+
+**Date:** 2026-05-22  
+**Area:** `client/src/renderer/api/client.ts`  
+**Symptom:** Unlisting an item from the watchlist fails with a generic "Request failed" error.  
+**Root cause:** The API client unconditionally attached the `'Content-Type': 'application/json'` header to all requests, even if no request body was present. For DELETE requests, the Fastify backend received this header and tried to parse JSON from the empty request stream, throwing a 400 Bad Request error.  
+**Fix:** Modified the client request builder to only attach `'Content-Type': 'application/json'` if the request `body` is not `undefined`. Added fallback error parsing in the client to bubble up standard framework error messages.  
+**DO NOT:**
+- Send a `'Content-Type'` header on HTTP requests (like GET or DELETE) that do not carry a request body payload.
+
+---
+
+## DN-030: Sideloaded subtitle format conversion for player compatibility
+
+**Date:** 2026-05-22  
+**Area:** `client/src/main/ipc/providers.ts`  
+**Symptom:** External subtitles fail to load or render inside the media player.  
+**Root cause:** OpenSubtitles fetches files in SRT format. Chromium's video element only native-renders WebVTT subtitles, which requires dot-separated milliseconds and the `WEBVTT` prefix header.  
+**Fix:** Implemented an on-the-fly converter in the stream proxy. If the `format=vtt` query is present, it retrieves the SRT subtitle file, replaces comma delimiters (e.g., `00:01:02,123`) with periods (e.g., `00:01:02.123`), prepends `WEBVTT\n\n`, and serves it with `text/vtt` content-type.  
+**DO NOT:**
+- Serve raw SRT subtitle tracks directly to the renderer's video element.
+
+
 
