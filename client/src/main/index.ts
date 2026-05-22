@@ -177,7 +177,8 @@ app.whenReady().then(async () => {
     if (filename.startsWith('video.')) {
       const rangeHeader = request.headers.get('range') || request.headers.get('Range')
       const result = decryptLocalDirectVideoRange(downloadId, rangeHeader)
-      return new Response(result.data ? new Uint8Array(result.data) : null, {
+      const body = (request.method === 'HEAD' || !result.data) ? null : new Uint8Array(result.data)
+      return new Response(body, {
         status: result.status,
         headers: result.headers,
       })

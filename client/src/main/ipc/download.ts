@@ -608,7 +608,7 @@ async function downloadDirectVideo(
   const metadataPath = join(localDir, 'metadata.json')
   const metadata = {
     type: 'direct',
-    totalSize: total > 0 ? total : received,
+    totalSize: received,
     chunkSize: CHUNK_SIZE,
     chunkCount: completed,
     contentType,
@@ -991,6 +991,7 @@ export function decryptLocalDirectVideoRange(
     const headers: Record<string, string> = {
       'Content-Type': contentType,
       'Content-Length': String(sliced.length),
+      'Accept-Ranges': 'bytes',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
