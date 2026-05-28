@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
+import { useSettingsStore } from './store/settings'
 
 const LoginPage = lazy(() => import('./pages/Login').then((m) => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('./pages/Register').then((m) => ({ default: m.RegisterPage })))
@@ -36,6 +37,21 @@ function LoadingScreen() {
 export function App() {
   const setAccount = useAuthStore((s) => s.setAccount)
   const account = useAuthStore((s) => s.account)
+  const { setTmdbApiKey, clearTmdbApiKey } = useSettingsStore()
+
+  useEffect(() => {
+    if (account?.id) {
+      window.electronAPI?.getTmdbApiKey(account.id).then((key) => {
+        if (key) {
+          setTmdbApiKey(key)
+        } else {
+          clearTmdbApiKey()
+        }
+      })
+    } else {
+      clearTmdbApiKey()
+    }
+  }, [account?.id])
 
   useEffect(() => {
     async function silentRefresh() {

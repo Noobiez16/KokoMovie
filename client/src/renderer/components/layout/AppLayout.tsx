@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/auth'
+import logoImg from '../../assets/logo.png'
 
 interface Props {
   children: React.ReactNode
@@ -129,9 +130,11 @@ export function AppLayout({ children, transparentNav = false }: Props) {
             onClick={() => navigate('/browse')}
             className="flex items-center gap-2 group focus:outline-none"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-black text-lg shadow-lg shadow-violet-500/25 group-hover:scale-105 transition-transform duration-300">
-              K
-            </div>
+            <img
+              src={logoImg}
+              alt="KokoMovie Logo"
+              className="w-8 h-8 rounded-lg shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform duration-300 object-cover"
+            />
             <span className="font-black text-lg tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-violet-300 via-fuchsia-300 to-white group-hover:opacity-90 transition-opacity">
               KOKOMOVIE
             </span>

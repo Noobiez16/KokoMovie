@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { useAuthStore } from './auth'
 
 interface SettingsState {
   tmdbApiKey: string
@@ -13,8 +14,20 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       tmdbApiKey: '',
 
-      setTmdbApiKey: (tmdbApiKey) => set({ tmdbApiKey }),
-      clearTmdbApiKey: () => set({ tmdbApiKey: '' }),
+      setTmdbApiKey: (tmdbApiKey) => {
+        set({ tmdbApiKey })
+        const accountId = useAuthStore.getState().account?.id
+        if (accountId && window.electronAPI) {
+          window.electronAPI.setTmdbApiKey(accountId, tmdbApiKey).catch(() => {})
+        }
+      },
+      clearTmdbApiKey: () => {
+        set({ tmdbApiKey: '' })
+        const accountId = useAuthStore.getState().account?.id
+        if (accountId && window.electronAPI) {
+          window.electronAPI.clearTmdbApiKey(accountId).catch(() => {})
+        }
+      },
     }),
     {
       name: 'km-settings',

@@ -20,7 +20,7 @@ import {
   removeWatchlistHandler,
   checkWatchlistHandler,
 } from './handlers/watchlist.js'
-import { getHistoryHandler } from './handlers/history.js'
+import { getHistoryHandler, deleteHistoryHandler } from './handlers/history.js'
 import { getPreferencesHandler, updatePreferencesHandler } from './handlers/preferences.js'
 import { presignAvatarHandler, confirmAvatarHandler } from './handlers/avatar.js'
 import { exportDataHandler } from './handlers/gdpr.js'
@@ -81,6 +81,7 @@ route(120, 'get', '/user/watchlist/:contentId/check', checkWatchlistHandler)
 // ─── Viewing History ──────────────────────────────────────────────────────────
 
 route(60, 'get', '/user/history', getHistoryHandler)
+route(60, 'delete', '/user/history', deleteHistoryHandler)
 
 // ─── Preferences ──────────────────────────────────────────────────────────────
 

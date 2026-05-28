@@ -7,6 +7,9 @@ interface ElectronAPI {
   clearAuthToken: () => Promise<void>
   getRefreshToken: () => Promise<string | null>
   setRefreshToken: (token: string, persist?: boolean) => Promise<void>
+  getTmdbApiKey: (accountId: string) => Promise<string | null>
+  setTmdbApiKey: (accountId: string, key: string) => Promise<void>
+  clearTmdbApiKey: (accountId: string) => Promise<void>
 
   // Downloads
   downloadContent: (opts: {

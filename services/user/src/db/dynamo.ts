@@ -169,3 +169,10 @@ export async function getHistory(
     lastKey: result.LastEvaluatedKey as Record<string, unknown> | undefined,
   }
 }
+
+export async function deleteHistoryItem(profileId: string, watchedAtContentId: string): Promise<void> {
+  await dynamo.send(new DeleteCommand({
+    TableName: 'viewing_history',
+    Key: { profileId, watchedAtContentId },
+  }))
+}

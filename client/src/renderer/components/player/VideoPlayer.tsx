@@ -725,16 +725,43 @@ export function VideoPlayer({
           contentId: content.id,
           episodeId: episode?.id,
           sessionId: session.sessionId,
-          positionSeconds: videoRef.current.currentTime,
-          durationSeconds: videoRef.current.duration || 0,
+          positionSeconds: Math.floor(videoRef.current.currentTime),
+          durationSeconds: Math.floor(videoRef.current.duration || 0),
           quality: currentLevel === -1 ? 'auto' : `${levels[currentLevel]?.height}p`,
         },
         profileId
-      ).catch(() => {})
+      ).catch((err) => {
+        console.error('[VideoPlayer] Heartbeat failed:', err)
+      })
     }, 10000)
 
     return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current) }
   }, [content.id, episode?.id, session.sessionId, profileId, currentLevel, levels])
+
+  // Save final position on unmount to prevent progress loss
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current
+      const pos = video ? Math.floor(video.currentTime) : Math.floor(currentTimeRef.current)
+      const dur = video ? Math.floor(video.duration || 0) : Math.floor(durationRef.current)
+      
+      if (pos > 0 && dur > 0) {
+        playbackApi.heartbeat(
+          {
+            contentId: content.id,
+            episodeId: episode?.id,
+            sessionId: session.sessionId,
+            positionSeconds: pos,
+            durationSeconds: dur,
+            quality: 'auto',
+          },
+          profileId
+        ).catch((err) => {
+          console.error('[VideoPlayer] Final unmount heartbeat failed:', err)
+        })
+      }
+    }
+  }, [content.id, episode?.id, session.sessionId, profileId])
 
   const resetControlsTimeout = useCallback(() => {
     setShowControls(true)

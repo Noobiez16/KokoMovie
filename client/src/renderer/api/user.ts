@@ -43,6 +43,7 @@ export interface WatchlistItem {
 
 export interface HistoryItem {
   profileId: string
+  watchedAtContentId: string
   contentId: string
   contentTitle: string
   contentType: string
@@ -52,6 +53,9 @@ export interface HistoryItem {
   completedAt: string | null
   watchedAt: string
   episodeId?: string | null
+  episodeNumber?: number
+  seasonNumber?: number
+  episodeTitle?: string
 }
 
 export interface Preferences {
@@ -97,6 +101,11 @@ export const userApi = {
       `/user/history?${params.toString()}`,
       { profileId },
     )
+  },
+
+  deleteHistoryItem: (watchedAtContentId: string, profileId: string) => {
+    const params = new URLSearchParams({ watchedAtContentId })
+    return userClient.delete<{ success: true; data: null }>(`/user/history?${params.toString()}`, { profileId })
   },
 
   // ─── Preferences ─────────────────────────────────────────────────────────────

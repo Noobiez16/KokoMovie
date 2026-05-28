@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearAuthToken: () => ipcRenderer.invoke('keychain:clear-token'),
   getRefreshToken: () => ipcRenderer.invoke('keychain:get-refresh-token'),
   setRefreshToken: (token: string, persist?: boolean) => ipcRenderer.invoke('keychain:set-refresh-token', token, persist ?? true),
+  getTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:get-tmdb-key', accountId),
+  setTmdbApiKey: (accountId: string, key: string) => ipcRenderer.invoke('keychain:set-tmdb-key', accountId, key),
+  clearTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:clear-tmdb-key', accountId),
 
   // ─── Downloads ────────────────────────────────────────────────────────────
   downloadContent: (opts: {

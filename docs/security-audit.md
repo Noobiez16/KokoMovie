@@ -126,5 +126,38 @@ frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.
 ### Findings Requiring Remediation
 
 1. **[LOW] COMPUTERNAME in device fingerprint** — On shared Windows machines, `COMPUTERNAME` may not uniquely identify individual users. Consider adding a device-specific UUID stored in `localStorage` (renderer process) as an additional fingerprint input.
-2. **[LOW] npm audit** — 2 low-severity advisories in transitive deps. No direct exploitability identified. Track via Dependabot.
+2. **[RESOLVED] npm audit (2026-05-28)** — Transitive dependencies and direct dependencies (`drizzle-orm`, `@fastify/jwt`) were upgraded to fix known vulnerabilities.
+
+---
+
+## 2026-05-28 Security Hardening & Snyk Mitigations
+
+In May 2026, a comprehensive security audit of the repository was conducted using Snyk. A total of 51 vulnerabilities (spanning application logic, dependency packages, and infrastructure-as-code configurations) were resolved.
+
+### 1. Application-Level Mitigations
+
+- **Path Traversal Prevention in Downloader**: Hardened the downloader queue in the Electron main process. Implemented strict regular expression validation to verify download UUIDs and filenames, and resolved paths using path-safe functions, ensuring downloaded HLS segment files cannot write outside the designated secure storage directory.
+- **IPC Proxy and Provider Protection**:
+  - Bound the local HTTP proxy interface explicitly to the loopback interface (`127.0.0.1` / `localhost`) instead of exposing it to all network interfaces.
+  - Implemented rate limiting and request size/structure bounds on the proxy to prevent denial-of-service (DoS) vectors.
+  - Added request execution timeouts to prevent resources from hanging indefinitely.
+- **Information Leakage Prevention**: Sanitized error responses returned by the main process and microservices to prevent leakage of server directories, runtime stack traces, or environment details to the client or console logs.
+- **Cross-Site Scripting (XSS) & Open Redirect Prevention**:
+  - Restricted the target origin of `postMessage` calls in the `HeroBanner` component specifically to `https://www.youtube.com`, preventing messages from being intercepted or spoofed by other origins.
+  - Added robust validation and sanitization for content detail backdrop images and trailer URLs in `ContentDetail.tsx` to block open redirect exploits and arbitrary JavaScript execution.
+- **DRM Buffer Validation**: Enforced strict buffer-type validation in the Widevine license handler (`services/playback/src/handlers/drm.ts`) to prevent out-of-bounds memory reading or potential heap overflow issues.
+- **Secret Removal**: Purged all hardcoded passwords, test accounts, and private key strings from the repository test suites (`test_watchlist_api.ts`, `test_watchlist_flow.ts`), transitioning them to standard runtime configuration variables.
+
+### 2. Dependency Management
+
+- **Package Upgrades**: Upgraded `drizzle-orm` (to `^0.30.x` or later) and `@fastify/jwt` to fix known security vulnerabilities.
+- **Node v18+ Compatibility**: Added explicit imports of the `crypto` library to ensure correct, secure cryptographic primitives are loaded on modern Node.js versions.
+
+### 3. Infrastructure Hardening (Terraform IaC)
+
+- **S3 Bucket Security**: Enforced AWS KMS customer managed key (CMK) encryption for all S3 buckets, blocked all public access, and enabled full access logs.
+- **DynamoDB Security**: Enabled Point-in-Time Recovery (PITR) for all DynamoDB tables, securing data against accidental deletes or service corruptions.
+- **ECS & ECR Hardening**: Enabled Amazon ECS Container Insights for microservice clusters, configured ECR image scan-on-push, and set ECR repository tag immutability.
+- **Network Logging**: Enabled AWS VPC Flow Logs on all public, private, and database subnets to track all network ingress/egress.
+- **Snyk Baseline Policy**: Drafted a `.snyk` policy file at the repository root to catalog and enforce security configurations for the development pipeline.
 

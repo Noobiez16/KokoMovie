@@ -218,7 +218,7 @@ frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.
 | Layer | Tool | What |
 |---|---|---|
 | Server state | TanStack Query | Catalog data, watchlists, playback positions |
-| Auth/UI state | Zustand | Active profile, authenticated user |
+| Auth/UI/Settings state | Zustand | Active profile, authenticated user, and local settings (e.g. user-configured TMDB API key) |
 | Navigation state | React Router | TMDB IDs passed between Browse → Detail → Player |
 
 ---
@@ -342,7 +342,7 @@ Handles identity, sessions, OAuth. JWT RS4096 with 15-min access tokens, 30-day 
 
 ### 6.2 Catalog Service (port 3002)
 
-Manages content metadata. Primary source is TMDB. Local PostgreSQL DB is populated on-demand as users browse. Fully functional with an empty DB as long as a TMDB API key is configured.
+Manages content metadata. Primary source is TMDB. Local PostgreSQL DB is populated on-demand as users browse. Fully functional with an empty DB as long as a TMDB API key is configured. The TMDB API key is sent dynamically by the client via the `X-TMDB-Key` HTTP header (configured in Settings); if not present, the service falls back to the `TMDB_API_KEY` server environment variable.
 
 | Method | Path | Description |
 |---|---|---|
@@ -473,6 +473,14 @@ The stream extractor `BrowserWindow` uses `webSecurity: false` specifically to a
 ### CORS / Network
 
 All renderer HTTP calls go through the `api:request` IPC channel → `net.fetch` in Main process. This bypasses Chromium CORS restrictions for the local microservices and any external API.
+
+### 8.4 Snyk Hardening & IPC Mitigations (2026-05-28)
+
+- **IPC and Proxy Isolation**: All main process IPC listeners and microservice ports bind strictly to the loopback interface (`127.0.0.1` / `localhost`) to prevent unauthorized cross-network access, complete with request size caps and execution timeouts.
+- **Downloader Directory Lock**: Strict input validation and regex checks prevent path traversal attacks (`../`) when resolving save directories for HLS video segments.
+- **PostMessage Security**: Event listener messaging target origin is locked explicitly to `https://www.youtube.com` for background hero video controllers.
+- **Error Payload Sanitization**: Output payloads from services and IPC are filtered to strip development traces, server directory trees, or execution stacks in production.
+- **DRM Buffer Validation**: Widevine license challenge proxies enforce boundary and type checks on inputs prior to payload handling.
 
 ---
 

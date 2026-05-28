@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.4-beta] — 2026-05-28 — Security Hardening, User-Configured TMDB Keys & New Branding Icon
+
+### Added
+- **User-Configurable TMDB API Key**: Integrated a local settings store (`settingsStore` via Zustand/localStorage) and professional API Configuration UI. Users can input and validate their own TMDB API keys directly in the application Settings. This allows zero-config binary execution without requiring local/backend `.env` variables, passing the key dynamically via `X-TMDB-Key` HTTP headers to backend services.
+- **Premium Tabbed Settings Dashboard**: Refactored the settings screen into a highly structured, horizontal-tab layout (Preferences, API Configuration, Downloads, and Privacy) and removed all emojis in favor of sleek, custom vector SVG graphics. Includes an interactive Preset Avatar selector featuring 6 theme options (Sunset Palm, Retro Cinema, Voyager, Spotlight, Synthwave, and Peak) to update profile pictures instantly without server load, while preserving custom image uploads.
+- **Tropical Branding & Brand Icon**: Recreated the KokoMovie logo and application icon with a fresh theme: a vibrant neon-accented palm tree wrapped in a classic celluloid film strip (styled like a decorated Christmas tree) over a dark-purple glassmorphic background. Rebuilt icons for all platforms (Windows `.ico`, macOS `.icns`, Linux `.png`s).
+
+### Fixed & Hardened (Snyk Vulnerabilities Mitigation)
+- **Electron Main Process & IPC Security**:
+  - Addressed 51 security issues reported during the repository audit.
+  - Implemented strict regex and path resolution validation in the downloader to prevent directory traversal attacks.
+  - Restricted provider IPC service listeners to the local loopback (127.0.0.1) and added rate limiting, timeout handling, and request bounds.
+  - Restricted the `postMessage` event handlers in `HeroBanner` to target origin `https://www.youtube.com` only.
+  - Sanitized backend error responses to prevent internal stack trace or system information leakage.
+- **Client & Subtitles Sanity**:
+  - Implemented secure URL sanitization for movie trailers and background backdrop images in `ContentDetail` to block open redirects and cross-site scripting (XSS).
+  - Validated buffer types in the DRM widevine handler to prevent out-of-bounds memory exposure.
+  - Hardened automated unit/integration tests by purging hardcoded authentication passwords and API key secrets.
+  - Upgraded dependencies (`drizzle-orm`, `@fastify/jwt`) to resolve upstream CVEs.
+- **Infrastructure Security**:
+  - Hardened Terraform AWS modules: configured AWS KMS CMK encryption for S3 buckets, turned on DynamoDB Point-in-Time Recovery (PITR), enabled ECS Container Insights, locked down ECR tags with immutability, and configured AWS VPC flow logs.
+  - Established a `.snyk` baseline policy file to track accepted architecture choices.
+
+---
+
 ## [1.0.3-beta] — 2026-05-22 — Custom Settings, Offline Support & Downloader Stabilisation
 
 ### Added

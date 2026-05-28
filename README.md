@@ -48,13 +48,11 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` and add your TMDB API key:
+All default configuration settings (database connection strings, microservice ports) work out of the box for local development.
 
-```env
-TMDB_API_KEY=your_key_here
-```
-
-All other defaults (database URLs, ports) work out of the box for local development.
+For the TMDB API key, you can either:
+- **Set it in the UI (Recommended)**: Start the app, go to the **Settings** sidebar tab ➔ **API Configuration**, paste your TMDB Key, and click **Validate & Save**.
+- **Set it in `.env`**: Assign it to the `TMDB_API_KEY` variable in `.env`. Note that any key configured in the Settings UI will take precedence.
 
 ### 3. Start Everything
 
@@ -146,7 +144,18 @@ Providers are configured at **Providers** in the app sidebar. All enabled provid
 
 ## TMDB API Key
 
-Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) — no credit card required. Without a key, the catalog is empty on a fresh install.
+To display movies and TV metadata, a TMDB API Key is required.
+
+### How to obtain a TMDB API Key:
+1. Register for an account at [TheMovieDB.org](https://www.themoviedb.org/).
+2. Navigate to your Account Settings page ➔ **API** (or go directly to [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)).
+3. Request an API key (select "Developer" if prompted).
+4. Fill in the request details (non-commercial use is free and instant).
+5. Copy your **API Key (v3 auth)** or **API Read Access Token (v4 auth)**.
+
+### Configuring the key in KokoMovie:
+- **Inside the App (Recommended)**: Go to **Settings** in the sidebar, open the **API Configuration** section, paste your TMDB API Key, and click **Validate & Save**. This is stored securely in local app preferences.
+- **Via Environment Variable**: For self-hosters or local developers, you can edit `.env` and assign your key to `TMDB_API_KEY`. The Settings page key always takes precedence.
 
 ---
 

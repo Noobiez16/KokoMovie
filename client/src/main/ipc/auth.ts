@@ -89,4 +89,34 @@ export function registerAuthIpc() {
     } catch {}
     setFallbackToken(REFRESH_TOKEN_ACCOUNT, token)
   })
+
+  // ─── TMDB API Key Secure Storage ───────────────────────────────────────────
+  ipcMain.handle('keychain:get-tmdb-key', async (_event, accountId: string) => {
+    const key = `tmdb-key-${accountId}`
+    try {
+      const val = await keytar.getPassword(SERVICE, key)
+      if (val) return val
+    } catch {}
+    return getFallbackTokens()[key] || null
+  })
+
+  ipcMain.handle('keychain:set-tmdb-key', async (_event, accountId: string, token: string) => {
+    const key = `tmdb-key-${accountId}`
+    try {
+      if (token === null || token === '') {
+        await keytar.deletePassword(SERVICE, key)
+      } else {
+        await keytar.setPassword(SERVICE, key, token)
+      }
+    } catch {}
+    setFallbackToken(key, token)
+  })
+
+  ipcMain.handle('keychain:clear-tmdb-key', async (_event, accountId: string) => {
+    const key = `tmdb-key-${accountId}`
+    try {
+      await keytar.deletePassword(SERVICE, key)
+    } catch {}
+    setFallbackToken(key, null)
+  })
 }

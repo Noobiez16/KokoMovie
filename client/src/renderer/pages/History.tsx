@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { userApi, type HistoryItem } from '../api/user'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -24,6 +24,16 @@ export function HistoryPage() {
   if (!activeProfile) return <Navigate to="/profiles" replace />
 
   const profileId = activeProfile.id
+
+  const queryClient = useQueryClient()
+  const removeMutation = useMutation({
+    mutationFn: (watchedAtContentId: string) =>
+      userApi.deleteHistoryItem(watchedAtContentId, profileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['history', profileId] })
+      queryClient.invalidateQueries({ queryKey: ['continue-watching', profileId] })
+    },
+  })
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError } = useInfiniteQuery({
     queryKey: ['history', profileId],
@@ -50,7 +60,7 @@ export function HistoryPage() {
     const pct = item.durationSeconds > 0
       ? (item.positionSeconds / item.durationSeconds) * 100
       : 0
-    const isCompleted = item.completedAt !== null || pct >= 90
+    const isCompleted = item.completedAt !== null || pct >= 95
 
     if (activeTab === 'completed') return isCompleted
     if (activeTab === 'in-progress') return item.positionSeconds > 0 && !isCompleted
@@ -61,7 +71,7 @@ export function HistoryPage() {
     const pct = item.durationSeconds > 0
       ? (item.positionSeconds / item.durationSeconds) * 100
       : 0
-    const isCompleted = item.completedAt !== null || pct >= 90
+    const isCompleted = item.completedAt !== null || pct >= 95
 
     const navState: any = {}
     if (!isCompleted || forceResume) {
@@ -125,7 +135,7 @@ export function HistoryPage() {
                   const pct = item.durationSeconds > 0
                     ? Math.round((item.positionSeconds / item.durationSeconds) * 100)
                     : 0
-                  const isCompleted = item.completedAt !== null || pct >= 90
+                  const isCompleted = item.completedAt !== null || pct >= 95
 
                   return (
                     <div
@@ -143,6 +153,11 @@ export function HistoryPage() {
 
                       <div className="flex-1 min-w-0">
                         <p className="text-white font-medium text-sm truncate">{item.contentTitle}</p>
+                        {item.episodeNumber !== undefined && item.seasonNumber !== undefined && (
+                          <p className="text-purple-300/80 text-xs mt-0.5">
+                            S{item.seasonNumber}:E{item.episodeNumber} {item.episodeTitle ? `— ${item.episodeTitle}` : ''}
+                          </p>
+                        )}
                         <p className="text-white/40 text-xs mt-0.5">{formatDate(item.watchedAt)}</p>
                         {item.durationSeconds > 0 && (
                           <div className="mt-1.5 flex items-center gap-2">
@@ -174,6 +189,19 @@ export function HistoryPage() {
                         {item.durationSeconds > 0 && (
                           <span className="text-white/30 text-xs">{formatDuration(item.durationSeconds)}</span>
                         )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeMutation.mutate(item.watchedAtContentId)
+                          }}
+                          disabled={removeMutation.isPending}
+                          className="flex items-center gap-1 text-purple-300/50 hover:text-red-400 disabled:opacity-50 text-[11px] font-semibold transition-colors duration-200 mt-1 cursor-pointer"
+                        >
+                          <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
+                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                          </svg>
+                          Remove
+                        </button>
                       </div>
                     </div>
                   )

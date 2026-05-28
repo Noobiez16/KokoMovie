@@ -1,5 +1,5 @@
 import { DynamoDBClient, CreateTableCommand, DescribeTableCommand, UpdateTimeToLiveCommand } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
 import { config } from '../config.js'
 
 const rawClient = new DynamoDBClient({
@@ -142,6 +142,31 @@ export interface HistoryItem {
 const HISTORY_TTL_SECS = 90 * 24 * 60 * 60
 
 export async function recordHistory(item: HistoryItem): Promise<void> {
+  // Query existing history items for this profile to find duplicates
+  try {
+    const result = await dynamo.send(new QueryCommand({
+      TableName: 'viewing_history',
+      KeyConditionExpression: 'profileId = :pid',
+      ExpressionAttributeValues: { ':pid': item.profileId },
+    }))
+    const existing = result.Items as any[] ?? []
+    const duplicates = existing.filter((x) => 
+      x.contentId === item.contentId && 
+      (x.episodeId ?? null) === (item.episodeId ?? null)
+    )
+    for (const dup of duplicates) {
+      await dynamo.send(new DeleteCommand({
+        TableName: 'viewing_history',
+        Key: {
+          profileId: item.profileId,
+          watchedAtContentId: dup.watchedAtContentId,
+        },
+      }))
+    }
+  } catch (err) {
+    console.error('Error deduplicating history items:', err)
+  }
+
   const now = item.watchedAt
   const watchedAtContentId = `${now}#${item.contentId}`
   const ttl = Math.floor(Date.now() / 1000) + HISTORY_TTL_SECS

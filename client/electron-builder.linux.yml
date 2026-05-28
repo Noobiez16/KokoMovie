@@ -12,6 +12,10 @@ files:
   - dist-electron/**/*
   - package.json
 
+extraResources:
+  - from: build/icons
+    to: icons
+
 npmRebuild: false
 asar: true
 asarUnpack:

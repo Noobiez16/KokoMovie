@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell, protocol } from 'electron'
+import { app, BrowserWindow, session, shell, protocol, nativeImage } from 'electron'
 import { join } from 'path'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
@@ -26,6 +26,11 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'offline', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ])
 
+app.name = 'KokoMovie'
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.kokomovie.app')
+}
+
 const isDev = !app.isPackaged || process.env['NODE_ENV'] === 'development'
 const devProto = 'http'
 const devHost = 'localhost:5173'
@@ -35,13 +40,19 @@ const DIST = join(__dirname, '../dist')
 let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'icons', process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : '512x512.png')
+    : join(__dirname, '..', 'build', 'icons', process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : '512x512.png')
+
   mainWindow = new BrowserWindow({
+    title: 'KokoMovie',
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 600,
     show: false,
     backgroundColor: '#0a0a0a',
+    icon: nativeImage.createFromPath(iconPath),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       // E1-S7: Security hardening — non-negotiable per architecture
