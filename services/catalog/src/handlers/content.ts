@@ -3,7 +3,6 @@ import { z } from 'zod'
 import { db } from '../db/connection.js'
 import { content, genres, contentGenres, castMembers, contentCast, seasons, episodes } from '../db/schema.js'
 import { redis } from '../redis/client.js'
-import { config } from '../config.js'
 import { eq, and, asc } from 'drizzle-orm'
 import {
   createTmdbClient, posterUrl, backdropUrl, tmdbContentId, TMDB_GENRE_MAP,
@@ -16,7 +15,7 @@ const paramsSchema = z.object({ id: z.string() })
 
 function getTmdbKey(request?: FastifyRequest): string {
   const headerKey = request?.headers['x-tmdb-key'] as string | undefined
-  return headerKey?.trim() || config.TMDB_API_KEY
+  return headerKey?.trim() || ''
 }
 
 function hasTmdb(request?: FastifyRequest): boolean {

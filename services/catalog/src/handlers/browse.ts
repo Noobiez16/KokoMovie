@@ -3,7 +3,6 @@ import { z } from 'zod'
 import { db } from '../db/connection.js'
 import { content, genres, contentGenres } from '../db/schema.js'
 import { redis } from '../redis/client.js'
-import { config } from '../config.js'
 import { eq, and, inArray, desc, sql } from 'drizzle-orm'
 import { createTmdbClient, tmdbContentId, posterUrl, backdropUrl, tmdbTitle, tmdbType, tmdbYear, TMDB_GENRE_MAP } from '../lib/tmdb.js'
 import { syncTrending, syncPopular } from '../lib/tmdb-sync.js'
@@ -18,7 +17,7 @@ const browseQuerySchema = z.object({
 
 function getTmdbKey(request?: FastifyRequest): string {
   const headerKey = request?.headers['x-tmdb-key'] as string | undefined
-  return headerKey?.trim() || config.TMDB_API_KEY
+  return headerKey?.trim() || ''
 }
 
 function hasTmdb(request?: FastifyRequest): boolean {

@@ -1,6 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { config } from '../config.js'
 import { createTmdbClient, tmdbContentId, posterUrl, backdropUrl, tmdbTitle, tmdbType, tmdbYear } from '../lib/tmdb.js'
 
 const searchQuerySchema = z.object({
@@ -11,7 +10,7 @@ const searchQuerySchema = z.object({
 
 function getTmdbKey(request?: FastifyRequest): string {
   const headerKey = request?.headers['x-tmdb-key'] as string | undefined
-  return headerKey?.trim() || config.TMDB_API_KEY
+  return headerKey?.trim() || ''
 }
 
 function toSummary(item: { id: number; title?: string; name?: string; overview: string | null; poster_path: string | null; backdrop_path: string | null; release_date?: string; first_air_date?: string; vote_average: number; media_type?: string }) {
