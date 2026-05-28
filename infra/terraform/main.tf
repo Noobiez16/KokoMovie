@@ -48,6 +48,19 @@ provider "aws" {
   }
 }
 
+# ─── KMS Encryption Key ──────────────────────────────────────────────────────
+
+resource "aws_kms_key" "streamflix" {
+  description             = "KMS key for Streamflix infrastructure encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_alias" "streamflix" {
+  name          = "alias/streamflix-${var.environment}"
+  target_key_id = aws_kms_key.streamflix.key_id
+}
+
 # ─── Modules ─────────────────────────────────────────────────────────────────
 
 module "vpc" {
@@ -55,12 +68,14 @@ module "vpc" {
   environment = var.environment
   aws_region  = var.aws_region
   vpc_cidr    = var.vpc_cidr
+  kms_key_arn = aws_kms_key.streamflix.arn
 }
 
 module "ecr" {
   source      = "./modules/ecr"
   environment = var.environment
   services    = ["auth", "catalog", "playback", "user", "recommendation"]
+  kms_key_arn = aws_kms_key.streamflix.arn
 }
 
 module "rds" {
@@ -71,6 +86,7 @@ module "rds" {
   db_security_group_id = module.vpc.db_security_group_id
   db_password         = var.db_password
   instance_class      = var.rds_instance_class
+  kms_key_arn         = aws_kms_key.streamflix.arn
 }
 
 module "elasticache" {
@@ -80,12 +96,14 @@ module "elasticache" {
   private_subnet_ids   = module.vpc.private_subnet_ids
   cache_security_group_id = module.vpc.cache_security_group_id
   node_type            = var.elasticache_node_type
+  kms_key_arn          = aws_kms_key.streamflix.arn
 }
 
 module "dynamodb" {
   source      = "./modules/dynamodb"
   environment = var.environment
   dr_region   = var.dr_region
+  kms_key_arn = aws_kms_key.streamflix.arn
 }
 
 module "msk" {
@@ -95,11 +113,13 @@ module "msk" {
   private_subnet_ids   = module.vpc.private_subnet_ids
   msk_security_group_id = module.vpc.msk_security_group_id
   broker_instance_type = var.msk_broker_instance_type
+  kms_key_arn          = aws_kms_key.streamflix.arn
 }
 
 module "s3" {
   source      = "./modules/s3"
   environment = var.environment
+  kms_key_arn = aws_kms_key.streamflix.arn
 }
 
 module "cloudfront" {
@@ -133,6 +153,8 @@ module "ecs" {
   stripe_secret_arn       = var.stripe_secret_arn
   anthropic_api_key_arn   = var.anthropic_api_key_arn
   desired_count           = var.ecs_desired_count
+  kms_key_arn             = aws_kms_key.streamflix.arn
+  s3_logs_bucket_id       = module.s3.logs_bucket_id
 }
 
 module "route53" {

@@ -16,9 +16,20 @@ async function doFetch(url: string, method: string, headers: Record<string, stri
 
 class ApiClient {
   private baseUrl: string
+  private customHeaders: Record<string, string> = {}
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl
+  }
+
+  /** Set a custom header that will be sent with every request from this client */
+  setHeader(key: string, value: string) {
+    this.customHeaders[key] = value
+  }
+
+  /** Remove a custom header */
+  removeHeader(key: string) {
+    delete this.customHeaders[key]
   }
 
   async request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -27,6 +38,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       'X-Client-Version': '1.0.0',
       'X-Platform': `electron-${navigator.platform.toLowerCase().includes('win') ? 'windows' : navigator.platform.toLowerCase().includes('mac') ? 'macos' : 'linux'}`,
+      ...this.customHeaders,
     }
 
     if (body !== undefined) {
@@ -112,3 +124,23 @@ export const userClient = new ApiClient(import.meta.env['VITE_USER_URL'] ?? 'htt
 export const catalogClient = new ApiClient(import.meta.env['VITE_CATALOG_URL'] ?? 'http://localhost:3002')
 export const playbackClient = new ApiClient(import.meta.env['VITE_PLAYBACK_URL'] ?? 'http://localhost:3003')
 export const recommendationClient = new ApiClient(import.meta.env['VITE_RECOMMENDATION_URL'] ?? 'http://localhost:3005')
+
+// ── Sync TMDB key from settings store into catalog client headers ────────────
+import { useSettingsStore } from '../store/settings'
+
+function syncTmdbKey(key: string) {
+  if (key.trim()) {
+    catalogClient.setHeader('X-TMDB-Key', key.trim())
+  } else {
+    catalogClient.removeHeader('X-TMDB-Key')
+  }
+}
+
+// Set initial value on module load
+syncTmdbKey(useSettingsStore.getState().tmdbApiKey)
+
+// React to future changes
+useSettingsStore.subscribe(
+  (state) => syncTmdbKey(state.tmdbApiKey),
+)
+

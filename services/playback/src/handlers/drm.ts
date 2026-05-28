@@ -18,7 +18,7 @@ export async function drmLicenseHandler(request: FastifyRequest, reply: FastifyR
   }
 
   const challenge = request.body as Buffer
-  if (!challenge || challenge.length === 0) {
+  if (!challenge || !Buffer.isBuffer(challenge) || challenge.length === 0) {
     return reply.code(400).send({
       success: false,
       error: { code: 'VALIDATION_ERROR', message: 'License challenge body is required' },

@@ -45,11 +45,13 @@ resource "aws_elasticache_replication_group" "main" {
 resource "aws_cloudwatch_log_group" "redis_slow_logs" {
   name              = "/elasticache/streamflix-${var.environment}/slow-logs"
   retention_in_days = 7
+  kms_key_id        = var.kms_key_arn
 }
 
 resource "aws_secretsmanager_secret" "redis" {
   name = "streamflix/${var.environment}/redis-url"
   recovery_window_in_days = 0
+  kms_key_id              = var.kms_key_arn
 }
 
 resource "aws_secretsmanager_secret_version" "redis" {

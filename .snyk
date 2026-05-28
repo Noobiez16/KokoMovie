@@ -1,0 +1,43 @@
+# Snyk policy file, patch or ignore known vulnerabilities or exclude paths from scanning
+version: v1.25.0
+ignore:
+  SNYK-CC-TF-70:
+    - '*':
+        reason: "ALB ingress must be public-facing on ports 80/443"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-TF-72:
+    - '*':
+        reason: "ALB ingress must be public-facing on ports 80/443"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-00170:
+    - '*':
+        reason: "ALB ingress must be public-facing on ports 80/443"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-TF-73:
+    - '*':
+        reason: "Security groups require outbound egress to communicate with external APIs and services"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-00171:
+    - '*':
+        reason: "Security groups require outbound egress to communicate with external APIs and services"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-TF-124:
+    - '*':
+        reason: "Application Load Balancer must be internet-facing to serve public requests"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-TF-125:
+    - '*':
+        reason: "Application Load Balancer must be internet-facing to serve public requests"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-00231:
+    - '*':
+        reason: "Application Load Balancer must be internet-facing to serve public requests"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-TF-127:
+    - '*':
+        reason: "MFA delete is a manual root-account level setting and not feasible programmatically"
+        expires: '2030-01-01T00:00:00.000Z'
+  SNYK-CC-00234:
+    - '*':
+        reason: "MFA delete is a manual root-account level setting and not feasible programmatically"
+        expires: '2030-01-01T00:00:00.000Z'

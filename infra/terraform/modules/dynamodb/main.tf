@@ -98,7 +98,12 @@ resource "aws_dynamodb_table" "tables" {
   }
 
   point_in_time_recovery {
-    enabled = var.environment == "production"
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.kms_key_arn
   }
 
   # Enable Global Tables for DR

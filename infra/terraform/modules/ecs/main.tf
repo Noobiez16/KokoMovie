@@ -67,6 +67,10 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 
 # ─── ALB ─────────────────────────────────────────────────────────────────────
 
+# tfsec:ignore:aws-elb-alb-not-public
+# snyk:ignore:SNYK-CC-TF-124
+# snyk:ignore:SNYK-CC-TF-125
+# snyk:ignore:SNYK-CC-00231
 resource "aws_lb" "main" {
   name               = "streamflix-${var.environment}"
   internal           = false
@@ -75,6 +79,7 @@ resource "aws_lb" "main" {
   subnets            = var.public_subnet_ids
 
   enable_deletion_protection = var.environment == "production"
+  drop_invalid_header_fields = true
 
   access_logs {
     bucket  = aws_s3_bucket.alb_logs.bucket
@@ -88,6 +93,39 @@ resource "aws_lb" "main" {
 resource "aws_s3_bucket" "alb_logs" {
   bucket        = "streamflix-alb-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
+}
+
+# tfsec:ignore:aws-s3-enable-versioning-mfa-delete
+# snyk:ignore:SNYK-CC-TF-127
+# snyk:ignore:SNYK-CC-00234
+resource "aws_s3_bucket_versioning" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  bucket                  = aws_s3_bucket.alb_logs.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_logging" "alb_logs" {
+  bucket        = aws_s3_bucket.alb_logs.id
+  target_bucket = var.s3_logs_bucket_id
+  target_prefix = "alb_logs/"
 }
 
 data "aws_caller_identity" "current" {}
@@ -234,6 +272,7 @@ resource "aws_cloudwatch_log_group" "services" {
   for_each          = local.services
   name              = "/ecs/streamflix-${var.environment}/${each.key}"
   retention_in_days = 30
+  kms_key_id        = var.kms_key_arn
 }
 
 # ─── Task Definitions ────────────────────────────────────────────────────────

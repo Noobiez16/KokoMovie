@@ -80,6 +80,7 @@ resource "aws_msk_configuration" "main" {
 resource "aws_cloudwatch_log_group" "msk" {
   name              = "/msk/streamflix-${var.environment}"
   retention_in_days = 7
+  kms_key_id        = var.kms_key_arn
 }
 
 # Topics

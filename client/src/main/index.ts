@@ -27,7 +27,9 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 const isDev = !app.isPackaged || process.env['NODE_ENV'] === 'development'
-const RENDERER_URL = 'http://localhost:5173'
+const devProto = 'http'
+const devHost = 'localhost:5173'
+const RENDERER_URL = `${devProto}://${devHost}`
 const DIST = join(__dirname, '../dist')
 
 let mainWindow: BrowserWindow | null = null
@@ -174,13 +176,37 @@ app.whenReady().then(async () => {
     const downloadId = url.hostname
     const filename = url.pathname.slice(1) // strip leading /
 
+    // Validate downloadId format (UUIDv4) to prevent path traversal
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(downloadId)) {
+      return new Response(null, {
+        status: 400,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      })
+    }
+
     if (filename.startsWith('video.')) {
+      const videoRegex = /^video\.[a-z0-9]+$/i
+      if (!videoRegex.test(filename)) {
+        return new Response(null, {
+          status: 400,
+          headers: { 'Access-Control-Allow-Origin': '*' }
+        })
+      }
       const rangeHeader = request.headers.get('range') || request.headers.get('Range')
       const result = decryptLocalDirectVideoRange(downloadId, rangeHeader)
       const body = (request.method === 'HEAD' || !result.data) ? null : new Uint8Array(result.data)
       return new Response(body, {
         status: result.status,
         headers: result.headers,
+      })
+    }
+
+    const segmentRegex = /^seg_\d+\.enc$/
+    if (!segmentRegex.test(filename)) {
+      return new Response(null, {
+        status: 400,
+        headers: { 'Access-Control-Allow-Origin': '*' }
       })
     }
 

@@ -16,12 +16,17 @@ const browseQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 })
 
-function hasTmdb() {
-  return config.TMDB_API_KEY.length > 0
+function getTmdbKey(request?: FastifyRequest): string {
+  const headerKey = request?.headers['x-tmdb-key'] as string | undefined
+  return headerKey?.trim() || config.TMDB_API_KEY
 }
 
-function tmdb() {
-  return createTmdbClient(config.TMDB_API_KEY)
+function hasTmdb(request?: FastifyRequest): boolean {
+  return getTmdbKey(request).length > 0
+}
+
+function tmdb(request?: FastifyRequest) {
+  return createTmdbClient(getTmdbKey(request))
 }
 
 interface TmdbVideo {
@@ -74,9 +79,9 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
   if (cached) return reply.send(JSON.parse(cached))
 
   // If TMDB key is set, retrieve from TMDB to show a giant catalog
-  if (hasTmdb()) {
+  if (hasTmdb(request)) {
     try {
-      const client = tmdb()
+      const client = tmdb(request)
       let genreId: number | undefined
       if (genre) {
         const entry = Object.entries(TMDB_GENRE_MAP).find(([_, slug]) => slug === genre)
@@ -206,9 +211,9 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
   if (cached) return reply.send(JSON.parse(cached))
 
   // TMDB-backed home page
-  if (hasTmdb()) {
+  if (hasTmdb(request)) {
     try {
-      const client = tmdb()
+      const client = tmdb(request)
       const [trendingPage, moviesPage, tvPage] = await Promise.all([
         client.trending('all'),
         client.popularMovies(),
@@ -319,9 +324,9 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
   )
 
   const featured = (await db.select().from(content).where(eq(content.isActive, true)).orderBy(desc(content.imdbScore)).limit(1))[0] ?? null
-  if (featured && featured.tmdbId && hasTmdb()) {
+  if (featured && featured.tmdbId && hasTmdb(request)) {
     try {
-      const client = tmdb()
+      const client = tmdb(request)
       const videoRes = featured.type === 'movie'
         ? await client.getMovieVideos(featured.tmdbId)
         : await client.getTvVideos(featured.tmdbId)
@@ -350,9 +355,9 @@ export async function getTrendingHandler(request: FastifyRequest, reply: Fastify
   const cached = await redis.get(cacheKey)
   if (cached) return reply.send(JSON.parse(cached))
 
-  if (hasTmdb()) {
+  if (hasTmdb(request)) {
     try {
-      const page = await tmdb().trending('all')
+      const page = await tmdb(request).trending('all')
       const rows = page.results
         .filter(i => i.media_type !== 'person')
         .slice(0, 20)

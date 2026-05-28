@@ -12,6 +12,16 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
 import type { ContentSummary } from '../api/catalog'
 
+function sanitizeUrl(url: string | null | undefined): string {
+  if (!url) return ''
+  const trimmed = url.trim()
+  // Allow relative, absolute paths starting with /, http, https, or data:image/
+  if (trimmed.startsWith('/') || /^https?:\/\//i.test(trimmed) || /^data:image\//i.test(trimmed)) {
+    return trimmed
+  }
+  return ''
+}
+
 export function ContentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -187,7 +197,11 @@ export function ContentDetailPage() {
 
     if (resumePosition !== undefined && resumePosition > 0) {
       // Clear navigation state to prevent auto-resume loops
-      navigate(location.pathname, {
+      // Ensure redirect path is relative and safe to prevent open redirect
+      const safePath = location.pathname.startsWith('/') && !location.pathname.startsWith('//')
+        ? location.pathname
+        : '/browse'
+      navigate(safePath, {
         replace: true,
         state: {
           ...navState,
@@ -561,7 +575,7 @@ export function ContentDetailPage() {
       <div className="relative">
         {thumbnail ? (
           <div className="relative h-[45vh] overflow-hidden">
-            <img src={thumbnail} alt={content.title} className="w-full h-full object-cover" />
+            <img src={sanitizeUrl(thumbnail)} alt={content.title} className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-km-bg/60 to-km-bg" />
           </div>
         ) : (
@@ -749,7 +763,7 @@ export function ContentDetailPage() {
                       {ep.episodeNumber}
                     </div>
                     {ep.s3ThumbnailKey ? (
-                      <img src={ep.s3ThumbnailKey} alt={ep.title} className="w-24 h-14 object-cover rounded flex-shrink-0" />
+                      <img src={sanitizeUrl(ep.s3ThumbnailKey)} alt={ep.title} className="w-24 h-14 object-cover rounded flex-shrink-0" />
                     ) : (
                       <div className="w-24 h-14 bg-white/5 rounded flex-shrink-0 flex items-center justify-center">
                         <span className="text-white/20 text-2xl">▶</span>

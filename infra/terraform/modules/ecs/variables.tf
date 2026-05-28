@@ -18,3 +18,5 @@ variable "stripe_secret_arn"        { type = string }
 variable "anthropic_api_key_arn"    { type = string }
 variable "desired_count"            { type = number }
 variable "domain_name"              { type = string; default = "streamflix.com" }
+variable "kms_key_arn"              { type = string }
+variable "s3_logs_bucket_id"        { type = string }

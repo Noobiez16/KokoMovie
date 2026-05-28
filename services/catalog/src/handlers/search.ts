@@ -9,6 +9,11 @@ const searchQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
 })
 
+function getTmdbKey(request?: FastifyRequest): string {
+  const headerKey = request?.headers['x-tmdb-key'] as string | undefined
+  return headerKey?.trim() || config.TMDB_API_KEY
+}
+
 function toSummary(item: { id: number; title?: string; name?: string; overview: string | null; poster_path: string | null; backdrop_path: string | null; release_date?: string; first_air_date?: string; vote_average: number; media_type?: string }) {
   const type = (item.media_type === 'tv' || item.name !== undefined) ? 'series' : 'movie'
   const tmdbType_ = type === 'series' ? 'tv' : 'movie'
@@ -39,8 +44,9 @@ export async function searchHandler(request: FastifyRequest, reply: FastifyReply
   }
 
   const { q, type, page } = parsed.data
+  const tmdbKey = getTmdbKey(request)
 
-  if (!config.TMDB_API_KEY) {
+  if (!tmdbKey) {
     return reply.send({
       success: true,
       data: [],
@@ -49,7 +55,7 @@ export async function searchHandler(request: FastifyRequest, reply: FastifyReply
   }
 
   try {
-    const client = createTmdbClient(config.TMDB_API_KEY)
+    const client = createTmdbClient(tmdbKey)
     const results = await client.searchMulti(q, page)
     let items = results.results
       .filter(i => i.media_type !== 'person')

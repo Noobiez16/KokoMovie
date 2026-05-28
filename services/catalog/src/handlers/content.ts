@@ -14,12 +14,17 @@ import { syncMovie, syncTv } from '../lib/tmdb-sync.js'
 
 const paramsSchema = z.object({ id: z.string() })
 
-function hasTmdb() {
-  return config.TMDB_API_KEY.length > 0
+function getTmdbKey(request?: FastifyRequest): string {
+  const headerKey = request?.headers['x-tmdb-key'] as string | undefined
+  return headerKey?.trim() || config.TMDB_API_KEY
 }
 
-function tmdb() {
-  return createTmdbClient(config.TMDB_API_KEY)
+function hasTmdb(request?: FastifyRequest): boolean {
+  return getTmdbKey(request).length > 0
+}
+
+function tmdb(request?: FastifyRequest) {
+  return createTmdbClient(getTmdbKey(request))
 }
 
 export async function getContentHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -38,11 +43,11 @@ export async function getContentHandler(request: FastifyRequest, reply: FastifyR
   const [row] = await db.select().from(content).where(eq(content.id, id)).limit(1)
 
   // If found in DB with tmdb_id, fetch full TMDB detail if not already synced (no imdb_id means not fully synced)
-  if (row?.tmdbId && hasTmdb() && !row.imdbId) {
+  if (row?.tmdbId && hasTmdb(request) && !row.imdbId) {
     try {
       const syncedId = row.type === 'movie'
-        ? await syncMovie(tmdb(), row.tmdbId)
-        : await syncTv(tmdb(), row.tmdbId)
+        ? await syncMovie(tmdb(request), row.tmdbId)
+        : await syncTv(tmdb(request), row.tmdbId)
       if (syncedId) {
         const [refreshed] = await db.select().from(content).where(eq(content.id, syncedId)).limit(1)
         if (refreshed) {
@@ -58,13 +63,13 @@ export async function getContentHandler(request: FastifyRequest, reply: FastifyR
 
   // Not in DB — try to resolve via TMDB directly if key is set
   // (This handles cases where the ID was generated client-side before DB sync, or on page reload)
-  if (hasTmdb()) {
+  if (hasTmdb(request)) {
     const decoded = decodeTmdbContentId(id)
     if (decoded) {
       try {
         const syncedId = decoded.type === 'movie'
-          ? await syncMovie(tmdb(), decoded.tmdbId)
-          : await syncTv(tmdb(), decoded.tmdbId)
+          ? await syncMovie(tmdb(request), decoded.tmdbId)
+          : await syncTv(tmdb(request), decoded.tmdbId)
         
         // Re-fetch from DB after sync
         if (syncedId) {
@@ -115,9 +120,9 @@ async function serveFromDb(id: string, request: FastifyRequest, reply: FastifyRe
       seasonRows.map(async (s) => {
         let episodeRows = await db.select().from(episodes).where(eq(episodes.seasonId, s.id)).orderBy(asc(episodes.episodeNumber))
         // Lazy-load episodes from TMDB if season has none (handles old syncs that only fetched season 1)
-        if (episodeRows.length === 0 && row.tmdbId && hasTmdb()) {
+        if (episodeRows.length === 0 && row.tmdbId && hasTmdb(request)) {
           try {
-            const seasonDetail = await tmdb().getSeason(row.tmdbId, s.seasonNumber as unknown as number)
+            const seasonDetail = await tmdb(request).getSeason(row.tmdbId, s.seasonNumber as unknown as number)
             for (const ep of seasonDetail.episodes ?? []) {
               await db.insert(episodes).values({
                 seasonId: s.id,
@@ -150,7 +155,7 @@ async function serveFromDb(id: string, request: FastifyRequest, reply: FastifyRe
 
 // Sync a TMDB item on first view (called by client when content detail is requested for a TMDB item not in DB)
 export async function syncContentHandler(request: FastifyRequest, reply: FastifyReply) {
-  if (!hasTmdb()) return reply.code(503).send({ success: false, error: { code: 'NO_TMDB', message: 'TMDB not configured' }, meta: {} })
+  if (!hasTmdb(request)) return reply.code(503).send({ success: false, error: { code: 'NO_TMDB', message: 'TMDB not configured' }, meta: {} })
 
   const body = z.object({
     tmdbId: z.number().int().positive(),
@@ -159,7 +164,7 @@ export async function syncContentHandler(request: FastifyRequest, reply: Fastify
   if (!body.success) return reply.code(400).send({ success: false, error: { code: 'VALIDATION_ERROR', message: body.error.message }, meta: {} })
 
   const { tmdbId, type } = body.data
-  const client = tmdb()
+  const client = tmdb(request)
 
   try {
     const id = type === 'movie' ? await syncMovie(client, tmdbId) : await syncTv(client, tmdbId)

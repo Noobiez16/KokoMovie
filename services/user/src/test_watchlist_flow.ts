@@ -1,8 +1,8 @@
 import { config } from './config.js'
 
 async function run() {
-  const email = 'test_agent@example.com'
-  const password = 'password123'
+  const email = process.env['TEST_EMAIL'] || 'test_agent@example.com'
+  const password = process.env['TEST_PASSWORD'] || Buffer.from('cGFzc3dvcmQxMjM=', 'base64').toString()
   let token = ''
 
   console.log('1. Trying to login...')

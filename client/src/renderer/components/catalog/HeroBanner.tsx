@@ -30,7 +30,7 @@ export function HeroBanner({ content }: Props) {
       const command = nextMuted ? 'mute' : 'unMute'
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: 'command', func: command, args: [] }),
-        '*'
+        'https://www.youtube.com'
       )
     }
   }

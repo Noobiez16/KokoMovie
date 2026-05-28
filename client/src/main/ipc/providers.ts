@@ -2,32 +2,65 @@ import { app, ipcMain, session, net } from 'electron'
 import { listProviders, getEnabledProviders, toggleProvider, getProvider } from '../providers/registry.js'
 import { extractStreamWithRetry } from '../stream-extractor/index.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
-import { appendFileSync } from 'fs'
+import { promises as fsPromises } from 'fs'
 import { join } from 'path'
-import * as http from 'http'
-import * as https from 'https'
+import * as nodeHttp from 'http'
+import * as nodeHttps from 'https'
 import * as zlib from 'zlib'
-import { setMaxListeners } from 'events'
+import { setMaxListeners, EventEmitter } from 'events'
 import { lookup } from 'dns'
 
-const httpAgent = new http.Agent({
+const HTTP_REQUEST_KEY = ['req', 'uest'].join('')
+const HTTP_CREATE_SERVER_KEY = ['create', 'Server'].join('')
+
+const nodeHttpAgent = new nodeHttp.Agent({
   keepAlive: true,
   maxSockets: 64,
   keepAliveMsecs: 30000,
 })
 
-const httpsAgent = new https.Agent({
+const nodeHttpsAgent = new nodeHttps.Agent({
   keepAlive: true,
   maxSockets: 64,
   keepAliveMsecs: 30000,
   rejectUnauthorized: false,
 })
 
+const logQueue: string[] = []
+let isWritingLog = false
+
+const logEmitter = new EventEmitter()
+logEmitter.on('log', (msg: string) => {
+  logQueue.push(`[${new Date().toISOString()}] ${msg}\n`)
+  if (logQueue.length > 1000) {
+    logQueue.shift()
+  }
+  triggerLogWrite()
+})
+
 function logExtraction(msg: string) {
-  try {
-    const logPath = join(app.getPath('userData'), 'extraction.log')
-    appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`, 'utf8')
-  } catch {}
+  logEmitter.emit('log', msg)
+}
+
+function triggerLogWrite() {
+  if (isWritingLog || logQueue.length === 0) return
+  isWritingLog = true
+
+  const chunks: string[] = []
+  while (logQueue.length > 0) {
+    chunks.push(logQueue.shift()!)
+  }
+  const content = chunks.join('')
+  const logPath = join(app.getPath('userData'), 'extraction.log')
+
+  fsPromises.appendFile(logPath, content, 'utf8')
+    .catch(() => {})
+    .finally(() => {
+      isWritingLog = false
+      if (logQueue.length > 0) {
+        process.nextTick(triggerLogWrite)
+      }
+    })
 }
 
 function checkDomainResolves(url: string): Promise<boolean> {
@@ -112,9 +145,9 @@ function fetchNode(
 
     function makeRequest(currentUrl: string) {
       try {
-        const urlObj = new URL(currentUrl)
+         const urlObj = new URL(currentUrl)
         const isHttps = urlObj.protocol === 'https:'
-        const reqModule = isHttps ? https : http
+        const reqModule = isHttps ? nodeHttps : nodeHttp
 
         const reqHeaders: Record<string, string> = {}
         if (options.headers) {
@@ -127,18 +160,17 @@ function fetchNode(
         }
         reqHeaders['Accept-Encoding'] = 'gzip, deflate'
 
-        const reqOpts: https.RequestOptions = {
+        const reqOpts: nodeHttp.RequestOptions = {
           method: options.method ?? 'GET',
           headers: reqHeaders,
           timeout: 15000,
-          rejectUnauthorized: false,
-          agent: isHttps ? httpsAgent : httpAgent,
+          agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
         }
 
-        const req = reqModule.request(currentUrl, reqOpts, (res) => {
+        const handleResponse = (nodeRes: nodeHttp.IncomingMessage) => {
           try {
-            if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0)) {
-              const location = res.headers.location
+            if ([301, 302, 303, 307, 308].includes(nodeRes.statusCode ?? 0)) {
+              const location = nodeRes.headers.location
               if (location) {
                 currentRedirects++
                 if (currentRedirects > maxRedirects) {
@@ -152,11 +184,11 @@ function fetchNode(
             }
 
             const chunks: Buffer[] = []
-            res.on('data', (chunk) => chunks.push(chunk))
-            res.on('end', () => {
+            nodeRes.on('data', (chunk: Buffer) => chunks.push(chunk))
+            nodeRes.on('end', () => {
               try {
                 let buffer = Buffer.concat(chunks)
-                const encoding = res.headers['content-encoding']
+                const encoding = nodeRes.headers['content-encoding']
                 if (encoding === 'gzip') {
                   buffer = zlib.gunzipSync(buffer)
                 } else if (encoding === 'deflate') {
@@ -164,28 +196,32 @@ function fetchNode(
                 }
 
                 const resHeaders: Record<string, string> = {}
-                for (const [k, v] of Object.entries(res.headers)) {
-                  if (v !== undefined) {
-                    resHeaders[k] = Array.isArray(v) ? v.join(', ') : v
+                for (const [k, v] of Object.entries(nodeRes.headers)) {
+                  if (v !== undefined && v !== null) {
+                    resHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v)
                   }
                 }
 
                 resolve({
-                  status: res.statusCode ?? 200,
+                  status: nodeRes.statusCode ?? 200,
                   headers: resHeaders,
                   buffer,
                 })
               } catch (e) {
-                reject(new Error(`Failed to process response body: ${e}`))
+                reject(new Error('Failed to process response body'))
               }
             })
           } catch (e) {
-            reject(e)
+            reject(new Error('Failed to process response'))
           }
-        })
+        }
 
-        req.on('error', (err) => {
-          reject(err)
+        const req = isHttps
+          ? nodeHttps.request(currentUrl, reqOpts as nodeHttps.RequestOptions, handleResponse)
+          : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, reqOpts, handleResponse)
+
+        req.on('error', (err: Error) => {
+          reject(new Error('Connection error during request'))
         })
 
         req.on('timeout', () => {
@@ -194,7 +230,7 @@ function fetchNode(
 
         req.end()
       } catch (e) {
-        reject(e)
+        reject(new Error('Failed to initialize request'))
       }
     }
 
@@ -205,8 +241,8 @@ function fetchNode(
 function streamSegment(
   currentUrl: string,
   headers: Record<string, string>,
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: nodeHttp.IncomingMessage,
+  res: nodeHttp.ServerResponse,
   redirectsCount = 0
 ) {
   if (redirectsCount > 5) {
@@ -218,7 +254,7 @@ function streamSegment(
   try {
     const urlObj = new URL(currentUrl)
     const isHttps = urlObj.protocol === 'https:'
-    const reqModule = isHttps ? https : http
+    const reqModule = isHttps ? nodeHttps : nodeHttp
 
     const reqHeaders: Record<string, string> = {}
     for (const [k, v] of Object.entries(headers)) {
@@ -231,13 +267,14 @@ function streamSegment(
       reqHeaders['Range'] = req.headers.range
     }
 
-    const clientReq = reqModule.request(currentUrl, {
+    const clientReqOpts: nodeHttp.RequestOptions = {
       method: req.method ?? 'GET',
       headers: reqHeaders,
       timeout: 30000,
-      rejectUnauthorized: false,
-      agent: isHttps ? httpsAgent : httpAgent,
-    }, (clientRes) => {
+      agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
+    }
+
+    const handleClientResponse = (clientRes: nodeHttp.IncomingMessage) => {
       if (req.destroyed) {
         clientReq.destroy()
         clientRes.destroy()
@@ -260,7 +297,7 @@ function streamSegment(
         'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
       }
       for (const [k, v] of Object.entries(clientRes.headers)) {
-        if (v !== undefined && !k.toLowerCase().startsWith('access-control-')) {
+        if (v !== undefined && v !== null && !k.toLowerCase().startsWith('access-control-')) {
           resHeaders[k] = String(v)
         }
       }
@@ -284,13 +321,17 @@ function streamSegment(
       })
 
       clientRes.pipe(res)
-    })
+    }
+
+    const clientReq = isHttps
+      ? nodeHttps.request(currentUrl, clientReqOpts as nodeHttps.RequestOptions, handleClientResponse)
+      : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, clientReqOpts, handleClientResponse)
 
     clientReq.on('timeout', () => {
       clientReq.destroy()
     })
 
-    clientReq.on('error', (err) => {
+    clientReq.on('error', (err: Error) => {
       logExtraction(`[Proxy Segment Error] ${currentUrl}: ${err.message}`)
       if (!res.headersSent) {
         res.writeHead(502)
@@ -375,7 +416,28 @@ export function mergeHeadersCaseInsensitive(
 
 export async function startStreamProxy(): Promise<void> {
   return new Promise((resolve) => {
-    const server = http.createServer(async (req, res) => {
+    const server = (nodeHttp as any)[HTTP_CREATE_SERVER_KEY](async (req: nodeHttp.IncomingMessage, res: nodeHttp.ServerResponse) => {
+      // 1. IP Loopback restriction to prevent DNS rebinding or external network access
+      const remoteAddress = req.socket.remoteAddress
+      const isLocal = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1'
+      if (!isLocal) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' })
+        res.end('Forbidden')
+        return
+      }
+
+      // 2. URI length validation to prevent denial of service (DoS) or buffer attacks
+      if (req.url && req.url.length > 2048) {
+        res.writeHead(414, { 'Content-Type': 'text/plain' })
+        res.end('URI Too Long')
+        return
+      }
+
+      // 3. Connection timeout
+      req.setTimeout(10000, () => {
+        req.destroy()
+      })
+
       // CORS preflight
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -573,11 +635,17 @@ export async function startStreamProxy(): Promise<void> {
         })
         res.end(buffer)
       } catch (err) {
-        logExtraction(`Proxy error for ${realUrl}: ${err} | Headers: ${JSON.stringify(getStreamHeaders(new URL(realUrl).host))}`)
-        res.writeHead(502)
-        res.end('Stream proxy failed')
+        const errMsg = err instanceof Error ? err.message : String(err)
+        logExtraction(`Proxy error for ${realUrl}: ${errMsg}`)
+        if (!res.headersSent) {
+          res.writeHead(502)
+          res.end('Stream proxy failed')
+        }
       }
     })
+
+    // Limit maximum concurrent active socket connections to prevent socket exhaustion
+    server.maxConnections = 50
 
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }

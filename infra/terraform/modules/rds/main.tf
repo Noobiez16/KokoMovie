@@ -42,7 +42,9 @@ resource "aws_rds_cluster" "main" {
   skip_final_snapshot          = var.environment != "production"
   final_snapshot_identifier    = var.environment == "production" ? "streamflix-${var.environment}-final" : null
 
-  storage_encrypted = true
+  storage_encrypted               = true
+  kms_key_id                      = var.kms_key_arn
+  iam_database_authentication_enabled = true
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
   tags = { Name = "streamflix-${var.environment}" }
@@ -102,6 +104,7 @@ resource "aws_iam_role_policy_attachment" "rds_monitoring" {
 resource "aws_secretsmanager_secret" "db" {
   name = "streamflix/${var.environment}/database-url"
   recovery_window_in_days = var.environment == "production" ? 30 : 0
+  kms_key_id              = var.kms_key_arn
 }
 
 resource "aws_secretsmanager_secret_version" "db" {

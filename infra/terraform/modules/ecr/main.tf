@@ -4,7 +4,7 @@ data "aws_region" "current" {}
 resource "aws_ecr_repository" "service" {
   for_each             = toset(var.services)
   name                 = "streamflix-${each.key}"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = var.environment != "production"
 
   image_scanning_configuration {
@@ -12,7 +12,8 @@ resource "aws_ecr_repository" "service" {
   }
 
   encryption_configuration {
-    encryption_type = "AES256"
+    encryption_type = "KMS"
+    kms_key         = var.kms_key_arn
   }
 
   tags = { Service = each.key }

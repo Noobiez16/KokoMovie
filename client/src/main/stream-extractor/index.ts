@@ -1,13 +1,38 @@
 import { app, BrowserWindow, session } from 'electron'
-import { appendFileSync } from 'fs'
+import { promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { lookup } from 'dns'
 
+const logQueue: string[] = []
+let isWritingLog = false
+
 function logExtraction(msg: string) {
-  try {
-    const logPath = join(app.getPath('userData'), 'extraction.log')
-    appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`, 'utf8')
-  } catch {}
+  logQueue.push(`[${new Date().toISOString()}] ${msg}\n`)
+  if (logQueue.length > 1000) {
+    logQueue.shift()
+  }
+  triggerLogWrite()
+}
+
+function triggerLogWrite() {
+  if (isWritingLog || logQueue.length === 0) return
+  isWritingLog = true
+
+  const chunks: string[] = []
+  while (logQueue.length > 0) {
+    chunks.push(logQueue.shift()!)
+  }
+  const content = chunks.join('')
+  const logPath = join(app.getPath('userData'), 'extraction.log')
+
+  fsPromises.appendFile(logPath, content, 'utf8')
+    .catch(() => {})
+    .finally(() => {
+      isWritingLog = false
+      if (logQueue.length > 0) {
+        process.nextTick(triggerLogWrite)
+      }
+    })
 }
 
 export interface ExtractedStream {
@@ -182,7 +207,11 @@ export async function extractStream(
         session: providerSession,
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: false,
+        // E1-S7: webSecurity is disabled on this isolated off-screen scraper window
+        // to permit CORS-disabled stream segment and manifest extraction from external CDNs.
+        // This is mitigated by isolating the browser context inside a random ephemeral partition
+        // session, enabling contextIsolation, and disabling nodeIntegration.
+        webSecurity: process.env['FORCE_WEB_SECURITY'] === 'true',
         javascript: true,
         images: false,
         backgroundThrottling: false,
