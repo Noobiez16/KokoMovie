@@ -44,8 +44,8 @@ interface ElectronAPI {
   // App
   getAppVersion: () => Promise<string>
   getPlatform: () => Promise<string>
-  onUpdateAvailable: (callback: () => void) => () => void
-  onUpdateDownloaded: (callback: () => void) => () => void
+  onUpdateAvailable: (callback: (version?: string) => void) => () => void
+  onUpdateDownloaded: (callback: (version?: string) => void) => () => void
   installUpdate: () => Promise<void>
 
   // OAuth
@@ -61,6 +61,7 @@ interface ElectronAPI {
   getStream: (providerId: string, req: StreamRequest) => Promise<ProviderResult>
   getFirstStream: (req: StreamRequest) => Promise<ProviderResult | null>
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) => Promise<{ ok: boolean }>
+  getProxyPort: () => Promise<number>
 }
 
 interface StreamRequest {

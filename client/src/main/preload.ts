@@ -59,13 +59,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── App ──────────────────────────────────────────────────────────────────
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   getPlatform: () => ipcRenderer.invoke('app:platform'),
-  onUpdateAvailable: (callback: () => void) => {
-    ipcRenderer.on('update:available', callback)
-    return () => ipcRenderer.removeListener('update:available', callback)
+  onUpdateAvailable: (callback: (version?: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, version?: string) => callback(version)
+    ipcRenderer.on('update:available', handler)
+    return () => ipcRenderer.removeListener('update:available', handler)
   },
-  onUpdateDownloaded: (callback: () => void) => {
-    ipcRenderer.on('update:downloaded', callback)
-    return () => ipcRenderer.removeListener('update:downloaded', callback)
+  onUpdateDownloaded: (callback: (version?: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, version?: string) => callback(version)
+    ipcRenderer.on('update:downloaded', handler)
+    return () => ipcRenderer.removeListener('update:downloaded', handler)
   },
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
 
@@ -90,4 +92,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('providers:getFirstStream', req),
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) =>
     ipcRenderer.invoke('providers:registerStreamHeaders', streamUrl, headers),
+  getProxyPort: () => ipcRenderer.invoke('providers:getProxyPort'),
 })

@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
 import { useSettingsStore } from './store/settings'
+import { UpdateNotification } from './components/UpdateNotification'
 
 const LoginPage = lazy(() => import('./pages/Login').then((m) => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('./pages/Register').then((m) => ({ default: m.RegisterPage })))
@@ -77,6 +78,7 @@ export function App() {
 
   return (
     <Suspense fallback={<LoadingScreen />}>
+      <UpdateNotification />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

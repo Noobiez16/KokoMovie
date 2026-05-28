@@ -771,6 +771,9 @@ export function initStreamHeaderInjector(): void {
 }
 
 export function registerProvidersIpc(): void {
+  // Get stream proxy port
+  ipcMain.handle('providers:getProxyPort', () => proxyPort)
+
   // List all providers with their enabled state
   ipcMain.handle('providers:list', () => listProviders())
 

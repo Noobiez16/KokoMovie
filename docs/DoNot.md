@@ -511,3 +511,26 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 
 ---
 
+## DN-033: Redis cache keys for browse, home, and trending endpoints must vary by user TMDB API key hash
+
+**Date:** 2026-05-28  
+**Area:** `services/catalog/src/handlers/browse.ts`  
+**Symptom:** Cross-user cache leakage (new accounts without API keys see cached TMDB movies from other users) and browse pagination buttons missing because a cached local DB fallback response (with only 1 page) overrides TMDB results.  
+**Root cause:** The Redis cache keys were built using only query parameters (e.g., `browse:{"page":1,...}`) without taking the user's `X-TMDB-Key` API key header into account, leading to cache collisions.  
+**Fix:** Created a `getCacheKey` helper that generates a SHA-256 hash of the `X-TMDB-Key` header if present, prefixing keys with `:tmdb:<hash>:` or `:local:`.  
+**DO NOT:**
+- Cache user-scoped or API-key-scoped search/browse queries under global, shared Redis keys without incorporating a hash of the credentials/headers into the key.
+
+---
+
+## DN-034: Sideloaded subtitle Strem.io proxy port parsing must fall back to IPC query
+
+**Date:** 2026-05-28  
+**Area:** `client/src/renderer/components/player/VideoPlayer.tsx`, `client/src/main/ipc/providers.ts`  
+**Symptom:** Subtitles/closed captions are not available for some providers (specifically those returning direct unproxied CDN URLs).  
+**Root cause:** The player parses the local HLS stream proxy port from the `activeStreamUrl`. If the stream URL is a direct CDN URL, the port is empty, preventing the player from querying external subtitles via the strem.io proxy.  
+**Fix:** Exposed the dynamic stream proxy port from the main process via IPC `'providers:getProxyPort'`, and updated `VideoPlayer.tsx` to fall back to `window.electronAPI.getProxyPort()` if it cannot parse a port from the stream URL.  
+**DO NOT:**
+- Assume the stream URL is always a localhost proxy URL, or fail to load external subtitles when direct video playback is active.
+
+---

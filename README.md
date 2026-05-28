@@ -1,269 +1,209 @@
-# KokoMovie PC
+<div align="center">
 
-An advanced, cross-platform desktop streaming aggregator engineered for Linux, Windows, and macOS. Built with a modern technology stack encompassing Electron, React, and Fastify, the application seamlessly aggregates real-time metadata from TMDB and bridges it with dynamic third-party video delivery networks (e.g., VidSrc, VidLink, SuperEmbed). It provides a frictionless, zero-configuration viewing experience—bypassing subscriptions, complex self-hosting requirements, and restrictive DRM.
+<img src="client/src/renderer/assets/logo.png" width="120" alt="KokoMovie logo" />
 
----
+# KokoMovie
 
-## How It Works
+**All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-KokoMovie PC is **not** a self-hosted Netflix. It is a content aggregator:
+[![Version](https://img.shields.io/badge/version-1.0.4--beta-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#-download)
+[![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#-automatic-updates)
 
-1. **Catalog**: Real metadata (titles, posters, cast, genres, ratings) from [TMDB](https://www.themoviedb.org/) — the same free database behind Letterboxd, Plex, and Infuse.
-2. **Streams**: When you click Watch, a provider picker appears. Select a provider (e.g. VidSrc), and KokoMovie opens a hidden browser window, loads the embed page, intercepts the `.m3u8` video URL, and feeds it to the built-in HLS player — similar to how Stremio or browser extensions work.
-3. **Profile data**: Watch history, continue watching, and watchlists are stored locally (PostgreSQL + DynamoDB Local). No cloud account needed.
-
----
-
-## Features
-
-- Real movie and TV show catalog from TMDB (trending, genre rows, search)
-- Multiple stream providers — VidSrc, 2Embed, SuperEmbed — with per-provider toggle
-- Built-in HLS player with quality selection, subtitles, Picture-in-Picture, and keyboard shortcuts
-- Watchlist and continue watching across multiple profiles
-- Multi-profile support per account
-- Offline download queue (HLS segments, AES-256-GCM encrypted)
-- Works on Linux, Windows, macOS
+</div>
 
 ---
 
-## Getting Started
+## 📥 Download
+
+Pick your system and click to grab the latest version from the
+**[Releases page](https://github.com/Noobiez16/KokoMovie/releases/latest)**:
+
+<div align="center">
+
+[![Download for Windows](https://img.shields.io/badge/Windows-Download%20.exe-8B5CF6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
+&nbsp;
+[![Download for Linux (.deb)](https://img.shields.io/badge/Linux-Download%20.deb-8B5CF6?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
+&nbsp;
+[![Download for Linux (AppImage)](https://img.shields.io/badge/Linux-Download%20.AppImage-A78BFA?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
+
+</div>
+
+> **On macOS?** A ready-made installer isn't published yet. You can build the app
+> yourself — see [For Developers](#-for-developers) below.
+
+---
+
+## ✨ What is KokoMovie?
+
+KokoMovie is a desktop app that brings movies and TV shows together in one place,
+with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
+stream for you automatically — no juggling websites, pop-ups, or sign-ups.
+
+- 🎬 **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
+- ▶️ **One-click play** — KokoMovie finds a working stream and starts playing
+- 📺 **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
+- 👤 **Profiles** — separate watchlists and "continue watching" for each person
+- ⬇️ **Watch offline** — download titles (securely encrypted) for when you're without internet
+- 🔄 **Always up to date** — the app updates itself in the background
+
+---
+
+## 🔄 Automatic Updates
+
+You only download KokoMovie once. After that, it **checks for new versions on its own**
+and installs them quietly in the background — the next time you open the app, you're
+already on the latest version. No re-downloading, no reinstalling.
+
+> 💡 On Linux, automatic updates work with the **AppImage** version. The `.deb` package
+> is updated like other system apps when you reinstall it.
+
+---
+
+## 🚀 Getting Started
+
+1. **Download and install** KokoMovie for your system (buttons above).
+2. **Open the app** and create an account, then pick or create a profile.
+3. **Add a free TMDB key** so the catalog fills with movies and shows
+   (one-time, 2 minutes — see below).
+4. **Browse or search**, click any poster, and press **Watch**. That's it.
+
+### Getting your free TMDB key
+
+KokoMovie uses [TMDB](https://www.themoviedb.org/) (the same free movie database behind
+many popular apps) to show posters, titles, and details. It's free and takes a minute:
+
+1. Create a free account at [themoviedb.org](https://www.themoviedb.org/).
+2. Go to **[Settings → API](https://www.themoviedb.org/settings/api)** and request a key
+   (choose "Developer", non-commercial use — it's instant).
+3. Copy your **API Key**.
+4. In KokoMovie, open **Settings → API Configuration**, paste the key, and click
+   **Validate & Save**. Done — your key is stored securely on your device.
+
+---
+
+## ❓ FAQ
+
+**Is it free?** Yes. There are no subscriptions or accounts to pay for.
+
+**Where do the movies come from?** KokoMovie doesn't host any videos. When you press
+Watch, it locates a stream from third-party sources — the same ones you'd find browsing
+the web — and plays it in its built-in player.
+
+**Do I need the TMDB key?** Yes, to see the catalog. It's free and one-time (steps above).
+
+**Will my data be uploaded anywhere?** No. Your profiles, watchlist, and history stay
+on your computer.
+
+---
+
+<details>
+<summary><h2>🛠️ For Developers</h2></summary>
+
+KokoMovie is an Electron + React desktop client backed by local Node.js (Fastify)
+microservices. Metadata comes from TMDB; streams are located by loading third-party
+embed pages in a sandboxed hidden window and intercepting the video URL.
 
 ### Prerequisites
 
 - Node.js 22+, npm 10+
-- Docker (for PostgreSQL, Redis, DynamoDB Local)
+- Docker (PostgreSQL, Redis, DynamoDB Local)
 - A free [TMDB API key](https://www.themoviedb.org/settings/api)
 
-### 1. Clone and Install
+### Run locally
 
 ```bash
 git clone https://github.com/Noobiez16/KokoMovie
-cd kokomovie-pc
+cd KokoMovie
 npm install
-```
-
-### 2. Configure Environment
-
-```bash
 cp .env.example .env
-```
-
-All default configuration settings (database connection strings, microservice ports) work out of the box for local development.
-
-For the TMDB API key, you can either:
-- **Set it in the UI (Recommended)**: Start the app, go to the **Settings** sidebar tab ➔ **API Configuration**, paste your TMDB Key, and click **Validate & Save**.
-- **Set it in `.env`**: Assign it to the `TMDB_API_KEY` variable in `.env`. Note that any key configured in the Settings UI will take precedence.
-
-### 3. Start Everything
-
-```bash
 npm run dev
 ```
 
-This command:
-1. Starts Docker containers (PostgreSQL, Redis, DynamoDB Local)
-2. Runs database migrations
-3. Starts all microservices (auth, user, catalog, playback, recommendation)
-4. Starts the Electron app + Vite dev server
+`npm run dev` starts the Docker containers, runs migrations, launches all services
+(auth, user, catalog, playback, recommendation), and opens the Electron app.
 
-On first launch, create an account, then select or create a profile. The Home page populates immediately from TMDB if your API key is set.
-
-> **No TMDB key?** You can still use the app — the catalog will be empty on a fresh install until you ingest content manually via `POST /catalog/ingest`.
-
----
-
-## Watching Content
-
-1. Browse the Home page, Movies, or Series to find something to watch
-2. Click any poster to open the content detail page
-3. Click **Watch** — KokoMovie races all enabled providers in parallel and collects every working stream
-4. The highest-quality stream wins and playback starts automatically
-5. Inside the player, open **Select Source** (bottom controls) to switch to any alternative provider — sources confirmed working for this title show a green **A** badge; sources that returned nothing show a dimmed red **S** badge. Switching to an **A** source is instant; **S** sources trigger a fresh extraction attempt
-
-To manage which providers are active, go to **Providers** in the left sidebar.
-
----
-
-## Project Structure
+### Project structure
 
 ```
-kokomovie-pc/
-├── client/                        # Electron app
+KokoMovie/
+├── client/                 # Electron app
 │   └── src/
-│       ├── main/                  # Electron main process (Node.js)
-│       │   ├── providers/         # Stream provider definitions (VidSrc, 2Embed, SuperEmbed)
-│       │   ├── stream-extractor/  # Hidden BrowserWindow-based stream URL interceptor
-│       │   └── ipc/               # IPC handlers (auth, downloads, providers, API proxy)
-│       └── renderer/              # React app (Vite)
-│           ├── pages/             # Route-level pages
-│           ├── components/        # Shared UI components
-│           └── api/               # Service API clients
-│
+│       ├── main/           # Main process (Node.js): providers, stream-extractor, ipc, updater
+│       └── renderer/       # React app (Vite): pages, components, api clients
 ├── services/
-│   ├── auth/            # JWT auth, refresh tokens, OAuth
-│   ├── user/            # Profiles, watchlist, preferences
-│   ├── catalog/         # TMDB integration, content metadata, search
-│   ├── playback/        # Session management, watch position tracking
-│   └── recommendation/  # Home rows, similar content, A/B experiments
-│
-├── scripts/             # DB init SQL, dev setup script
-└── docker-compose.yml   # PostgreSQL, Redis, DynamoDB Local
+│   ├── auth/               # JWT auth, refresh tokens, OAuth
+│   ├── user/               # Profiles, watchlist, preferences
+│   ├── catalog/            # TMDB integration, metadata, search
+│   ├── playback/           # Sessions, watch position
+│   └── recommendation/     # Home rows, similar content
+├── scripts/                # DB init, dev setup
+└── docker-compose.yml      # PostgreSQL, Redis, DynamoDB Local
 ```
 
----
-
-## Stream Providers
-
-Providers are configured at **Providers** in the app sidebar. All enabled providers participate in a staggered parallel race — the first one to return a working stream wins. Available providers:
-
-| Provider | Domain | ID Required |
-|---|---|---|
-| VidBinge | `vidbinge.com` | IMDB ID |
-| VidSrc | `vidsrc.to` | IMDB ID preferred, TMDB fallback |
-| VidSrc.su | `vidsrc.su` | TMDB ID |
-| VidSrc.pm | `vidsrc.pm` | TMDB ID |
-| VidSrc.in (vsrc.su) | `vsrc.su` | IMDB or TMDB ID |
-| VidLink | `vidlink.pro` | TMDB ID |
-| VidSrc.cc | `vidsrc.cc` | IMDB ID |
-| MultiEmbed | `multiembed.mov` | TMDB ID |
-| VidSrc.pro | `vidsrc.pro` | TMDB ID |
-| VidSrc.rip | `vidsrc.rip` | TMDB ID |
-| AutoEmbed | `autoembed.cc` | TMDB ID |
-| SuperEmbed | `multiembed.mov` | TMDB ID |
-| VidSrc.me (vidsrcme) | `vidsrcme.su` | TMDB ID |
-| 2Embed | `2embed.cc` | IMDB ID preferred |
-| SmashyStream | `smashystream.com` | TMDB ID |
-| MoviesAPI | `moviesapi.to` | TMDB ID |
-| EmbedSu | `embed.su` | TMDB ID |
-
-**How it works**: Each provider has an embed URL pattern. KokoMovie opens the embed page in a hidden Electron `BrowserWindow` with a persistent session, monitors outbound network requests via `webRequest.onSendHeaders`, and captures the first `.m3u8` or `.mp4` URL it finds. That URL is then passed to a built-in local HTTP proxy server running in the main process (`http://localhost:PORT`), which fetches segments using a custom Node-level fetcher (`fetchNode`) to bypass Electron's forbidden headers restriction (like Referer/Origin) and Chromium's strict CORS enforcement, before feeding the stream to `hls.js` in the main window. Providers are raced in parallel batches of 4, staggered 1.5 seconds apart.
-
-**To add a new provider**: implement the `Provider` interface in `client/src/main/providers/` and register it in `registry.ts`.
-
----
-
-## TMDB API Key
-
-To display movies and TV metadata, a TMDB API Key is required.
-
-### How to obtain a TMDB API Key:
-1. Register for an account at [TheMovieDB.org](https://www.themoviedb.org/).
-2. Navigate to your Account Settings page ➔ **API** (or go directly to [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)).
-3. Request an API key (select "Developer" if prompted).
-4. Fill in the request details (non-commercial use is free and instant).
-5. Copy your **API Key (v3 auth)** or **API Read Access Token (v4 auth)**.
-
-### Configuring the key in KokoMovie:
-- **Inside the App (Recommended)**: Go to **Settings** in the sidebar, open the **API Configuration** section, paste your TMDB API Key, and click **Validate & Save**. This is stored securely in local app preferences.
-- **Via Environment Variable**: For self-hosters or local developers, you can edit `.env` and assign your key to `TMDB_API_KEY`. The Settings page key always takes precedence.
-
----
-
-## Infrastructure
-
-Only 3 Docker services required (PostgreSQL, Redis, DynamoDB Local):
-
-```bash
-npm run docker:up
-```
-
-| Service | Port | Purpose |
-|---|---|---|
-| PostgreSQL 16 | 5432 | User accounts, profiles, catalog metadata |
-| Redis 7 | 6379 | Response cache (catalog, trending) |
-| DynamoDB Local | 8000 | Playback sessions, watch history, A/B experiments |
-
----
-
-## Microservice Ports
-
-| Service | Port |
-|---|---|
-| Auth | 3001 |
-| Catalog | 3002 |
-| Playback | 3003 |
-| User | 3004 |
-| Recommendation | 3005 |
-
----
-
-## Development Commands
+### Development commands
 
 | Command | Description |
 |---|---|
 | `npm run dev` | Start everything (Docker + services + Electron) |
 | `npm run dev:services` | Start only the backend services |
 | `npm run dev:client` | Start only the Electron/Vite client |
-| `npm run docker:up` | Start infrastructure containers |
-| `npm run docker:down` | Stop containers |
+| `npm run docker:up` / `docker:down` | Start / stop infrastructure |
 | `npm run migrate:all` | Run DB migrations for all services |
 | `npm run build` | Build all packages |
 | `npm run lint` | Run ESLint |
 
----
-
-## Building for Distribution
-
-### Linux
+### Building installers
 
 ```bash
+# Linux (.AppImage + .deb)  →  client/release/linux/
 sudo apt install build-essential python3 libsecret-1-dev
 cd client && npm run dist:linux
-# Output: client/release/linux/ (.AppImage + .deb)
-```
 
-### Windows
-
-Build on a Windows machine or via CI (GitHub Actions `electron-release.yml`):
-
-```bash
+# Windows (.exe)  →  client/release/windows/   (run on Windows)
 cd client && npm run dist:win
-# Output: client/release/windows/
-```
 
-### macOS
-
-Requires a Mac or `macos-latest` GitHub Actions runner (for code signing + notarization):
-
-```bash
+# macOS (.dmg)  →  client/release/mac/   (run on a Mac; needs Apple signing for notarization)
 cd client && npm run dist:mac
-# Output: client/release/mac/ (.dmg)
 ```
 
-Push a version tag to trigger parallel builds on all three platforms:
+### Releasing (auto-update pipeline)
+
+Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on any
+`v*` tag. The workflow builds Windows + Linux, then publishes the installers **plus the
+`latest.yml` / `latest-linux.yml` and `.blockmap` files** to a GitHub Release. Those
+metadata files are what `electron-updater` reads to deliver automatic updates, so they
+must be attached to every release.
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.4-beta
+git push origin v1.0.4-beta
 ```
 
----
+Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
+each `client/electron-builder.*.yml` (GitHub provider → `Noobiez16/KokoMovie`).
 
-## Tech Stack
+### Stream providers
 
-**Client**
-- Electron 31 (main: Node.js, renderer: Chromium)
-- React 19 + Vite 5 + TypeScript
-- TailwindCSS 3
-- TanStack Query v5 (data fetching + cache)
-- Zustand v5 (auth/UI state)
-- hls.js v1.5 (HLS player)
+Providers live in `client/src/main/providers/` and are registered in `registry.ts`.
+Each enabled provider joins a staggered parallel race; the first to return a working
+stream wins. To add one, implement the `Provider` interface and register it. Manage
+active providers in the app under **Providers**.
 
-**Services**
-- Fastify 5 (HTTP framework)
-- Drizzle ORM + PostgreSQL 16
-- ioredis (Redis client)
-- AWS SDK v3 (DynamoDB Local)
-- Zod (runtime validation)
-- Jose (JWT RS256)
+### Tech stack
 
-**Infrastructure**
-- Docker Compose (local dev)
-- PostgreSQL 16
-- Redis 7
-- DynamoDB Local
+**Client:** Electron 31 · React 19 · Vite 5 · TypeScript · TailwindCSS 3 · TanStack Query v5 · Zustand v5 · hls.js v1.5
+**Services:** Fastify 5 · Drizzle ORM · PostgreSQL 16 · ioredis · AWS SDK v3 (DynamoDB Local) · Zod · Jose (JWT RS256)
+**Infra:** Docker Compose · PostgreSQL 16 · Redis 7 · DynamoDB Local
+
+</details>
 
 ---
 
-## Legal Notice
+## ⚖️ Legal Notice
 
-KokoMovie PC does not host, store, or distribute any video content. All streams are located by loading third-party embed pages in a sandboxed browser context, at the user's explicit request. This is equivalent to a user visiting those pages in their own browser. Use of third-party streaming sites is subject to their terms of service and applicable law in your jurisdiction. This project is for personal and educational use only.
+KokoMovie does not host, store, or distribute any video content. All streams are located
+by loading third-party embed pages in a sandboxed browser context, at the user's explicit
+request — equivalent to visiting those pages in your own browser. Use of third-party
+streaming sites is subject to their terms of service and the law in your jurisdiction.
+This project is for personal and educational use only.

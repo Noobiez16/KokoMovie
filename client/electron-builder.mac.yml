@@ -49,5 +49,5 @@ dmg:
 publish:
   provider: github
   owner: Noobiez16
-  repo: kokomovie-pc
+  repo: KokoMovie
   releaseType: release

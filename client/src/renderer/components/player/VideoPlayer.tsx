@@ -401,9 +401,16 @@ export function VideoPlayer({
           subQuery = `${imdbId}:${seasonNumber}:${episode.episodeNumber}`
         }
 
-        // Parse proxy port from session manifest URL to route via proxy and bypass CORS
+        // Parse proxy port from session manifest URL, or fallback to the main process proxy port
+        let proxyPort = ''
         const match = activeStreamUrl.match(/^http:\/\/localhost:(\d+)\//)
-        const proxyPort = match ? match[1] : ''
+        if (match) {
+          proxyPort = match[1]!
+        } else if (window.electronAPI?.getProxyPort) {
+          const portNum = await window.electronAPI.getProxyPort()
+          if (portNum) proxyPort = String(portNum)
+        }
+
         if (!proxyPort) return
 
         const listUrl = `http://localhost:${proxyPort}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${subQuery}.json`

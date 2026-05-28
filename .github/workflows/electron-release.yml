@@ -39,6 +39,8 @@ jobs:
           path: |
             client/release/linux/*.AppImage
             client/release/linux/*.deb
+            client/release/linux/latest-linux.yml
+            client/release/linux/*.blockmap
           retention-days: 1
 
   # ─── Windows: NSIS .exe installer → client/release/windows/ ─────────────────
@@ -71,7 +73,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: client/release/windows/*.exe
+          path: |
+            client/release/windows/*.exe
+            client/release/windows/latest.yml
+            client/release/windows/*.blockmap
           retention-days: 1
 
   # ─── Release: collect artifacts → single GitHub Release ─────────────────────
@@ -106,6 +111,10 @@ jobs:
           files: |
             artifacts/linux/*.AppImage
             artifacts/linux/*.deb
+            artifacts/linux/latest-linux.yml
+            artifacts/linux/*.blockmap
             artifacts/windows/*.exe
+            artifacts/windows/latest.yml
+            artifacts/windows/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -25,6 +25,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Validated buffer types in the DRM widevine handler to prevent out-of-bounds memory exposure.
   - Hardened automated unit/integration tests by purging hardcoded authentication passwords and API key secrets.
   - Upgraded dependencies (`drizzle-orm`, `@fastify/jwt`) to resolve upstream CVEs.
+  - **Redis Cache Isolation**: Varied Redis cache keys in the catalog microservice by the user's `X-TMDB-Key` API key hash to prevent cross-user cache leakage and resolve catalog pagination UI bugs.
+  - **Subtitle Proxy Port Fallback**: Added a local IPC listener to query the dynamic stream proxy port from the Electron main process, restoring sideloaded closed captions/subtitles for unproxied CDN video sources.
+  - **Local DB Fallback Home Section**: Restored the "Trending Now" section on the home page when falling back to the local database.
 - **Infrastructure Security**:
   - Hardened Terraform AWS modules: configured AWS KMS CMK encryption for S3 buckets, turned on DynamoDB Point-in-Time Recovery (PITR), enabled ECS Container Insights, locked down ECR tags with immutability, and configured AWS VPC flow logs.
   - Established a `.snyk` baseline policy file to track accepted architecture choices.
