@@ -310,7 +310,13 @@ export function SettingsPage() {
 
     setTmdbValidation('validating')
     try {
-      const res = await fetch(`https://api.themoviedb.org/3/configuration?api_key=${encodeURIComponent(key)}`)
+      // TMDB keys come in two flavours: a v3 API key (sent as ?api_key=) or a
+      // v4 read access token (a JWT sent as a Bearer header). Validate whichever
+      // the user pasted so v4 tokens aren't wrongly rejected.
+      const isV4 = key.startsWith('eyJ') || key.length > 40
+      const res = isV4
+        ? await fetch('https://api.themoviedb.org/3/configuration', { headers: { Authorization: `Bearer ${key}` } })
+        : await fetch(`https://api.themoviedb.org/3/configuration?api_key=${encodeURIComponent(key)}`)
       if (res.ok) {
         setTmdbApiKey(key)
         setTmdbValidation('valid')

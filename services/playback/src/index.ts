@@ -8,7 +8,7 @@ import { authenticate } from './lib/auth.js'
 import { ensureTables } from './db/dynamo.js'
 import { disconnectProducer } from './kafka/producer.js'
 import { createSessionHandler, getSessionHandler } from './handlers/session.js'
-import { heartbeatHandler, getPositionHandler, getContinueWatchingHandler } from './handlers/position.js'
+import { heartbeatHandler, getPositionHandler, getContinueWatchingHandler, deletePositionHandler } from './handlers/position.js'
 import { drmLicenseHandler } from './handlers/drm.js'
 import { qualityReportHandler } from './handlers/quality.js'
 
@@ -38,6 +38,7 @@ app.get('/playback/session/:sessionId', { preHandler: authenticate }, getSession
 // Position heartbeat
 app.put('/playback/position', { preHandler: authenticate }, heartbeatHandler)
 app.get('/playback/position/:contentId', { preHandler: authenticate }, getPositionHandler)
+app.delete('/playback/position/:contentId', { preHandler: authenticate }, deletePositionHandler)
 app.get('/playback/continue-watching', { preHandler: authenticate }, getContinueWatchingHandler)
 
 // DRM

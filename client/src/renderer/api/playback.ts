@@ -59,4 +59,13 @@ export const playbackApi = {
       '/playback/continue-watching',
       { profileId },
     ),
+
+  // Removes the saved resume position so the title leaves "Continue Watching".
+  deletePosition: (contentId: string, episodeId: string | null | undefined, profileId: string) => {
+    const qs = episodeId ? `?episodeId=${episodeId}` : ''
+    return playbackClient.delete<{ success: true; data: null }>(
+      `/playback/position/${contentId}${qs}`,
+      { profileId },
+    )
+  },
 }

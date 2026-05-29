@@ -118,11 +118,22 @@ export function decodeTmdbContentId(uuidStr: string): { type: 'movie' | 'tv'; tm
   return { type, tmdbId }
 }
 
+// TMDB accepts two credential styles:
+//   • v3 API key   → passed as the `api_key` query param (32-char hex string)
+//   • v4 read token → a JWT passed as `Authorization: Bearer <token>`
+// The Settings UI tells users either is fine, so support both here. A v4 token
+// sent as `api_key` returns 401, which previously caused every catalog call to
+// fail and silently fall back to the (tiny) local DB.
+export function isV4Token(key: string): boolean {
+  return key.startsWith('eyJ') || key.length > 40
+}
+
 async function tmdbFetch<T>(path: string, apiKey: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(`${BASE}${path}`)
-  url.searchParams.set('api_key', apiKey)
+  const v4 = isV4Token(apiKey)
+  if (!v4) url.searchParams.set('api_key', apiKey)
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), v4 ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined)
   if (!res.ok) throw new Error(`TMDB ${path} → ${res.status}`)
   return res.json() as Promise<T>
 }
@@ -132,8 +143,8 @@ export function createTmdbClient(apiKey: string) {
     tmdbFetch<T>(path, apiKey, params)
 
   return {
-    trending: (type: 'all' | 'movie' | 'tv' = 'all') =>
-      get<TmdbPage>(`/trending/${type}/week`),
+    trending: (type: 'all' | 'movie' | 'tv' = 'all', page = 1) =>
+      get<TmdbPage>(`/trending/${type}/week`, { page: String(page) }),
 
     popularMovies: (page = 1) =>
       get<TmdbPage>('/movie/popular', { page: String(page) }),

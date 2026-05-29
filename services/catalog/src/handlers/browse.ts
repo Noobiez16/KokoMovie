@@ -7,6 +7,7 @@ import { eq, and, inArray, desc, sql } from 'drizzle-orm'
 import { createTmdbClient, tmdbContentId, posterUrl, backdropUrl, tmdbTitle, tmdbType, tmdbYear, TMDB_GENRE_MAP } from '../lib/tmdb.js'
 import { syncTrending, syncPopular } from '../lib/tmdb-sync.js'
 import { createHash } from 'crypto'
+import { config } from '../config.js'
 
 const browseQuerySchema = z.object({
   genre: z.string().optional(),
@@ -92,6 +93,62 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
   if (hasTmdb(request)) {
     try {
       const client = tmdb(request)
+      const toSummary = (i: any) => ({
+        id: tmdbContentId(tmdbType(i) === 'series' ? 'tv' : 'movie', i.id),
+        title: tmdbTitle(i),
+        type: tmdbType(i),
+        releaseYear: tmdbYear(i),
+        rating: null,
+        imdbScore: i.vote_average > 0 ? i.vote_average.toFixed(1) : null,
+        durationMins: null,
+        s3Thumbnail: posterUrl(i.poster_path),
+        backdropUrl: backdropUrl(i.backdrop_path),
+        planMinimum: 'basic',
+        tmdbId: i.id,
+        imdbId: null,
+      })
+
+      if (genre === 'trending') {
+        const offset = (page - 1) * limit
+        const itemsPerPage = 20
+        const startPage = Math.floor(offset / itemsPerPage) + 1
+        const endPage = Math.floor((offset + limit - 1) / itemsPerPage) + 1
+
+        const pagePromises = []
+        for (let p = startPage; p <= endPage; p++) {
+          pagePromises.push(client.trending(type === 'series' ? 'tv' : type === 'movie' ? 'movie' : 'all', p))
+        }
+
+        const results = await Promise.all(pagePromises)
+        let allItems: any[] = []
+        let total = 0
+        let maxPages = 1
+
+        for (const res of results) {
+          allItems = allItems.concat(res.results)
+          total = Math.max(total, res.total_results)
+          maxPages = Math.max(maxPages, res.total_pages)
+        }
+
+        const startIdx = offset % itemsPerPage
+        const itemsSlice = allItems.slice(startIdx, startIdx + limit)
+        const rows = itemsSlice.filter(i => i.media_type !== 'person').map(toSummary)
+        const pages = Math.ceil(total / limit)
+
+        const responseBody = {
+          success: true,
+          data: rows,
+          meta: {
+            requestId: request.id,
+            timestamp: new Date().toISOString(),
+            source: 'tmdb' as const,
+            pagination: { page, limit, total, pages },
+          },
+        }
+        await redis.setex(cacheKey, 1800, JSON.stringify(responseBody))
+        return reply.send(responseBody)
+      }
+
       let genreId: number | undefined
       if (genre) {
         const entry = Object.entries(TMDB_GENRE_MAP).find(([_, slug]) => slug === genre)
@@ -100,10 +157,11 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
         }
       }
 
-      // TMDB returns 20 items per page. Calculate the range of TMDB pages to fetch.
+      // Calculate dynamic itemsPerPage (40 for mixed, 20 for movie/series)
+      const itemsPerPage = (!type) ? 40 : 20
       const offset = (page - 1) * limit
-      const startPage = Math.floor(offset / 20) + 1
-      const endPage = Math.floor((offset + limit - 1) / 20) + 1
+      const startPage = Math.floor(offset / itemsPerPage) + 1
+      const endPage = Math.floor((offset + limit - 1) / itemsPerPage) + 1
 
       const pagePromises: Promise<{ results: any[]; total_results: number; total_pages: number }>[] = []
       for (let p = startPage; p <= endPage; p++) {
@@ -143,25 +201,12 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
       }
 
       // Slice the exact items we want out of the combined pages
-      const startIdx = offset % 20
+      const startIdx = offset % itemsPerPage
       const itemsSlice = allItems.slice(startIdx, startIdx + limit)
 
       const rows = itemsSlice
         .filter(i => i.media_type !== 'person')
-        .map(i => ({
-          id: tmdbContentId(tmdbType(i) === 'series' ? 'tv' : 'movie', i.id),
-          title: tmdbTitle(i),
-          type: tmdbType(i),
-          releaseYear: tmdbYear(i),
-          rating: null,
-          imdbScore: i.vote_average > 0 ? i.vote_average.toFixed(1) : null,
-          durationMins: null,
-          s3Thumbnail: posterUrl(i.poster_path),
-          backdropUrl: backdropUrl(i.backdrop_path),
-          planMinimum: 'basic',
-          tmdbId: i.id,
-          imdbId: null,
-        }))
+        .map(toSummary)
 
       // Normalize pagination output for UI client
       const pages = Math.ceil(total / limit)
@@ -172,6 +217,7 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
         meta: {
           requestId: request.id,
           timestamp: new Date().toISOString(),
+          source: 'tmdb' as const,
           pagination: { page, limit, total, pages },
         },
       }
@@ -189,26 +235,31 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
   let rows
   let total
   if (genre) {
-    const [genreRow] = await db.select({ id: genres.id }).from(genres).where(eq(genres.slug, genre)).limit(1)
-    if (!genreRow) {
-      return reply.code(404).send({
-        success: false,
-        error: { code: 'CONTENT_NOT_FOUND', message: 'Genre not found' },
-        meta: { requestId: request.id, timestamp: new Date().toISOString() },
-      })
+    if (genre === 'trending') {
+      rows = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId, backdropUrl: content.backdropUrl }).from(content).where(and(...conditions)).orderBy(desc(content.imdbScore)).limit(limit).offset((page - 1) * limit)
+      total = (await db.select({ total: sql<number>`count(*)::int` }).from(content).where(and(...conditions)))[0]?.total ?? 0
+    } else {
+      const [genreRow] = await db.select({ id: genres.id }).from(genres).where(eq(genres.slug, genre)).limit(1)
+      if (!genreRow) {
+        return reply.code(404).send({
+          success: false,
+          error: { code: 'CONTENT_NOT_FOUND', message: 'Genre not found' },
+          meta: { requestId: request.id, timestamp: new Date().toISOString() },
+        })
+      }
+      const ids = (await db.select({ contentId: contentGenres.contentId }).from(contentGenres).where(eq(contentGenres.genreId, genreRow.id))).map(r => r.contentId)
+      rows = ids.length ? await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId, backdropUrl: content.backdropUrl }).from(content).where(and(...conditions, inArray(content.id, ids))).orderBy(desc(content.imdbScore)).limit(limit).offset((page - 1) * limit) : []
+      total = ids.length ? (await db.select({ total: sql<number>`count(*)::int` }).from(content).where(and(...conditions, inArray(content.id, ids))))[0]?.total ?? 0 : 0
     }
-    const ids = (await db.select({ contentId: contentGenres.contentId }).from(contentGenres).where(eq(contentGenres.genreId, genreRow.id))).map(r => r.contentId)
-    rows = ids.length ? await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId }).from(content).where(and(...conditions, inArray(content.id, ids))).orderBy(desc(content.imdbScore)).limit(limit).offset((page - 1) * limit) : []
-    total = ids.length ? (await db.select({ total: sql<number>`count(*)::int` }).from(content).where(and(...conditions, inArray(content.id, ids))))[0]?.total ?? 0 : 0
   } else {
-    rows = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId }).from(content).where(and(...conditions)).orderBy(desc(content.imdbScore)).limit(limit).offset((page - 1) * limit)
+    rows = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId, backdropUrl: content.backdropUrl }).from(content).where(and(...conditions)).orderBy(desc(content.imdbScore)).limit(limit).offset((page - 1) * limit)
     total = (await db.select({ total: sql<number>`count(*)::int` }).from(content).where(and(...conditions)))[0]?.total ?? 0
   }
 
   const responseBody = {
     success: true,
     data: rows,
-    meta: { requestId: request.id, timestamp: new Date().toISOString(), pagination: { page, limit, total, pages: Math.ceil(total / limit) } },
+    meta: { requestId: request.id, timestamp: new Date().toISOString(), source: 'local' as const, pagination: { page, limit, total, pages: Math.ceil(total / limit) } },
   }
   await redis.setex(cacheKey, 3600, JSON.stringify(responseBody))
   return reply.send(responseBody)
@@ -217,7 +268,9 @@ export async function browseHandler(request: FastifyRequest, reply: FastifyReply
 // ─── Home ────────────────────────────────────────────────────────────────────
 
 export async function getGenreRowsHandler(request: FastifyRequest, reply: FastifyReply) {
-  const cacheKey = getCacheKey('browse:home', request, {})
+  const query = request.query as { type?: 'movie' | 'series' }
+  const type = query.type === 'movie' || query.type === 'series' ? query.type : undefined
+  const cacheKey = getCacheKey('browse:home', request, { type })
   const cached = await redis.get(cacheKey)
   if (cached) return reply.send(JSON.parse(cached))
 
@@ -225,13 +278,7 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
   if (hasTmdb(request)) {
     try {
       const client = tmdb(request)
-      const [trendingPage, moviesPage, tvPage] = await Promise.all([
-        client.trending('all'),
-        client.popularMovies(),
-        client.popularTv(),
-      ])
-
-      const toSummary = (i: (typeof trendingPage.results)[0]) => ({
+      const toSummary = (i: any) => ({
         id: tmdbContentId(tmdbType(i) === 'series' ? 'tv' : 'movie', i.id),
         title: tmdbTitle(i),
         type: tmdbType(i),
@@ -246,8 +293,22 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
         imdbId: null,
       })
 
-      const trending = trendingPage.results.filter(i => i.media_type !== 'person').slice(0, 20).map(toSummary)
-      const featured = trending[0] ?? null
+      let trending
+      let featured
+
+      if (!type) {
+        const [trendingPage, moviesPage, tvPage] = await Promise.all([
+          client.trending('all'),
+          client.popularMovies(),
+          client.popularTv(),
+        ])
+        trending = trendingPage.results.filter(i => i.media_type !== 'person').slice(0, 20).map(toSummary)
+        featured = trending[0] ?? null
+      } else {
+        const trendingPage = await client.trending(type === 'series' ? 'tv' : 'movie')
+        trending = trendingPage.results.filter(i => i.media_type !== 'person').slice(0, 20).map(toSummary)
+        featured = trending[0] ?? null
+      }
 
       if (featured && featured.tmdbId) {
         try {
@@ -282,13 +343,16 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
       const rows = await Promise.all(
         FEATURED_GENRE_IDS.map(async (g) => {
           try {
-            const [moviePage, tvPage] = await Promise.all([
-              client.discoverMovie(g.id),
-              client.discoverTv(g.tv),
-            ])
+            const moviePromise = (!type || type === 'movie') ? client.discoverMovie(g.id) : null
+            const tvPromise = (!type || type === 'series') ? client.discoverTv(g.tv) : null
+            const [moviePage, tvPage] = await Promise.all([moviePromise, tvPromise])
+
+            const movieItems = moviePage ? moviePage.results.slice(0, type ? 20 : 10) : []
+            const tvItems = tvPage ? tvPage.results.slice(0, type ? 20 : 10) : []
+
             const items = [
-              ...moviePage.results.slice(0, 10),
-              ...tvPage.results.slice(0, 10),
+              ...movieItems,
+              ...tvItems,
             ]
               .sort((a, b) => b.vote_average - a.vote_average)
               .slice(0, 20)
@@ -314,7 +378,7 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
           trending,
           rows: validRows,
         },
-        meta: { requestId: request.id, timestamp: new Date().toISOString() },
+        meta: { requestId: request.id, timestamp: new Date().toISOString(), source: 'tmdb' as const },
       }
       await redis.setex(cacheKey, 3600, JSON.stringify(responseBody))
       return reply.send(responseBody)
@@ -324,38 +388,81 @@ export async function getGenreRowsHandler(request: FastifyRequest, reply: Fastif
   }
 
   // Local DB fallback
+  const localConditions = [eq(content.isActive, true)]
+  if (type) localConditions.push(eq(content.type, type))
+
   const allGenres = await db.select().from(genres).orderBy(genres.name)
   const localRows = await Promise.all(
     allGenres.map(async (g) => {
       const ids = (await db.select({ contentId: contentGenres.contentId }).from(contentGenres).where(eq(contentGenres.genreId, g.id)).limit(20)).map(r => r.contentId)
       if (!ids.length) return { genre: g, items: [] }
-      const items = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId }).from(content).where(and(eq(content.isActive, true), inArray(content.id, ids))).orderBy(desc(content.imdbScore)).limit(20)
+      const items = await db.select({
+        id: content.id,
+        title: content.title,
+        type: content.type,
+        releaseYear: content.releaseYear,
+        rating: content.rating,
+        imdbScore: content.imdbScore,
+        durationMins: content.durationMins,
+        s3Thumbnail: content.s3Thumbnail,
+        planMinimum: content.planMinimum,
+        tmdbId: content.tmdbId,
+        imdbId: content.imdbId,
+        backdropUrl: content.backdropUrl
+      }).from(content).where(and(...localConditions, inArray(content.id, ids))).orderBy(desc(content.imdbScore)).limit(20)
       return { genre: g, items }
     })
   )
 
-  const featured = (await db.select().from(content).where(eq(content.isActive, true)).orderBy(desc(content.imdbScore)).limit(1))[0] ?? null
-  if (featured && featured.tmdbId && hasTmdb(request)) {
-    try {
-      const client = tmdb(request)
-      const videoRes = featured.type === 'movie'
-        ? await client.getMovieVideos(featured.tmdbId)
-        : await client.getTvVideos(featured.tmdbId)
-      const trailer = findBestTrailer(videoRes.results as any)
-      if (trailer) {
-        (featured as any).trailerKey = trailer.key
+  const featured = (await db.select().from(content).where(and(...localConditions)).orderBy(desc(content.imdbScore)).limit(1))[0] ?? null
+  
+  if (featured) {
+    const featuredGenres = await db
+      .select({ id: genres.id, name: genres.name, slug: genres.slug })
+      .from(genres)
+      .innerJoin(contentGenres, eq(genres.id, contentGenres.genreId))
+      .where(eq(contentGenres.contentId, featured.id))
+    
+    ;(featured as any).genres = featuredGenres
+
+    if (featured.tmdbId) {
+      const tmdbKeyToUse = getTmdbKey(request) || config.TMDB_API_KEY
+      if (tmdbKeyToUse) {
+        try {
+          const client = createTmdbClient(tmdbKeyToUse)
+          const videoRes = featured.type === 'movie'
+            ? await client.getMovieVideos(featured.tmdbId)
+            : await client.getTvVideos(featured.tmdbId)
+          const trailer = findBestTrailer(videoRes.results as any)
+          if (trailer) {
+            (featured as any).trailerKey = trailer.key
+          }
+        } catch {
+          // ignore
+        }
       }
-    } catch {
-      // ignore
     }
   }
 
-  const trending = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId }).from(content).where(eq(content.isActive, true)).orderBy(desc(content.imdbScore)).limit(20)
+  const trending = await db.select({
+    id: content.id,
+    title: content.title,
+    type: content.type,
+    releaseYear: content.releaseYear,
+    rating: content.rating,
+    imdbScore: content.imdbScore,
+    durationMins: content.durationMins,
+    s3Thumbnail: content.s3Thumbnail,
+    planMinimum: content.planMinimum,
+    tmdbId: content.tmdbId,
+    imdbId: content.imdbId,
+    backdropUrl: content.backdropUrl
+  }).from(content).where(and(...localConditions)).orderBy(desc(content.imdbScore)).limit(20)
 
   const responseBody = {
     success: true,
     data: { featured, trending, rows: localRows.filter(r => r.items.length > 0) },
-    meta: { requestId: request.id, timestamp: new Date().toISOString() },
+    meta: { requestId: request.id, timestamp: new Date().toISOString(), source: 'local' as const },
   }
   await redis.setex(cacheKey, 3600, JSON.stringify(responseBody))
   return reply.send(responseBody)
@@ -389,7 +496,7 @@ export async function getTrendingHandler(request: FastifyRequest, reply: Fastify
           imdbId: null,
         }))
 
-      const responseBody = { success: true, data: rows, meta: { requestId: request.id, timestamp: new Date().toISOString() } }
+      const responseBody = { success: true, data: rows, meta: { requestId: request.id, timestamp: new Date().toISOString(), source: 'tmdb' as const } }
       await redis.setex(cacheKey, 3600, JSON.stringify(responseBody))
       return reply.send(responseBody)
     } catch (e) {
@@ -397,8 +504,8 @@ export async function getTrendingHandler(request: FastifyRequest, reply: Fastify
     }
   }
 
-  const rows = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId }).from(content).where(eq(content.isActive, true)).orderBy(desc(content.imdbScore)).limit(20)
-  const responseBody = { success: true, data: rows, meta: { requestId: request.id, timestamp: new Date().toISOString() } }
+  const rows = await db.select({ id: content.id, title: content.title, type: content.type, releaseYear: content.releaseYear, rating: content.rating, imdbScore: content.imdbScore, durationMins: content.durationMins, s3Thumbnail: content.s3Thumbnail, planMinimum: content.planMinimum, tmdbId: content.tmdbId, imdbId: content.imdbId, backdropUrl: content.backdropUrl }).from(content).where(eq(content.isActive, true)).orderBy(desc(content.imdbScore)).limit(20)
+  const responseBody = { success: true, data: rows, meta: { requestId: request.id, timestamp: new Date().toISOString(), source: 'local' as const } }
   await redis.setex(cacheKey, 3600, JSON.stringify(responseBody))
   return reply.send(responseBody)
 }

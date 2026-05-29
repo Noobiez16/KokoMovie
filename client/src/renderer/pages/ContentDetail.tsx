@@ -282,7 +282,12 @@ export function ContentDetailPage() {
     }
 
     try {
-      const result = await providersApi.getFirstStream(req)
+      const result = await Promise.race([
+        providersApi.getFirstStream(req),
+        new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out searching for a stream')), 50000)
+        ),
+      ])
       if (cancelled) return null
 
       if (result && result.streams.length > 0) {
@@ -466,7 +471,14 @@ export function ContentDetailPage() {
     )
 
     try {
-      const result = await providersApi.getFirstStream(req)
+      // Defense-in-depth: the main process already hard-caps the provider race, but
+      // guard the IPC round-trip too so the loading overlay can never hang forever.
+      const result = await Promise.race([
+        providersApi.getFirstStream(req),
+        new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out searching for a stream')), 50000)
+        ),
+      ])
       if (cancelled) return
 
       if (result && result.streams.length > 0) {

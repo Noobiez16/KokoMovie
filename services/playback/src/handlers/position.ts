@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { upsertPosition, getPosition, getPositionsForProfile, getSession, recordHistory } from '../db/dynamo.js'
+import { upsertPosition, getPosition, getPositionsForProfile, deletePosition, getSession, recordHistory } from '../db/dynamo.js'
 import { emitPlaybackEvent } from '../kafka/producer.js'
 import type { AuthenticatedRequest } from '../lib/auth.js'
 
@@ -160,6 +160,36 @@ export async function getPositionHandler(request: FastifyRequest, reply: Fastify
   return reply.send({
     success: true,
     data: position ?? { positionSeconds: 0, durationSeconds: 0, completedAt: null },
+    meta: { requestId: request.id, timestamp: new Date().toISOString() },
+  })
+}
+
+// Removes a saved playback position so the item disappears from Continue Watching.
+// Called when the user deletes the corresponding entry from Viewing History, keeping
+// the two Home-screen modules consistent.
+export async function deletePositionHandler(request: FastifyRequest, reply: FastifyReply) {
+  const params = getPositionParamsSchema.safeParse(request.params)
+  const query = getPositionQuerySchema.safeParse(request.query)
+
+  if (!params.success) {
+    return reply.code(400).send({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: params.error.message },
+      meta: { requestId: request.id, timestamp: new Date().toISOString() },
+    })
+  }
+
+  const req = request as unknown as AuthenticatedRequest
+  const profileId = req.profileId ?? req.accountId
+  const { contentId } = params.data
+  const episodeId = query.data?.episodeId
+
+  const contentEpisodeId = episodeId ? `${contentId}#${episodeId}` : `${contentId}#movie`
+  await deletePosition(profileId, contentEpisodeId)
+
+  return reply.send({
+    success: true,
+    data: null,
     meta: { requestId: request.id, timestamp: new Date().toISOString() },
   })
 }

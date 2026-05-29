@@ -4,15 +4,21 @@ import { useAuthStore } from './auth'
 
 interface SettingsState {
   tmdbApiKey: string
+  // True once the per-account key has been loaded from the OS keychain on
+  // login (see App.tsx). Lets the UI distinguish "still loading the key" from
+  // "this account has no key", so the API-key-required screen never flashes.
+  tmdbKeyHydrated: boolean
 
   setTmdbApiKey: (key: string) => void
   clearTmdbApiKey: () => void
+  setTmdbKeyHydrated: (v: boolean) => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       tmdbApiKey: '',
+      tmdbKeyHydrated: false,
 
       setTmdbApiKey: (tmdbApiKey) => {
         set({ tmdbApiKey })
@@ -28,6 +34,7 @@ export const useSettingsStore = create<SettingsState>()(
           window.electronAPI.clearTmdbApiKey(accountId).catch(() => {})
         }
       },
+      setTmdbKeyHydrated: (tmdbKeyHydrated) => set({ tmdbKeyHydrated }),
     }),
     {
       name: 'km-settings',
@@ -37,7 +44,7 @@ export const useSettingsStore = create<SettingsState>()(
       // would leak user A's key to user B when they log in on the same machine.
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { tmdbApiKey, ...rest } = state
+        const { tmdbApiKey, tmdbKeyHydrated, ...rest } = state
         return rest
       },
     },

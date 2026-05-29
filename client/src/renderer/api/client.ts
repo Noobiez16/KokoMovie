@@ -54,7 +54,8 @@ class ApiClient {
 
     const bodyStr = body !== undefined ? JSON.stringify(body) : undefined
     const result = await doFetch(`${this.baseUrl}${path}`, method, headers, bodyStr)
-    const data = JSON.parse(result.body) as T
+    const isNoContent = result.status === 204 || !result.body || result.body.trim() === ''
+    const data = isNoContent ? ({} as T) : (JSON.parse(result.body) as T)
 
     if (!result.ok) {
       const errData = data as { error?: { code?: string; message?: string } }

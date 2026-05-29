@@ -114,7 +114,29 @@ async function serveFromDb(id: string, request: FastifyRequest, reply: FastifyRe
 
   let seasonsData: object[] = []
   if (row.type === 'series') {
-    const seasonRows = await db.select().from(seasons).where(eq(seasons.contentId, id)).orderBy(asc(seasons.seasonNumber))
+    let seasonRows = await db.select().from(seasons).where(eq(seasons.contentId, id)).orderBy(asc(seasons.seasonNumber))
+    
+    // Check if we need to sync from TMDB because we only have mock/seeded episodes
+    const episodeRowsCheck = await db.select().from(episodes).where(eq(episodes.contentId, id)).limit(10)
+    const hasDummy = episodeRowsCheck.some((ep) =>
+      ep.description?.startsWith('The journey begins') ||
+      ep.description?.startsWith('Tensions rise') ||
+      ep.description?.startsWith('Secrets are unveiled')
+    )
+
+    if (hasDummy && row.tmdbId && hasTmdb(request)) {
+      try {
+        request.log.info('Seeded series detected. Deleting seeded seasons/episodes and syncing from TMDB.')
+        await db.delete(episodes).where(eq(episodes.contentId, id))
+        await db.delete(seasons).where(eq(seasons.contentId, id))
+        await syncTv(tmdb(request), row.tmdbId)
+        // Refresh rows
+        seasonRows = await db.select().from(seasons).where(eq(seasons.contentId, id)).orderBy(asc(seasons.seasonNumber))
+      } catch (e) {
+        request.log.error(e, 'Failed to sync seeded TV show details from TMDB')
+      }
+    }
+
     seasonsData = await Promise.all(
       seasonRows.map(async (s) => {
         let episodeRows = await db.select().from(episodes).where(eq(episodes.seasonId, s.id)).orderBy(asc(episodes.episodeNumber))

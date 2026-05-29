@@ -6,6 +6,7 @@ import { playbackApi } from '../../api/playback'
 import { providersApi } from '../../api/providers'
 import { PlayerControls } from './PlayerControls'
 import { NextEpisodeOverlay } from './NextEpisodeOverlay'
+import { autoSyncSubtitles, type SubCue } from '../../lib/subtitleAutoSync'
 
 interface CachedStream {
   providerId: string
@@ -143,22 +144,67 @@ interface SubtitleTracksProps {
   externalSubs: Array<{ id: number; name: string; lang: string; url: string }>
   proxyPort: string
   currentSubtitle: number
+  subtitleOffset: number
 }
 
 // Lazy-load: render a <track> element ONLY for the currently selected external sub.
 // Rendering every external sub eagerly caused the browser to fetch all of them in
 // parallel, which triggered HTTP 429 (rate-limit) responses from opensubtitles.
-const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle }: SubtitleTracksProps) => {
-  if (!proxyPort) return null
-  if (currentSubtitle < 1000) return null
-  const selected = externalSubs.find((s) => s.id === currentSubtitle)
-  if (!selected) return null
+//
+// The timing offset is applied IN-MEMORY by shifting each cue's start/end time —
+// not by re-fetching the VTT with a new `&offset=`. Re-fetching remounted the
+// <track>, which left residual cues on screen (the "bleeding" artifact) and made
+// every nudge a network round-trip. Loading once and mutating cue times makes the
+// offset instant and lets the browser's native cue lifecycle clear cleanly.
+const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle, subtitleOffset }: SubtitleTracksProps) => {
+  const trackRef = useRef<HTMLTrackElement>(null)
+  // Pristine cue times captured on first load, so repeated offset changes always
+  // shift from the original timing (never compound).
+  const originalsRef = useRef<Array<{ start: number; end: number }> | null>(null)
 
-  const cleanUrl = selected.url.replace(/^https?:\/\//, '')
-  const proxiedUrl = `http://localhost:${proxyPort}/proxy/${cleanUrl}${cleanUrl.includes('?') ? '&' : '?'}format=vtt`
+  const selected = currentSubtitle >= 1000 ? externalSubs.find((s) => s.id === currentSubtitle) : undefined
+  const cleanUrl = selected ? selected.url.replace(/^https?:\/\//, '') : ''
+  const proxiedUrl = selected
+    ? `http://localhost:${proxyPort}/proxy/${cleanUrl}${cleanUrl.includes('?') ? '&' : '?'}format=vtt`
+    : ''
+
+  // New subtitle source → forget the previous track's captured timings.
+  useEffect(() => { originalsRef.current = null }, [proxiedUrl])
+
+  // Capture originals once the cues parse, then (re)apply the current offset. Runs on
+  // offset change too — instantly, with no network request or remount.
+  useEffect(() => {
+    const el = trackRef.current
+    if (!el) return
+    const applyOffset = () => {
+      const cues = el.track?.cues
+      if (!cues || cues.length === 0) return
+      if (!originalsRef.current || originalsRef.current.length !== cues.length) {
+        originalsRef.current = Array.from({ length: cues.length }, (_, i) => {
+          const c = cues[i] as TextTrackCue
+          return { start: c.startTime, end: c.endTime }
+        })
+      }
+      const orig = originalsRef.current
+      for (let i = 0; i < cues.length; i++) {
+        const c = cues[i] as TextTrackCue
+        const o = orig[i]
+        if (!o) continue
+        c.startTime = Math.max(0, o.start + subtitleOffset)
+        c.endTime = Math.max(0, o.end + subtitleOffset)
+      }
+    }
+    applyOffset()
+    el.addEventListener('load', applyOffset)
+    return () => el.removeEventListener('load', applyOffset)
+  }, [subtitleOffset, proxiedUrl])
+
+  if (!proxyPort || !selected) return null
 
   return (
     <track
+      ref={trackRef}
+      key={selected.id}
       id={selected.id.toString()}
       kind="subtitles"
       src={proxiedUrl}
@@ -219,15 +265,44 @@ export function VideoPlayer({
     ]
   })()
   const [currentSubtitle, setCurrentSubtitle] = useState(-1)
-  const [subtitleSize, setSubtitleSize] = useState<'small' | 'medium' | 'large'>('medium')
+  // Subtitle size is a global preference — remember the user's S/M/L choice across
+  // titles and sessions via localStorage.
+  const [subtitleSize, setSubtitleSize] = useState<'small' | 'medium' | 'large'>(() => {
+    const saved = (typeof localStorage !== 'undefined' && localStorage.getItem('km_subtitle_size')) || ''
+    return saved === 'small' || saved === 'medium' || saved === 'large' ? saved : 'medium'
+  })
+  const [subtitleOffset, setSubtitleOffset] = useState(0)
+  const [autoSyncState, setAutoSyncState] = useState<'idle' | 'running' | 'done' | 'fail'>('idle')
+  const autoSyncAbortRef = useRef<AbortController | null>(null)
   const [showControls, setShowControls] = useState(true)
   const [showNextEpisode, setShowNextEpisode] = useState(false)
   const [hlsError, setHlsError] = useState<string | null>(null)
+  // True from when a stream starts loading until the first frame actually plays.
+  // Drives the "Loading video…" overlay so the user never stares at a black screen.
+  const [initialLoading, setInitialLoading] = useState(true)
+  // True while playback is stalled waiting on the network — most visibly after a
+  // seek, where fetching the new position can take a while on slow CDNs. Debounced
+  // so quick buffers don't flash the overlay.
+  const [isBuffering, setIsBuffering] = useState(false)
+  const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const durationRef = useRef(duration)
   durationRef.current = duration
   const currentTimeRef = useRef(currentTime)
   currentTimeRef.current = currentTime
+
+  // Latest subtitle selection, read inside the (rarely re-created) HLS handlers so a
+  // source switch re-applies the user's choice instead of letting hls.js auto-enable
+  // an internal track on top of a selected external one (which shows doubled subs).
+  const currentSubtitleRef = useRef(currentSubtitle)
+  currentSubtitleRef.current = currentSubtitle
+
+  // Automatic source fallback: remember which sources we've already given up on for
+  // this title, count consecutive fatal network errors, and hold the latest fallback
+  // fn in a ref so the (rarely re-created) HLS error handler always calls the current one.
+  const triedSourcesRef = useRef<Set<string>>(new Set())
+  const networkErrorCountRef = useRef(0)
+  const autoFallbackRef = useRef<(reason: string) => void>(() => {})
 
   // Reset local state on external prop changes (e.g. initial load)
   useEffect(() => {
@@ -236,6 +311,9 @@ export function VideoPlayer({
     setActiveSourceId(initialProviderId || null)
     setResumeAtSeconds(initialResumeAt ?? 0)
     setSwitchingError(null)
+    // Fresh title/episode → forget which sources failed last time.
+    triedSourcesRef.current = new Set()
+    networkErrorCountRef.current = 0
   }, [session.manifestUrl, streamHeaders, initialProviderId, initialResumeAt])
 
   // Register stream headers with main process so HLS.js segment requests get correct headers
@@ -374,6 +452,40 @@ export function VideoPlayer({
     }
   }
 
+  // Automatically move to the next collected source when the current one can't play
+  // (segments never start, buffering hangs, or fatal network errors). This is what
+  // keeps playback reliable on flaky CDNs instead of spinning on "Loading video…".
+  const autoFallback = (reason: string) => {
+    if (switchingSource) return
+    if (activeSourceId) triedSourcesRef.current.add(activeSourceId)
+    const next = allStreams.find(
+      (s) => s.providerId !== activeSourceId && !triedSourcesRef.current.has(s.providerId) && s.streams.length > 0,
+    )
+    if (next) {
+      console.warn(`[auto-fallback] ${reason} — switching to ${next.providerName} (${next.providerId})`)
+      networkErrorCountRef.current = 0
+      setSwitchingError(null)
+      handleSourceChange(next.providerId)
+    } else {
+      console.warn(`[auto-fallback] ${reason} — no untried sources left`)
+      setInitialLoading(false)
+      setHlsError('This title wouldn’t play on any available source. Please try again later or pick another source.')
+    }
+  }
+  autoFallbackRef.current = autoFallback
+
+  // Watchdog: if playback stays stuck (initial load or buffering) past the cap without
+  // a frame advancing, give up on this source and fall back to the next one.
+  useEffect(() => {
+    if (switchingSource) return
+    if (!initialLoading && !isBuffering) return
+    const STUCK_MS = 25000
+    const t = setTimeout(() => {
+      autoFallbackRef.current(initialLoading ? 'initial-load timeout' : 'buffering timeout')
+    }, STUCK_MS)
+    return () => clearTimeout(t)
+  }, [initialLoading, isBuffering, switchingSource, activeStreamUrl])
+
   // Fetch external subtitles on content or episode change
   useEffect(() => {
     let active = true
@@ -497,6 +609,7 @@ export function VideoPlayer({
   // Apply subtitle styling via dynamic ::cue CSS.
   // Sizes are calibrated so small/medium/large feel proportionally correct at full-screen.
   useEffect(() => {
+    try { localStorage.setItem('km_subtitle_size', subtitleSize) } catch { /* noop */ }
     const sizeMap = { small: '0.85em', medium: '1.15em', large: '1.55em' }
     const styleId = 'km-subtitle-size'
     let style = document.getElementById(styleId) as HTMLStyleElement | null
@@ -523,6 +636,7 @@ export function VideoPlayer({
     if (!video) return
 
     setHlsError(null)
+    setInitialLoading(true)
     const manifestUrl = activeStreamUrl
 
     // Detect if this is a direct video file (MP4/WebM) vs HLS manifest
@@ -572,6 +686,10 @@ export function VideoPlayer({
         levelLoadingTimeOut: 20000,
       })
 
+      // Don't let hls.js auto-render an internal subtitle unless the user actually has
+      // one selected — otherwise it stacks on top of a selected external track.
+      hls.subtitleDisplay = currentSubtitleRef.current >= 0 && currentSubtitleRef.current < 1000
+
       hls.loadSource(manifestUrl)
       hls.attachMedia(video)
 
@@ -604,6 +722,16 @@ export function VideoPlayer({
 
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, data) => {
         setInternalSubs(data.subtitleTracks.map((t) => ({ id: t.id, name: getCleanSubtitleName(t.name, t.lang ?? ''), lang: t.lang ?? '' })))
+        // Re-apply the current selection. Without this, switching source lets hls.js
+        // auto-enable an internal subtitle on top of a chosen external one → doubled subs.
+        const sel = currentSubtitleRef.current
+        if (sel >= 0 && sel < 1000) {
+          hls.subtitleDisplay = true
+          hls.subtitleTrack = sel
+        } else {
+          hls.subtitleDisplay = false
+          hls.subtitleTrack = -1
+        }
       })
 
       // LEVEL_SWITCHED reports the ABR-chosen level. We deliberately do NOT mirror that
@@ -639,8 +767,15 @@ export function VideoPlayer({
         if (!data.fatal) return
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // Try to recover network errors
-            hls.startLoad()
+            // Try to recover a couple of times; if the source keeps failing to
+            // deliver segments (e.g. a CDN returning empty ranges), stop looping and
+            // fall back to the next collected source instead of spinning forever.
+            networkErrorCountRef.current++
+            if (networkErrorCountRef.current > 2) {
+              autoFallbackRef.current('fatal network error')
+            } else {
+              hls.startLoad()
+            }
             break
           case Hls.ErrorTypes.MEDIA_ERROR:
             // Try to recover media errors
@@ -668,6 +803,9 @@ export function VideoPlayer({
     }
 
     return () => {
+      // Disable the internal subtitle before teardown so it can't linger in a
+      // 'showing' state and double up with the next source's subtitles.
+      try { if (hlsRef.current) hlsRef.current.subtitleTrack = -1 } catch { /* noop */ }
       hlsRef.current?.destroy()
       hlsRef.current = null
     }
@@ -690,8 +828,30 @@ export function VideoPlayer({
       setBuffered(0)
     }
 
+    const showBufferingSoon = () => {
+      if (bufferingTimerRef.current) return
+      bufferingTimerRef.current = setTimeout(() => {
+        bufferingTimerRef.current = null
+        setIsBuffering(true)
+      }, 250)
+    }
+    const clearBuffering = () => {
+      if (bufferingTimerRef.current) {
+        clearTimeout(bufferingTimerRef.current)
+        bufferingTimerRef.current = null
+      }
+      setIsBuffering(false)
+    }
+
     const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
+    const onPause = () => { setIsPlaying(false); clearBuffering() }
+    // First frame is actually rendering — drop the loading overlays and reset the
+    // network-error streak (the source is clearly working now).
+    const onPlaying = () => { setIsPlaying(true); setInitialLoading(false); clearBuffering(); networkErrorCountRef.current = 0 }
+    const onCanPlay = () => clearBuffering()
+    const onWaiting = () => showBufferingSoon()
+    const onSeeking = () => showBufferingSoon()
+    const onStalled = () => showBufferingSoon()
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime)
       if (video.buffered.length > 0) {
@@ -708,6 +868,11 @@ export function VideoPlayer({
 
     video.addEventListener('play', onPlay)
     video.addEventListener('pause', onPause)
+    video.addEventListener('playing', onPlaying)
+    video.addEventListener('canplay', onCanPlay)
+    video.addEventListener('waiting', onWaiting)
+    video.addEventListener('seeking', onSeeking)
+    video.addEventListener('stalled', onStalled)
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
     video.addEventListener('loadedmetadata', onLoadedMetadata)
@@ -716,10 +881,19 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener('play', onPlay)
       video.removeEventListener('pause', onPause)
+      video.removeEventListener('playing', onPlaying)
+      video.removeEventListener('canplay', onCanPlay)
+      video.removeEventListener('waiting', onWaiting)
+      video.removeEventListener('seeking', onSeeking)
+      video.removeEventListener('stalled', onStalled)
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('durationchange', onDurationChange)
       video.removeEventListener('loadedmetadata', onLoadedMetadata)
       video.removeEventListener('volumechange', onVolumeChange)
+      if (bufferingTimerRef.current) {
+        clearTimeout(bufferingTimerRef.current)
+        bufferingTimerRef.current = null
+      }
     }
   }, [nextEpisode, activeStreamUrl])
 
@@ -727,13 +901,15 @@ export function VideoPlayer({
   useEffect(() => {
     heartbeatRef.current = setInterval(() => {
       if (!videoRef.current) return
+      const dur = Math.floor(videoRef.current.duration || 0)
+      if (dur <= 0) return // Skip heartbeat until video duration metadata is loaded and positive
       playbackApi.heartbeat(
         {
           contentId: content.id,
           episodeId: episode?.id,
           sessionId: session.sessionId,
           positionSeconds: Math.floor(videoRef.current.currentTime),
-          durationSeconds: Math.floor(videoRef.current.duration || 0),
+          durationSeconds: dur,
           quality: currentLevel === -1 ? 'auto' : `${levels[currentLevel]?.height}p`,
         },
         profileId
@@ -831,6 +1007,70 @@ export function VideoPlayer({
       }
     }
   }
+
+  // Estimate and apply the right subtitle offset automatically by correlating speech
+  // (audio energy VAD) with the subtitle cue timeline. Opt-in and fail-safe: it only
+  // applies an offset when it finds a confident match, otherwise it leaves things be.
+  const handleAutoSync = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || currentSubtitle < 1000) return
+
+    // Find the selected external subtitle track and its cues.
+    let track: TextTrack | null = null
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const t = video.textTracks[i]
+      if (t && t.id === currentSubtitle.toString()) { track = t; break }
+    }
+    if (!track) {
+      const sel = externalSubs.find((s) => s.id === currentSubtitle)
+      if (sel) {
+        for (let i = 0; i < video.textTracks.length; i++) {
+          const t = video.textTracks[i]
+          if (t && t.label === sel.name) { track = t; break }
+        }
+      }
+    }
+    const domCues = track?.cues
+    if (!domCues || domCues.length === 0) {
+      setAutoSyncState('fail')
+      window.setTimeout(() => setAutoSyncState('idle'), 3500)
+      return
+    }
+
+    // The DOM cue times already include the applied offset — strip it to get originals.
+    const cues: SubCue[] = []
+    for (let i = 0; i < domCues.length; i++) {
+      const c = domCues[i] as TextTrackCue
+      cues.push({ start: c.startTime - subtitleOffset, end: c.endTime - subtitleOffset })
+    }
+
+    // VAD needs audio actually playing to read energy.
+    if (video.paused) video.play().catch(() => {})
+
+    autoSyncAbortRef.current?.abort()
+    const controller = new AbortController()
+    autoSyncAbortRef.current = controller
+    setAutoSyncState('running')
+    try {
+      const result = await autoSyncSubtitles(video, cues, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      if (result) {
+        setSubtitleOffset(result.offset)
+        setAutoSyncState('done')
+      } else {
+        setAutoSyncState('fail')
+      }
+    } catch {
+      if (!controller.signal.aborted) setAutoSyncState('fail')
+    } finally {
+      if (autoSyncAbortRef.current === controller) autoSyncAbortRef.current = null
+      window.setTimeout(() => setAutoSyncState((s) => (s === 'running' ? s : 'idle')), 3500)
+    }
+  }, [currentSubtitle, subtitleOffset, externalSubs])
+
+  // Abort any in-flight analysis on unmount.
+  useEffect(() => () => autoSyncAbortRef.current?.abort(), [])
+
   const handleFullscreen = () => {
     if (!document.fullscreenElement) containerRef.current?.requestFullscreen()
     else document.exitFullscreen()
@@ -884,6 +1124,27 @@ export function VideoPlayer({
         )}
       </div>
 
+      {/* Initial buffering overlay — shown until the first frame plays so the
+          user sees progress instead of a black screen while the stream loads. */}
+      {initialLoading && !switchingSource && !hlsError && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black pointer-events-none">
+          <div className="w-10 h-10 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin mb-4" />
+          <p className="text-white/80 text-sm font-semibold">Loading video…</p>
+          <p className="text-white/40 text-xs mt-1">Fetching the stream, this can take a few seconds</p>
+        </div>
+      )}
+
+      {/* Buffering / seek overlay — shown when playback stalls on the network
+          (most visibly after seeking on a slow CDN) so the user knows it's working. */}
+      {isBuffering && !initialLoading && !switchingSource && !hlsError && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-3 rounded-2xl bg-black/55 px-8 py-6 backdrop-blur-sm">
+            <div className="w-9 h-9 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin" />
+            <p className="text-white/80 text-xs font-medium">Loading…</p>
+          </div>
+        </div>
+      )}
+
       {/* Switch Source Loading Overlay */}
       {switchingSource && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-40 flex flex-col items-center justify-center pointer-events-auto">
@@ -920,6 +1181,7 @@ export function VideoPlayer({
           externalSubs={externalSubs}
           proxyPort={activeStreamUrl.match(/^http:\/\/localhost:(\d+)\//)?.[1] || ''}
           currentSubtitle={currentSubtitle}
+          subtitleOffset={subtitleOffset}
         />
       </video>
 
@@ -945,6 +1207,10 @@ export function VideoPlayer({
           subtitleTracks={subtitleTracks}
           currentSubtitle={currentSubtitle}
           subtitleSize={subtitleSize}
+          subtitleOffset={subtitleOffset}
+          onSubtitleOffsetChange={setSubtitleOffset}
+          onAutoSync={handleAutoSync}
+          autoSyncState={autoSyncState}
           onPlayPause={handlePlayPause}
           onMute={handleMute}
           onVolumeChange={handleVolumeChange}

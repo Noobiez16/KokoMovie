@@ -38,19 +38,23 @@ function LoadingScreen() {
 export function App() {
   const setAccount = useAuthStore((s) => s.setAccount)
   const account = useAuthStore((s) => s.account)
-  const { setTmdbApiKey, clearTmdbApiKey } = useSettingsStore()
+  const { setTmdbApiKey, clearTmdbApiKey, setTmdbKeyHydrated } = useSettingsStore()
 
   useEffect(() => {
+    setTmdbKeyHydrated(false)
     if (account?.id) {
-      window.electronAPI?.getTmdbApiKey(account.id).then((key) => {
-        if (key) {
-          setTmdbApiKey(key)
-        } else {
-          clearTmdbApiKey()
-        }
-      })
+      window.electronAPI?.getTmdbApiKey(account.id)
+        .then((key) => {
+          if (key) {
+            setTmdbApiKey(key)
+          } else {
+            clearTmdbApiKey()
+          }
+        })
+        .finally(() => setTmdbKeyHydrated(true))
     } else {
       clearTmdbApiKey()
+      setTmdbKeyHydrated(true)
     }
   }, [account?.id])
 

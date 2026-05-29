@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { userApi, type HistoryItem } from '../api/user'
+import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 
 function formatDuration(secs: number): string {
@@ -27,8 +28,14 @@ export function HistoryPage() {
 
   const queryClient = useQueryClient()
   const removeMutation = useMutation({
-    mutationFn: (watchedAtContentId: string) =>
-      userApi.deleteHistoryItem(watchedAtContentId, profileId),
+    // Deleting a history entry must also clear the matching resume position, otherwise
+    // the title keeps reappearing in "Continue Watching" (the two are backed by
+    // separate stores). We delete both, then refresh both Home-screen modules.
+    mutationFn: async (item: HistoryItem) => {
+      await userApi.deleteHistoryItem(item.watchedAtContentId, profileId)
+      // Best-effort: a missing position shouldn't fail the whole delete.
+      await playbackApi.deletePosition(item.contentId, item.episodeId, profileId).catch(() => {})
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['history', profileId] })
       queryClient.invalidateQueries({ queryKey: ['continue-watching', profileId] })
@@ -192,7 +199,7 @@ export function HistoryPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            removeMutation.mutate(item.watchedAtContentId)
+                            removeMutation.mutate(item)
                           }}
                           disabled={removeMutation.isPending}
                           className="flex items-center gap-1 text-purple-300/50 hover:text-red-400 disabled:opacity-50 text-[11px] font-semibold transition-colors duration-200 mt-1 cursor-pointer"

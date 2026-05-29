@@ -109,6 +109,13 @@ export async function upsertPosition(pos: PlaybackPosition): Promise<void> {
   }))
 }
 
+export async function deletePosition(profileId: string, contentEpisodeId: string): Promise<void> {
+  await dynamo.send(new DeleteCommand({
+    TableName: 'playback_positions',
+    Key: { profileId, contentEpisodeId },
+  }))
+}
+
 export async function getPosition(profileId: string, contentEpisodeId: string): Promise<PlaybackPosition | null> {
   const result = await dynamo.send(new GetCommand({
     TableName: 'playback_positions',

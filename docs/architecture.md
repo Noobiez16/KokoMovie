@@ -342,7 +342,11 @@ Handles identity, sessions, OAuth. JWT RS4096 with 15-min access tokens, 30-day 
 
 ### 6.2 Catalog Service (port 3002)
 
-Manages content metadata. Primary source is TMDB. Local PostgreSQL DB is populated on-demand as users browse. Fully functional with an empty DB as long as a TMDB API key is configured. The TMDB API key is sent dynamically by the client via the `X-TMDB-Key` HTTP header (configured in Settings); if not present, the service falls back to the `TMDB_API_KEY` server environment variable.
+Manages content metadata. Primary source is TMDB. Local PostgreSQL DB is populated on-demand as users browse.
+
+**TMDB key handling (per-account, required):** The TMDB key is supplied *only* by the client via the `X-TMDB-Key` HTTP header. As of 1.0.4-beta there is **no** server-side `TMDB_API_KEY` fallback — it was removed to prevent one user's key leaking into another user's session. The key is stored per account in the OS keychain (`tmdb-key-{accountId}`) and re-loaded automatically on reconnect, so each account enters its key once. Both v3 API keys and v4 read access tokens (JWT → `Authorization: Bearer`) are accepted.
+
+When no valid key reaches the service, catalog endpoints fall back to whatever has been synced into the local PostgreSQL DB and tag the response with `meta.source: 'local'` (vs `'tmdb'`). The client uses this to show an "API key required" gate (no key configured) or a limited-catalog banner (key set but TMDB unreachable), rather than silently serving a thin catalog.
 
 | Method | Path | Description |
 |---|---|---|

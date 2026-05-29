@@ -238,119 +238,281 @@ function fetchNode(
   })
 }
 
+// Hop-by-hop headers must not be forwarded by a proxy (RFC 7230 §6.1). Forwarding
+// `transfer-encoding`/`connection` alongside a `content-length` confuses Node's
+// response writer and can corrupt framing.
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
+  'proxy-authenticate', 'proxy-authorization',
+])
+
+// Resilient segment streaming.
+//
+// Flaky stream CDNs routinely close the socket mid-segment, delivering fewer bytes
+// than the `Content-Length` they advertised. The old implementation forwarded that
+// header and then let `pipe` end the response truncated — Chromium detects the byte
+// shortfall and aborts the request with ERR_CONTENT_LENGTH_MISMATCH, which stalls
+// playback. Here we track how many bytes we've actually delivered and, when the
+// upstream ends early, transparently resume from the next byte with a Range request.
+// The response is only finished once every promised byte has been sent; if we truly
+// can't recover we reset the connection so the player retries the whole fragment
+// cleanly instead of caching a short read.
 function streamSegment(
-  currentUrl: string,
+  initialUrl: string,
   headers: Record<string, string>,
   req: nodeHttp.IncomingMessage,
   res: nodeHttp.ServerResponse,
-  redirectsCount = 0
 ) {
-  if (redirectsCount > 5) {
-    res.writeHead(502)
-    res.end('Too many redirects')
-    return
+  const MAX_ATTEMPTS = 6
+  let headWritten = false
+  let finalUrl = initialUrl       // resolved URL after redirects — resumes target this
+  let bytesPiped = 0              // bytes delivered to the client so far
+  let absStart = 0                // absolute offset of the first byte we're serving
+  let expectedLen: number | null = null // total bytes we owe the client, if known
+  let attempts = 0
+  let firstBytes: Buffer | null = null
+  let done = false
+  let currentClientReq: nodeHttp.ClientRequest | null = null
+  let currentClientRes: nodeHttp.IncomingMessage | null = null
+  let pendingStatus = 502
+  let pendingHeaders: Record<string, string> = { 'Access-Control-Allow-Origin': '*' }
+  let bodyExpected = true
+
+  // Headers are sent only once the first body byte actually arrives — this lets us
+  // retry an empty/early-failed response without having committed a status line.
+  const writeHeadOnce = () => {
+    if (headWritten || res.headersSent) return
+    res.writeHead(pendingStatus, pendingHeaders)
+    headWritten = true
   }
 
-  try {
-    const urlObj = new URL(currentUrl)
-    const isHttps = urlObj.protocol === 'https:'
-    const reqModule = isHttps ? nodeHttps : nodeHttp
+  const finish = (ok: boolean) => {
+    if (done) return
+    done = true
+    try { currentClientReq?.destroy() } catch { /* noop */ }
+    if (ok) {
+      res.end()
+    } else {
+      // Reset rather than end: a truncated/empty body would otherwise be cached or
+      // parsed by the player as if it were complete.
+      res.destroy()
+    }
+  }
+
+  // Decide what to do once an upstream response (or its connection) terminates.
+  const settleAttempt = () => {
+    if (done) return
+
+    // Nothing committed to the client yet (0 bytes delivered). Because we defer the
+    // response headers until the first byte arrives, we can retry the whole request —
+    // so a flaky CDN returning an empty 206 never surfaces as ERR_EMPTY_RESPONSE.
+    if (!headWritten) {
+      if (bodyExpected && attempts < MAX_ATTEMPTS) {
+        attempts++
+        logExtraction(`[Segment retry ${attempts}] no data yet → ${finalUrl.slice(0, 120)}`)
+        makeRequest(finalUrl, undefined, 0)
+      } else if (!bodyExpected) {
+        // Legitimately empty (HEAD / 204 / zero-length / error page) — pass it through.
+        writeHeadOnce()
+        finish(true)
+      } else if (!res.headersSent) {
+        res.writeHead(502, { 'Access-Control-Allow-Origin': '*' })
+        res.end('Upstream returned no data')
+        done = true
+      } else {
+        finish(false)
+      }
+      return
+    }
+
+    // Headers already sent. If the upstream stopped short of the promised length,
+    // resume just the missing tail with a Range request.
+    if (expectedLen != null && bytesPiped < expectedLen) {
+      if (attempts < MAX_ATTEMPTS) {
+        attempts++
+        const from = absStart + bytesPiped
+        const to = absStart + expectedLen - 1
+        logExtraction(`[Segment resume ${attempts}] have=${bytesPiped}/${expectedLen} → bytes=${from}-${to} ${finalUrl.slice(0, 120)}`)
+        makeRequest(finalUrl, `bytes=${from}-${to}`, 0)
+      } else {
+        logExtraction(`[Segment incomplete] have=${bytesPiped}/${expectedLen}, attempts exhausted ${finalUrl.slice(0, 120)}`)
+        finish(false)
+      }
+    } else {
+      const head = firstBytes ? firstBytes.toString('hex') : 'none'
+      logExtraction(`[Segment done] bytes=${bytesPiped}${expectedLen != null ? `/${expectedLen}` : ''} head=${head} ${finalUrl.slice(0, 120)}`)
+      finish(true)
+    }
+  }
+
+  function makeRequest(url: string, rangeHeader: string | undefined, redirects: number) {
+    if (done) return
+    // One settle per attempt: whichever of end/error/aborted/connection-error fires
+    // first decides whether we resume or finish — later events for this attempt are
+    // ignored so we never launch two resumes in parallel (which would duplicate bytes).
+    let settled = false
+    const settleOnce = () => { if (settled || done) return; settled = true; settleAttempt() }
+    if (redirects > 5) {
+      if (!headWritten && !res.headersSent) { res.writeHead(502); res.end('Too many redirects') } else finish(false)
+      return
+    }
+
+    let isHttps: boolean
+    try { isHttps = new URL(url).protocol === 'https:' } catch { finish(false); return }
 
     const reqHeaders: Record<string, string> = {}
     for (const [k, v] of Object.entries(headers)) {
-      if (k.toLowerCase() !== 'host') {
-        reqHeaders[k] = v
-      }
+      if (k.toLowerCase() !== 'host') reqHeaders[k] = v
     }
+    const range = rangeHeader ?? req.headers.range
+    if (range) reqHeaders['Range'] = String(range)
 
-    if (req.headers.range) {
-      reqHeaders['Range'] = req.headers.range
-    }
-
-    const clientReqOpts: nodeHttp.RequestOptions = {
+    const opts: nodeHttp.RequestOptions = {
       method: req.method ?? 'GET',
       headers: reqHeaders,
       timeout: 30000,
       agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
     }
 
-    const handleClientResponse = (clientRes: nodeHttp.IncomingMessage) => {
-      if (req.destroyed) {
-        clientReq.destroy()
-        clientRes.destroy()
+    const onResponse = (clientRes: nodeHttp.IncomingMessage) => {
+      if (done || req.destroyed) { clientRes.destroy(); return }
+
+      const statusCode = clientRes.statusCode ?? 200
+
+      // Follow redirects (without writing anything to the client yet).
+      if ([301, 302, 303, 307, 308].includes(statusCode) && clientRes.headers.location) {
+        const absoluteLocation = new URL(clientRes.headers.location, url).toString()
+        clientRes.resume() // drain the redirect body
+        settled = true // this attempt has handed off to the redirect target
+        makeRequest(absoluteLocation, rangeHeader, redirects + 1)
         return
       }
 
-      const statusCode = clientRes.statusCode ?? 200
-      if ([301, 302, 303, 307, 308].includes(statusCode)) {
-        const location = clientRes.headers.location
-        if (location) {
-          const absoluteLocation = new URL(location, currentUrl).toString()
-          streamSegment(absoluteLocation, headers, req, res, redirectsCount + 1)
-          return
-        }
-      }
+      if (headWritten) {
+        // A resume — it must come back as 206 to splice safely onto what we've sent.
+        if (statusCode !== 206) { clientRes.destroy(); finish(false); return }
+      } else {
+        finalUrl = url
 
-      const resHeaders: Record<string, string> = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      }
-      for (const [k, v] of Object.entries(clientRes.headers)) {
-        if (v !== undefined && v !== null && !k.toLowerCase().startsWith('access-control-')) {
+        // Work out how many bytes we owe the client and the absolute start offset,
+        // so a resume can ask for exactly the missing tail.
+        const contentRange = clientRes.headers['content-range']
+        const contentLength = parseInt(String(clientRes.headers['content-length'] ?? ''), 10)
+        const crMatch = typeof contentRange === 'string' ? contentRange.match(/bytes\s+(\d+)-(\d+)\//i) : null
+        if (crMatch) {
+          absStart = parseInt(crMatch[1]!, 10)
+          expectedLen = parseInt(crMatch[2]!, 10) - absStart + 1
+        } else if (!isNaN(contentLength)) {
+          const reqRange = String(req.headers.range ?? '').match(/bytes=(\d+)-/i)
+          absStart = reqRange ? parseInt(reqRange[1]!, 10) : 0
+          expectedLen = contentLength
+        } else {
+          expectedLen = null // chunked / unknown length — can't verify or resume
+        }
+
+        const isHead = (req.method ?? 'GET').toUpperCase() === 'HEAD'
+        const ok2xx = statusCode === 200 || statusCode === 206
+        // No body to verify/resume for HEAD, non-2xx error pages, or zero length.
+        if (isHead || !ok2xx || expectedLen === 0) expectedLen = null
+        bodyExpected = !isHead && ok2xx && expectedLen != null && expectedLen > 0
+
+        // Stage the response headers but DON'T send them until the first byte
+        // arrives — so settleAttempt can retry an empty response cleanly.
+        const resHeaders: Record<string, string> = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        }
+        for (const [k, v] of Object.entries(clientRes.headers)) {
+          const lk = k.toLowerCase()
+          if (v == null || lk.startsWith('access-control-') || HOP_BY_HOP_HEADERS.has(lk)) continue
           resHeaders[k] = String(v)
         }
+        pendingStatus = statusCode
+        pendingHeaders = resHeaders
       }
 
-      res.writeHead(statusCode, resHeaders)
+      currentClientRes = clientRes
 
-      // DIAGNOSTIC: capture status, size, content-type, and first 16 bytes of each segment
-      // so we can tell whether the upstream is returning real TS data (0x47 sync byte) or
-      // an HTML challenge / error page / unexpected envelope.
-      let firstBytes: Buffer | null = null
-      let totalBytes = 0
       clientRes.on('data', (chunk: Buffer) => {
-        totalBytes += chunk.length
+        if (done) return
+        writeHeadOnce() // commit the staged headers on the first real byte
+        bytesPiped += chunk.length
         if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, Math.min(16, chunk.length)))
-      })
-      clientRes.on('end', () => {
-        const head = firstBytes ? firstBytes.toString('hex') : 'none'
-        const ct = clientRes.headers['content-type'] ?? '?'
-        const urlBrief = currentUrl.length > 140 ? currentUrl.slice(0, 140) + '…' : currentUrl
-        logExtraction(`[Segment ${statusCode}] bytes=${totalBytes} ct=${ct} head=${head} url=${urlBrief}`)
+        // Manual write (not pipe) so headers stay deferrable and resumed bytes can be
+        // appended to the same response. Honour backpressure via the res 'drain' below.
+        if (!res.write(chunk)) clientRes.pause()
       })
 
-      clientRes.pipe(res)
+      // Exactly one of end/error/aborted drives the next step for this attempt.
+      clientRes.on('end', settleOnce)
+      clientRes.on('error', (err: Error) => {
+        logExtraction(`[Proxy Segment Response Error] ${finalUrl}: ${err.message}`)
+        settleOnce()
+      })
+      clientRes.on('aborted', () => {
+        logExtraction(`[Proxy Segment Response Aborted] ${finalUrl}`)
+        settleOnce()
+      })
     }
 
-    const clientReq = isHttps
-      ? nodeHttps.request(currentUrl, clientReqOpts as nodeHttps.RequestOptions, handleClientResponse)
-      : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, clientReqOpts, handleClientResponse)
+    let clientReq: nodeHttp.ClientRequest
+    try {
+      clientReq = isHttps
+        ? nodeHttps.request(url, opts as nodeHttps.RequestOptions, onResponse)
+        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, opts, onResponse)
+    } catch (e: any) {
+      logExtraction(`[Proxy Segment Exception] ${url}: ${e?.message}`)
+      settleOnce()
+      return
+    }
+    currentClientReq = clientReq
 
-    clientReq.on('timeout', () => {
-      clientReq.destroy()
-    })
-
+    clientReq.on('timeout', () => clientReq.destroy(new Error('Upstream timeout')))
     clientReq.on('error', (err: Error) => {
-      logExtraction(`[Proxy Segment Error] ${currentUrl}: ${err.message}`)
-      if (!res.headersSent) {
-        res.writeHead(502)
-        res.end('Proxy segment request failed')
-      }
-    })
-
-    req.on('close', () => {
-      clientReq.destroy()
+      logExtraction(`[Proxy Segment Error] ${url}: ${err.message}`)
+      // Routed through the per-attempt guard: before any bytes this retries the whole
+      // request; mid-body it resumes the tail; after a redirect handoff it's a no-op.
+      settleOnce()
     })
 
     clientReq.end()
-  } catch (err: any) {
-    logExtraction(`[Proxy Segment Exception] ${currentUrl}: ${err.message}`)
-    if (!res.headersSent) {
-      res.writeHead(502)
-      res.end('Proxy segment request exception')
-    }
   }
+
+  // Resume the active upstream read once the client's socket drains (backpressure).
+  // Attached once; always targets whichever upstream response is currently flowing.
+  res.on('drain', () => { try { currentClientRes?.resume() } catch { /* noop */ } })
+
+  // Tear everything down if the player (client) goes away. Attached once so resumes
+  // don't pile up listeners on `req`.
+  const onClientGone = () => { done = true; try { currentClientReq?.destroy() } catch { /* noop */ } }
+  req.on('close', onClientGone)
+  req.on('aborted', onClientGone)
+
+  makeRequest(initialUrl, undefined, 0)
+}
+
+function parseTimestamp(ts: string): number {
+  const parts = ts.replace(',', '.').split(':')
+  let secs = 0
+  if (parts.length === 3) {
+    secs += parseInt(parts[0]!, 10) * 3600
+    secs += parseInt(parts[1]!, 10) * 60
+    secs += parseFloat(parts[2]!)
+  } else if (parts.length === 2) {
+    secs += parseInt(parts[0]!, 10) * 60
+    secs += parseFloat(parts[1]!)
+  }
+  return secs
+}
+
+function formatTimestamp(secs: number): string {
+  if (secs < 0) secs = 0
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = Math.floor(secs % 60)
+  const ms = Math.round((secs % 1) * 1000)
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`
 }
 
 // Lenient SRT/VTT normalizer.
@@ -362,7 +524,7 @@ function streamSegment(
 // prepend WEBVTT header if missing, then regex-inject bottom-center positioning onto every
 // cue line that doesn't already carry settings. Cue identifier lines (sequence numbers) are
 // valid in VTT and are left in place.
-function srtToVtt(raw: string): string {
+function srtToVtt(raw: string, offsetSecs = 0): string {
   let text = raw
     .replace(/^﻿/, '')         // strip BOM
     .replace(/\r\n/g, '\n')
@@ -371,6 +533,12 @@ function srtToVtt(raw: string): string {
   // SRT uses comma between seconds and ms; VTT requires dot.
   // Supports both HH:MM:SS,mmm and MM:SS,mmm formats
   text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}),(\d{3})/g, '$1.$3')
+
+  if (offsetSecs !== 0) {
+    text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}\.\d{3})/g, (match, start, _, end) => {
+      return `${formatTimestamp(parseTimestamp(start) + offsetSecs)} --> ${formatTimestamp(parseTimestamp(end) + offsetSecs)}`
+    })
+  }
 
   if (!text.trimStart().startsWith('WEBVTT')) {
     text = 'WEBVTT\n\n' + text
@@ -475,8 +643,12 @@ export async function startStreamProxy(): Promise<void> {
         const isVtt = urlObj.searchParams.get('format') === 'vtt'
         if (isVtt) {
           urlObj.searchParams.delete('format')
-          realUrl = urlObj.toString()
         }
+        const offsetSecs = parseFloat(urlObj.searchParams.get('offset') ?? '0')
+        if (urlObj.searchParams.has('offset')) {
+          urlObj.searchParams.delete('offset')
+        }
+        realUrl = urlObj.toString()
 
         const host = urlObj.host
         const baseHeaders = { ...getStreamHeaders(host) }
@@ -552,17 +724,24 @@ export async function startStreamProxy(): Promise<void> {
           const isAlreadyVtt = raw.replace(/^﻿/, '').trimStart().startsWith('WEBVTT')
           if (isAlreadyVtt) {
             // Rewrite or inject positioning on every --> line that doesn't already have settings
-            const rewritten = raw
+            let rewritten = raw
               .replace(/^﻿/, '')
               .replace(/\r\n/g, '\n')
               .replace(/\r/g, '\n')
-              .replace(
-                /^((\d{1,3}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{1,3}:)?\d{2}:\d{2}\.\d{3})(\s*)$/gm,
-                '$1 line:90% position:50% align:center',
-              )
+
+            if (offsetSecs !== 0) {
+              rewritten = rewritten.replace(/((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})/g, (match, start, _, end) => {
+                return `${formatTimestamp(parseTimestamp(start) + offsetSecs)} --> ${formatTimestamp(parseTimestamp(end) + offsetSecs)}`
+              })
+            }
+
+            rewritten = rewritten.replace(
+              /^((\d{1,3}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{1,3}:)?\d{2}:\d{2}\.\d{3})(\s*)$/gm,
+              '$1 line:90% position:50% align:center',
+            )
             buffer = Buffer.from(rewritten, 'utf8')
           } else {
-            buffer = Buffer.from(srtToVtt(raw), 'utf8')
+            buffer = Buffer.from(srtToVtt(raw, offsetSecs), 'utf8')
           }
           contentType = 'text/vtt; charset=utf-8'
         } else if (realUrl.includes('.m3u') || contentType.includes('mpegurl')) {
@@ -1024,6 +1203,24 @@ export function registerProvidersIpc(): void {
           checkFinish()
         }
       }
+
+      // Absolute safety net: never let a hung worker (a stuck resolution probe,
+      // unresponsive socket, etc.) keep the caller spinning forever. When this fires
+      // we resolve with the best stream found so far — or null — and abort the rest.
+      const HARD_CAP_MS = 40000
+      const hardTimer = setTimeout(() => {
+        if (collectDone) return
+        if (resolved && bestResult) { finishCollecting(); return }
+        logExtraction(`HARD TIMEOUT after ${HARD_CAP_MS}ms — resolving with best-so-far (${bestResult ? bestResolution + 'p' : 'none'})`)
+        resolved = true
+        collectDone = true
+        controller.abort()
+        timers.forEach(clearTimeout)
+        if (collectTimer) clearTimeout(collectTimer)
+        if (fallbackTimer) clearTimeout(fallbackTimer)
+        resolve(bestResult ? { ...bestResult, allStreams: collectedStreams } : null)
+      }, HARD_CAP_MS)
+      timers.push(hardTimer)
 
       // Schedule batches
       for (let i = 0; i < enabled.length; i += batchSize) {

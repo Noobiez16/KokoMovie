@@ -79,18 +79,24 @@ export interface HomeData {
   rows: HomeRow[]
 }
 
+export type CatalogSource = 'tmdb' | 'local'
+
 export interface PaginatedMeta {
   requestId: string
   timestamp: string
+  source?: CatalogSource
   pagination: { page: number; limit: number; total: number; pages: number }
 }
 
 export const catalogApi = {
-  getHome: (profileId: string) =>
-    catalogClient.get<{ success: true; data: HomeData; meta: { requestId: string; timestamp: string } }>(
-      '/catalog/browse/home',
+  getHome: (params: { type?: string } = {}, profileId: string) => {
+    const qs = new URLSearchParams()
+    if (params.type) qs.set('type', params.type)
+    return catalogClient.get<{ success: true; data: HomeData; meta: { requestId: string; timestamp: string; source?: CatalogSource } }>(
+      `/catalog/browse/home?${qs}`,
       { profileId }
-    ),
+    )
+  },
 
   browse: (params: { genre?: string; type?: string; year?: number; page?: number; limit?: number }, profileId: string) => {
     const qs = new URLSearchParams()
