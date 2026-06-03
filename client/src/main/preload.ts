@@ -81,6 +81,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
     ipcRenderer.invoke('api:request', opts),
 
+  // ─── Local library (watchlist, resume positions, preferences) ────────────
+  watchlistList: () => ipcRenderer.invoke('library:watchlist:list'),
+  watchlistAdd: (contentId: string, contentType: string) => ipcRenderer.invoke('library:watchlist:add', contentId, contentType),
+  watchlistRemove: (contentId: string) => ipcRenderer.invoke('library:watchlist:remove', contentId),
+  watchlistHas: (contentId: string) => ipcRenderer.invoke('library:watchlist:has', contentId),
+  positionSave: (p: { contentId: string; episodeId?: string | null; contentType?: string; positionSeconds: number; durationSeconds: number; completed?: boolean }) =>
+    ipcRenderer.invoke('library:position:save', p),
+  positionGet: (contentId: string, episodeId?: string | null) => ipcRenderer.invoke('library:position:get', contentId, episodeId),
+  positionList: () => ipcRenderer.invoke('library:position:list'),
+  positionDelete: (contentId: string, episodeId?: string | null) => ipcRenderer.invoke('library:position:delete', contentId, episodeId),
+  prefsGet: () => ipcRenderer.invoke('library:prefs:get'),
+  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) =>
+    ipcRenderer.invoke('library:prefs:set', p),
+
   // ─── Providers (stream aggregator) ───────────────────────────────────────
   listProviders: () => ipcRenderer.invoke('providers:list'),
   toggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('providers:toggle', id, enabled),

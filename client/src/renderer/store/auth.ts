@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Profile } from '../api/user'
+import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from '../lib/local-identity'
 
 interface AccountInfo {
   id: string
@@ -8,6 +9,11 @@ interface AccountInfo {
   plan: string
   mfaEnabled: boolean
 }
+
+// KokoMovie is fully local — there is no login. A single on-device identity is
+// always "signed in" so the rest of the app (which keys off the active profile)
+// works unchanged.
+const LOCAL_ACCOUNT: AccountInfo = { id: LOCAL_PROFILE_ID, email: 'local', plan: 'basic', mfaEnabled: false }
 
 interface AuthState {
   account: AccountInfo | null
@@ -22,9 +28,9 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      account: null,
-      activeProfile: null,
-      isAuthenticated: false,
+      account: LOCAL_ACCOUNT,
+      activeProfile: LOCAL_PROFILE,
+      isAuthenticated: true,
 
       setAccount: (account) =>
         set({ account, isAuthenticated: account !== null }),
@@ -32,8 +38,9 @@ export const useAuthStore = create<AuthState>()(
       setActiveProfile: (activeProfile) =>
         set({ activeProfile }),
 
+      // No real sessions in the local build; "logout" just resets to the local identity.
       logout: () =>
-        set({ account: null, activeProfile: null, isAuthenticated: false }),
+        set({ account: LOCAL_ACCOUNT, activeProfile: LOCAL_PROFILE, isAuthenticated: true }),
     }),
     {
       name: 'km-auth',

@@ -1,4 +1,7 @@
-import { playbackClient } from './client'
+// Local playback tracking: resume positions and continue-watching live in local
+// SQLite (via IPC). Actual streams are located by the provider framework in the
+// main process; the "session" here is just a local handle for position tracking.
+import { catalogApi } from './catalog'
 
 export interface PlaybackSession {
   sessionId: string
@@ -27,45 +30,90 @@ export interface ContinueWatchingItem {
   releaseYear: number | null
 }
 
+const api = () => window.electronAPI!
+
+// A title counts as "finished" (and drops off continue-watching) past 92%.
+function isComplete(position: number, duration: number): boolean {
+  return duration > 0 && position >= duration * 0.92
+}
+
 export const playbackApi = {
-  createSession: (
+  createSession: async (
     body: { contentId: string; episodeId?: string; s3HlsKey: string; drmKeyId?: string; durationSeconds: number },
-    profileId: string
-  ) =>
-    playbackClient.post<{ success: true; data: PlaybackSession }>('/playback/session', body, { profileId }),
-
-  heartbeat: (
-    body: { contentId: string; episodeId?: string; sessionId: string; positionSeconds: number; durationSeconds: number; quality: string },
-    profileId: string
-  ) =>
-    playbackClient.put<void>('/playback/position', body, { profileId }),
-
-  getPosition: (contentId: string, episodeId: string | undefined, profileId: string) => {
-    const qs = episodeId ? `?episodeId=${episodeId}` : ''
-    return playbackClient.get<{ success: true; data: PlaybackPosition }>(
-      `/playback/position/${contentId}${qs}`,
-      { profileId }
-    )
+    _profileId?: string,
+  ) => {
+    return {
+      success: true as const,
+      data: {
+        sessionId: crypto.randomUUID(),
+        manifestUrl: '',
+        drmKeyId: body.drmKeyId ?? null,
+        expiresIn: 14400,
+      } as PlaybackSession,
+    }
   },
 
-  reportQuality: (
-    body: { sessionId: string; contentId: string; episodeId?: string; quality: string; positionSeconds: number; durationSeconds: number; bandwidth?: number },
-    profileId: string
-  ) =>
-    playbackClient.post<void>('/playback/quality-report', body, { profileId }),
+  heartbeat: async (
+    body: { contentId: string; episodeId?: string; sessionId: string; positionSeconds: number; durationSeconds: number; quality: string },
+    _profileId?: string,
+  ) => {
+    await api().positionSave({
+      contentId: body.contentId,
+      episodeId: body.episodeId ?? null,
+      positionSeconds: body.positionSeconds,
+      durationSeconds: body.durationSeconds,
+      completed: isComplete(body.positionSeconds, body.durationSeconds),
+    })
+  },
 
-  getContinueWatching: (profileId: string) =>
-    playbackClient.get<{ success: true; data: ContinueWatchingItem[] }>(
-      '/playback/continue-watching',
-      { profileId },
-    ),
+  getPosition: async (contentId: string, episodeId: string | undefined, _profileId?: string) => {
+    const row = await api().positionGet(contentId, episodeId ?? null)
+    return {
+      success: true as const,
+      data: {
+        positionSeconds: row?.position_seconds ?? 0,
+        durationSeconds: row?.duration_seconds ?? 0,
+        completedAt: row?.completed_at ?? null,
+      } as PlaybackPosition,
+    }
+  },
 
-  // Removes the saved resume position so the title leaves "Continue Watching".
-  deletePosition: (contentId: string, episodeId: string | null | undefined, profileId: string) => {
-    const qs = episodeId ? `?episodeId=${episodeId}` : ''
-    return playbackClient.delete<{ success: true; data: null }>(
-      `/playback/position/${contentId}${qs}`,
-      { profileId },
-    )
+  reportQuality: async (
+    _body: { sessionId: string; contentId: string; episodeId?: string; quality: string; positionSeconds: number; durationSeconds: number; bandwidth?: number },
+    _profileId?: string,
+  ) => {
+    // No telemetry in the local build.
+  },
+
+  getContinueWatching: async (_profileId?: string) => {
+    const rows = await api().positionList()
+    const active = rows.filter((r) => r.position_seconds > 0 && !r.completed_at && !isComplete(r.position_seconds, r.duration_seconds))
+    const items = (
+      await Promise.all(
+        active.map(async (r): Promise<ContinueWatchingItem | null> => {
+          const s = await catalogApi.getSummary(r.content_id)
+          if (!s) return null
+          return {
+            contentId: r.content_id,
+            episodeId: r.episode_id || null,
+            positionSeconds: r.position_seconds,
+            durationSeconds: r.duration_seconds,
+            contentEpisodeId: `${r.content_id}:${r.episode_id}`,
+            updatedAt: r.updated_at,
+            title: s.title,
+            type: s.type,
+            s3Thumbnail: s.s3Thumbnail,
+            backdropUrl: s.backdropUrl,
+            releaseYear: s.releaseYear,
+          }
+        }),
+      )
+    ).filter((x): x is ContinueWatchingItem => x !== null)
+    return { success: true as const, data: items }
+  },
+
+  deletePosition: async (contentId: string, episodeId: string | null | undefined, _profileId?: string) => {
+    await api().positionDelete(contentId, episodeId ?? null)
+    return { success: true as const, data: null }
   },
 }

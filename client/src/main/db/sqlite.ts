@@ -43,6 +43,34 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS downloads_content_id_idx ON downloads (content_id);
     CREATE INDEX IF NOT EXISTS downloads_status_idx ON downloads (status);
     CREATE INDEX IF NOT EXISTS downloads_expires_at_idx ON downloads (expires_at);
+
+    -- ─── Local library (fully offline; metadata is enriched from TMDB on read) ──
+    CREATE TABLE IF NOT EXISTS watchlist (
+      content_id   TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL DEFAULT 'movie',
+      added_at     TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playback_positions (
+      content_id       TEXT NOT NULL,
+      episode_id       TEXT NOT NULL DEFAULT '',
+      content_type     TEXT NOT NULL DEFAULT 'movie',
+      position_seconds INTEGER NOT NULL DEFAULT 0,
+      duration_seconds INTEGER NOT NULL DEFAULT 0,
+      completed_at     TEXT,
+      updated_at       TEXT NOT NULL,
+      PRIMARY KEY (content_id, episode_id)
+    );
+    CREATE INDEX IF NOT EXISTS positions_updated_idx ON playback_positions (updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS preferences (
+      id               INTEGER PRIMARY KEY CHECK (id = 1),
+      language         TEXT NOT NULL DEFAULT 'en',
+      subtitle_default TEXT,
+      autoplay         INTEGER NOT NULL DEFAULT 1,
+      maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA'
+    );
+    INSERT OR IGNORE INTO preferences (id) VALUES (1);
   `)
 
   // Check if headers column exists in downloads table (for backward compatibility)

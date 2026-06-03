@@ -55,6 +55,18 @@ interface ElectronAPI {
   apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
     Promise<{ ok: boolean; status: number; body: string }>
 
+  // Local library
+  watchlistList: () => Promise<Array<{ content_id: string; content_type: string; added_at: string }>>
+  watchlistAdd: (contentId: string, contentType: string) => Promise<{ ok: boolean }>
+  watchlistRemove: (contentId: string) => Promise<{ ok: boolean }>
+  watchlistHas: (contentId: string) => Promise<{ inWatchlist: boolean }>
+  positionSave: (p: { contentId: string; episodeId?: string | null; contentType?: string; positionSeconds: number; durationSeconds: number; completed?: boolean }) => Promise<{ ok: boolean }>
+  positionGet: (contentId: string, episodeId?: string | null) => Promise<{ content_id: string; episode_id: string; content_type: string; position_seconds: number; duration_seconds: number; completed_at: string | null; updated_at: string } | null>
+  positionList: () => Promise<Array<{ content_id: string; episode_id: string; content_type: string; position_seconds: number; duration_seconds: number; completed_at: string | null; updated_at: string }>>
+  positionDelete: (contentId: string, episodeId?: string | null) => Promise<{ ok: boolean }>
+  prefsGet: () => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
+  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
+
   // Providers
   listProviders: () => Promise<Array<{ id: string; name: string; enabled: boolean }>>
   toggleProvider: (id: string, enabled: boolean) => Promise<{ ok: boolean }>

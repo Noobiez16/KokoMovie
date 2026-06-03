@@ -1,4 +1,10 @@
-import { userClient } from './client'
+// Local user data: profiles collapse to a single on-device profile; watchlist,
+// history and preferences live in local SQLite (via IPC). Same exported shapes
+// as before so pages/components are unchanged.
+import { catalogApi } from './catalog'
+import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from '../lib/local-identity'
+
+export { LOCAL_PROFILE, LOCAL_PROFILE_ID }
 
 export interface Profile {
   id: string
@@ -66,67 +72,130 @@ export interface Preferences {
   isKids: boolean
 }
 
+const api = () => window.electronAPI!
+
 export const userApi = {
-  // ─── Profiles ────────────────────────────────────────────────────────────────
-  listProfiles: () =>
-    userClient.get<{ success: true; data: Profile[] }>('/user/profiles'),
+  // ─── Profiles (single local profile) ──────────────────────────────────────
+  listProfiles: async () => ({ success: true as const, data: [LOCAL_PROFILE] }),
+  createProfile: async (_payload: CreateProfilePayload) => ({ success: true as const, data: LOCAL_PROFILE }),
+  updateProfile: async (_id: string, _payload: UpdateProfilePayload) => ({ success: true as const, data: LOCAL_PROFILE }),
+  deleteProfile: async (_id: string) => ({ success: true as const, data: null }),
 
-  createProfile: (payload: CreateProfilePayload) =>
-    userClient.post<{ success: true; data: Profile }>('/user/profiles', payload),
-
-  updateProfile: (id: string, payload: UpdateProfilePayload) =>
-    userClient.put<{ success: true; data: Profile }>(`/user/profiles/${id}`, payload),
-
-  deleteProfile: (id: string) =>
-    userClient.delete<{ success: true; data: null }>(`/user/profiles/${id}`),
-
-  // ─── Watchlist ────────────────────────────────────────────────────────────────
-  getWatchlist: (profileId: string) =>
-    userClient.get<{ success: true; data: WatchlistItem[] }>('/user/watchlist', { profileId }),
-
-  addToWatchlist: (contentId: string, contentType: string, profileId: string) =>
-    userClient.post<{ success: true; data: null }>(`/user/watchlist/${contentId}`, { contentType }, { profileId }),
-
-  removeFromWatchlist: (contentId: string, profileId: string) =>
-    userClient.delete<{ success: true; data: null }>(`/user/watchlist/${contentId}`, { profileId }),
-
-  checkWatchlist: (contentId: string, profileId: string) =>
-    userClient.get<{ success: true; data: { inWatchlist: boolean } }>(`/user/watchlist/${contentId}/check`, { profileId }),
-
-  // ─── History ──────────────────────────────────────────────────────────────────
-  getHistory: (profileId: string, limit = 50, cursor?: string) => {
-    const params = new URLSearchParams({ limit: String(limit) })
-    if (cursor) params.set('cursor', cursor)
-    return userClient.get<{ success: true; data: HistoryItem[]; meta: { nextCursor?: string } }>(
-      `/user/history?${params.toString()}`,
-      { profileId },
+  // ─── Watchlist ──────────────────────────────────────────────────────────────
+  getWatchlist: async (_profileId?: string) => {
+    const rows = await api().watchlistList()
+    const items = await Promise.all(
+      rows.map(async (r): Promise<WatchlistItem> => {
+        const s = await catalogApi.getSummary(r.content_id)
+        return {
+          profileId: LOCAL_PROFILE_ID,
+          contentId: r.content_id,
+          addedAt: r.added_at,
+          contentType: r.content_type,
+          title: s?.title,
+          s3Thumbnail: s?.s3Thumbnail ?? null,
+          backdropUrl: s?.backdropUrl ?? null,
+          releaseYear: s?.releaseYear ?? null,
+        }
+      }),
     )
+    return { success: true as const, data: items }
   },
 
-  deleteHistoryItem: (watchedAtContentId: string, profileId: string) => {
-    const params = new URLSearchParams({ watchedAtContentId })
-    return userClient.delete<{ success: true; data: null }>(`/user/history?${params.toString()}`, { profileId })
+  addToWatchlist: async (contentId: string, contentType: string, _profileId?: string) => {
+    await api().watchlistAdd(contentId, contentType)
+    return { success: true as const, data: null }
   },
 
-  // ─── Preferences ─────────────────────────────────────────────────────────────
-  getPreferences: (profileId: string) =>
-    userClient.get<{ success: true; data: Preferences }>('/user/preferences', { profileId }),
+  removeFromWatchlist: async (contentId: string, _profileId?: string) => {
+    await api().watchlistRemove(contentId)
+    return { success: true as const, data: null }
+  },
 
-  updatePreferences: (payload: Partial<Omit<Preferences, 'isKids'>>, profileId: string) =>
-    userClient.put<{ success: true; data: Preferences }>('/user/preferences', payload, { profileId }),
+  checkWatchlist: async (contentId: string, _profileId?: string) => {
+    const res = await api().watchlistHas(contentId)
+    return { success: true as const, data: { inWatchlist: res.inWatchlist } }
+  },
 
-  // ─── Avatar ───────────────────────────────────────────────────────────────────
-  presignAvatar: (contentType: string, filename: string, profileId: string) =>
-    userClient.post<{ success: true; data: { uploadUrl: string; cdnUrl: string; s3Key: string; expiresIn: number } }>(
-      '/user/avatar/presign',
-      { contentType, filename },
-      { profileId },
-    ),
+  // ─── History ──────────────────────────────────────────────────────────────
+  getHistory: async (_profileId?: string, limit = 50, _cursor?: string) => {
+    const rows = (await api().positionList()).slice(0, limit)
+    const items = await Promise.all(
+      rows.map(async (r): Promise<HistoryItem> => {
+        const s = await catalogApi.getSummary(r.content_id)
+        return {
+          profileId: LOCAL_PROFILE_ID,
+          watchedAtContentId: `${r.content_id}:${r.episode_id}`,
+          contentId: r.content_id,
+          contentTitle: s?.title ?? 'Unknown',
+          contentType: r.content_type,
+          thumbnailUrl: s?.s3Thumbnail ?? s?.backdropUrl ?? null,
+          positionSeconds: r.position_seconds,
+          durationSeconds: r.duration_seconds,
+          completedAt: r.completed_at,
+          watchedAt: r.updated_at,
+          episodeId: r.episode_id || null,
+        }
+      }),
+    )
+    return { success: true as const, data: items, meta: { nextCursor: undefined as string | undefined } }
+  },
 
-  confirmAvatar: (cdnUrl: string, profileId: string) =>
-    userClient.put<{ success: true; data: { avatarUrl: string } }>('/user/avatar/confirm', { cdnUrl }, { profileId }),
+  deleteHistoryItem: async (watchedAtContentId: string, _profileId?: string) => {
+    const [contentId, episodeId] = watchedAtContentId.split(':')
+    await api().positionDelete(contentId!, episodeId || null)
+    return { success: true as const, data: null }
+  },
 
-  // ─── GDPR ─────────────────────────────────────────────────────────────────────
-  exportData: () =>
-    userClient.get<object>('/user/export'),
+  // ─── Preferences ─────────────────────────────────────────────────────────
+  getPreferences: async (_profileId?: string) => {
+    const p = await api().prefsGet()
+    return {
+      success: true as const,
+      data: {
+        language: p.language,
+        subtitleDefault: p.subtitle_default,
+        autoplay: !!p.autoplay,
+        maturityRating: p.maturity_rating,
+        isKids: false,
+      } as Preferences,
+    }
+  },
+
+  updatePreferences: async (payload: Partial<Omit<Preferences, 'isKids'>>, _profileId?: string) => {
+    const p = await api().prefsSet({
+      language: payload.language,
+      subtitleDefault: payload.subtitleDefault,
+      autoplay: payload.autoplay,
+      maturityRating: payload.maturityRating,
+    })
+    return {
+      success: true as const,
+      data: {
+        language: p.language,
+        subtitleDefault: p.subtitle_default,
+        autoplay: !!p.autoplay,
+        maturityRating: p.maturity_rating,
+        isKids: false,
+      } as Preferences,
+    }
+  },
+
+  // ─── Avatar / GDPR (no-ops in the local build) ─────────────────────────────
+  presignAvatar: async (
+    _contentType: string,
+    _filename: string,
+    _profileId?: string,
+  ): Promise<{ success: true; data: { uploadUrl: string; cdnUrl: string; s3Key: string; expiresIn: number } }> => {
+    throw new Error('Avatar upload is not available in the local build')
+  },
+  confirmAvatar: async (_cdnUrl: string, _profileId?: string) => ({ success: true as const, data: { avatarUrl: '' } }),
+  exportData: async () => {
+    const [watchlist, history, preferences] = await Promise.all([
+      api().watchlistList(),
+      api().positionList(),
+      api().prefsGet(),
+    ])
+    return { watchlist, history, preferences }
+  },
 }

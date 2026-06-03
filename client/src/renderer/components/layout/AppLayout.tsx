@@ -11,7 +11,7 @@ interface Props {
 export function AppLayout({ children, transparentNav = false }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { activeProfile, logout } = useAuthStore()
+  const { activeProfile } = useAuthStore()
   const [profileOpen, setProfileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -229,16 +229,10 @@ export function AppLayout({ children, transparentNav = false }: Props) {
               {profileOpen && (
                 <div className="absolute bottom-14 left-0 right-0 bg-[#120d24] border border-km-border/50 rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-xl animate-fade-in">
                   <button
-                    onClick={() => { setProfileOpen(false); navigate('/profiles') }}
+                    onClick={() => { setProfileOpen(false); navigate('/settings') }}
                     className="w-full text-left px-4 py-2 text-purple-300/70 hover:text-white hover:bg-violet-600/20 text-xs font-medium transition-colors"
                   >
-                    Switch Profile
-                  </button>
-                  <button
-                    onClick={() => { setProfileOpen(false); logout() }}
-                    className="w-full text-left px-4 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs font-medium transition-colors mt-1 pt-1.5"
-                  >
-                    Sign Out
+                    Settings
                   </button>
                 </div>
               )}

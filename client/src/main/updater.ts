@@ -2,6 +2,16 @@ import { autoUpdater } from 'electron-updater'
 import { app, ipcMain, BrowserWindow } from 'electron'
 
 export function setupUpdater() {
+  // Only run updater logic in a packaged build.
+  // In development, the app is unpackaged and version is often '0.0',
+  // which causes electron-updater to crash on initialization.
+  if (!app.isPackaged) {
+    ipcMain.handle('app:install-update', () => {
+      console.log('[updater] app:install-update called in dev mode (stub)')
+    })
+    return
+  }
+
   autoUpdater.logger = console
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
@@ -22,11 +32,7 @@ export function setupUpdater() {
     autoUpdater.quitAndInstall(false, true)
   })
 
-  // Only run in a packaged build — electron-updater has no release metadata to
-  // read in dev (and packaged apps don't set NODE_ENV, so the old NODE_ENV
-  // check never fired). Check on launch, then every 4 hours.
-  if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify()
-    setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000)
-  }
+  autoUpdater.checkForUpdatesAndNotify()
+  setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000)
 }
+

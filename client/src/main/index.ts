@@ -6,6 +6,7 @@ import { registerAuthIpc } from './ipc/auth'
 import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange } from './ipc/download'
 import { registerAppIpc } from './ipc/app'
 import { registerApiProxy } from './ipc/api-proxy'
+import { registerLibraryIpc } from './ipc/library'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
 
 // Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
@@ -253,6 +254,7 @@ app.whenReady().then(async () => {
   registerDownloadIpc()
   registerAppIpc()
   registerApiProxy()
+  registerLibraryIpc()
   initStreamHeaderInjector()
   registerProvidersIpc()
 
