@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 2.0.0  
-**Date:** May 2026  
+**Version:** 3.0.0 (Fully Local Architecture)  
+**Date:** June 2026  
 **Status:** Current
 
 ---
@@ -13,11 +13,11 @@
 3. [System Architecture](#3-system-architecture)
 4. [Client Architecture — Electron + React](#4-client-architecture--electron--react)
 5. [Providers Framework](#5-providers-framework)
-6. [Backend Microservices](#6-backend-microservices)
-7. [Data Architecture](#7-data-architecture)
+6. [DEPRECATED Backend Microservices](#6-deprecated-backend-microservices)
+7. [Data Architecture — Local SQLite](#7-data-architecture--local-sqlite)
 8. [Security Architecture](#8-security-architecture)
 9. [Infrastructure](#9-infrastructure)
-10. [API Contracts](#10-api-contracts)
+10. [IPC Bridge & API Contracts](#10-ipc-bridge--api-contracts)
 
 ---
 
@@ -25,22 +25,15 @@
 
 ### What KokoMovie PC Is
 
-KokoMovie PC is a **desktop content aggregator** — not a self-hosted streaming service. It browses real movie and TV show metadata from [TMDB](https://www.themoviedb.org/) and streams content via third-party providers (VidSrc, 2Embed, SuperEmbed). No self-hosted video, no CDN, no DRM, no subscriptions.
+KokoMovie PC is a **fully local desktop content aggregator**. It runs entirely on-device with zero server dependencies or active cloud backends. It browses real movie and TV show metadata by communicating directly with the [TMDB](https://www.themoviedb.org/) API and streams content on-demand via third-party providers (VidSrc, VidLink, etc.) in a built-in player.
 
-The mental model: KokoMovie is like Stremio or Infuse — it finds streams, it does not host them.
+Watchlists, playback positions, continue-watching lists, and preferences are stored securely on-device. No accounts, login, or cloud databases are required.
 
 ### What it is NOT
 
-- Not a self-hosted Netflix (no S3 video, no MediaConvert, no CloudFront media CDN)
-- Not a subscription service (billing removed)
-- Not a cloud-dependent application (runs entirely on localhost with 3 Docker containers)
-
-### Personas
-
-| Persona | Key Jobs |
-|---|---|
-| Casual Viewer | Browse TMDB catalog, pick a provider, watch |
-| Power User | Manage providers, download for offline, multiple profiles |
+- Not a hosted streaming service or CDN.
+- Not a subscription service.
+- Not cloud-dependent (there are no active backend services or Docker requirements).
 
 ---
 
@@ -48,40 +41,33 @@ The mental model: KokoMovie is like Stremio or Infuse — it finds streams, it d
 
 ### ADR-001 — Electron for cross-platform desktop
 
-**Decision:** Electron 33  
-**Rationale:** Cross-platform (Linux/Windows/macOS), embedded Chromium for hls.js HLS playback, Node.js main process for hidden BrowserWindow stream extraction, OS keychain access via `keytar`.
+**Decision:** Electron 31  
+**Rationale:** Cross-platform (Linux/Windows/macOS) execution, integrated Chromium shell for `hls.js` HLS playback, Node.js main process context for sandboxed browser-based stream extraction, and native OS keychain access.
 
-### ADR-002 — Content aggregator model (v2.0 pivot from self-hosted)
+### ADR-002 — Fully Local Architecture (v3.0.0 Pivot)
 
-**Decision:** TMDB metadata + third-party providers instead of self-hosted VOD  
-**Rationale:** Eliminates infrastructure cost (S3, CloudFront, MediaConvert), DRM licensing complexity, and content licensing requirements. Providers supply streams on-demand. The TMDB free tier provides complete metadata for all mainstream titles.  
-**Trade-off:** Stream availability depends on provider uptime. Multiple providers mitigate this.
+**Decision:** Replace all Node.js microservices and local Docker containers with local database storage (SQLite) and direct TMDB client integration.  
+**Rationale:** Eliminates local dev orchestration complexity (Postgres, Redis, DynamoDB Local), removes resource usage, protects privacy since user data never leaves their machine, and makes setup a single command: `npm run dev:client`.
 
 ### ADR-003 — Hidden BrowserWindow stream extraction
 
 **Decision:** Load provider embed pages in a hidden `BrowserWindow`, intercept `.m3u8` via Electron's `webRequest.onSendHeaders`  
-**Rationale:** Providers protect streams behind JavaScript challenges that require a real browser context. `onSendHeaders` fires with both URL and request headers simultaneously, giving us the stream URL and any required auth headers (Referer, Origin) in one callback.  
-**Alternative considered:** Playwright/Puppeteer — too heavy, adds 150MB+ to bundle; `onBeforeRequest` — fires before headers are set so headers are empty.
+**Rationale:** Providers protect streams behind anti-bot and cookie challenges requiring a real browser engine. Intercepting outbound requests in the main process captures the final media stream along with any required headers (`Referer`, `Origin`).
 
-### ADR-004 — Persistent provider sessions
+### ADR-004 — Local SQLite for On-Device Storage
 
-**Decision:** `session.fromPartition('persist:provider-{name}')` per provider  
-**Rationale:** Providers that use cookie/localStorage anti-bot checks (re-captcha gates, access tokens) will succeed on repeat visits because session state is preserved. Ephemeral sessions fail after the first use on such providers.
+**Decision:** Store watchlists, playback positions (continue watching), downloads, and preferences in a local SQLite 3 database (`better-sqlite3`).  
+**Rationale:** High performance, zero administration, single file persistence, and robust transactional integrity for a desktop client.
 
-### ADR-005 — Deterministic UUIDs for TMDB content IDs
+### ADR-005 — Deterministic Content IDs from TMDB
 
-**Decision:** `tmdbContentId(type, id)` generates a stable UUID from `tmdb:{type}:{id}`  
-**Rationale:** Allows the client to compute the content UUID before the row exists in the DB, enabling optimistic navigation. The UUID is stable across the entire system — the same TMDB movie always gets the same UUID.
+**Decision:** Derive stable UUIDs deterministically from TMDB IDs: `tmdbContentId(type, id)`  
+**Rationale:** Allows the client to reference content IDs before they exist in the local SQLite db. Watchlists and Continue-Watching lists store only IDs; rows are enriched from TMDB on read.
 
-### ADR-006 — JWT RS256 for stateless auth
+### ADR-006 — OS Keychain for API Keys
 
-**Decision:** RS4096 asymmetric JWT, 15-min access token, 30-day refresh token  
-**Rationale:** Services verify tokens with the public key only — no network call to Auth service per request. RS256 is preferred over HS256 because downstream services never need the signing secret.
-
-### ADR-007 — HLS via hls.js with header injection
-
-**Decision:** hls.js in Renderer process; Electron `webRequest.onBeforeSendHeaders` injects captured headers  
-**Rationale:** hls.js runs in the Renderer (Chromium) and cannot add arbitrary cross-origin headers due to CORS. The Main process intercepts all outbound requests and injects provider-captured headers (Referer, etc.) transparently before CORS enforcement.
+**Decision:** Store the user's TMDB API key in the OS keychain via `keytar` associated with account ID `'local'`.  
+**Rationale:** API keys are sensitive secrets; they are stored in the OS-level credential manager rather than plaintext configurations or `localStorage`.
 
 ---
 
@@ -95,67 +81,39 @@ The mental model: KokoMovie is like Stremio or Infuse — it finds streams, it d
 │  │   Renderer Process           │  │   Main Process          │   │
 │  │   (Chromium)                 │  │   (Node.js)             │   │
 │  │                              │  │                         │   │
-│  │   React 18 + Vite            │  │   Providers Registry    │   │
-│  │   TanStack Query             │  │   Stream Extractor      │   │
-│  │   Zustand                    │◄─┤   IPC Handlers          │   │
-│  │   hls.js (video player)      │  │   keytar (keychain)     │   │
-│  │   React Router (HashRouter)  │  │   Header Injector       │   │
-│  └──────────────┬───────────────┘  └────────────────────────┘   │
-└─────────────────┼───────────────────────────────────────────────┘
-                  │ HTTP (via Electron net.fetch proxy)
-                  │
-     ┌────────────┼────────────────────────────────┐
-     │            │                                │
-┌────▼──┐  ┌──────▼──┐  ┌──────────┐  ┌────────┐  ┌────────────┐
-│ Auth  │  │ Catalog  │  │ Playback │  │  User  │  │   Rec.     │
-│ :3001 │  │  :3002   │  │  :3003   │  │  :3004 │  │   :3005    │
-└────┬──┘  └────┬─────┘  └────┬─────┘  └───┬────┘  └─────┬──────┘
-     │          │              │             │              │
-┌────▼──────────▼──────────────▼─────────────▼──────────────▼────┐
-│                         Data Layer                               │
-│   PostgreSQL 16 · Redis 7 · DynamoDB Local                      │
-└─────────────────────────────────────────────────────────────────┘
-
-                         ┌──────────────────┐
-                         │   TMDB API       │  (catalog metadata)
-                         │   themoviedb.org │
-                         └──────────────────┘
-
-                         ┌──────────────────┐
-                         │   Providers      │  (streams)
-                         │   vidsrc.to      │
-                         │   vidsrc.me      │
-                         │   2embed.cc      │
-                         │   multiembed.mov │
-                         └──────────────────┘
+│  │   React 19 + Vite            │  │   SQLite Database       │   │
+│  │   TanStack Query             │  │   IPC Handlers (Library)│   │
+│  │   Zustand                    │◄─┤   keytar (keychain)     │   │
+│  │   hls.js (video player)      │  │   Providers Registry    │   │
+│  │   React Router (HashRouter)  │  │   Stream Extractor      │   │
+│  └──────────────┬───────────────┘  └───────────┬────────────┘   │
+└─────────────────┼──────────────────────────────┼────────────────┘
+                  │ GET /search, /browse         │ getFirstStream
+                  ▼                              ▼
+         ┌──────────────────┐          ┌──────────────────┐
+         │   TMDB API       │          │   Providers      │
+         │   themoviedb.org │          │   vidsrc, etc.   │
+         └──────────────────┘          └──────────────────┘
 ```
 
-### Data Flow: Browsing
+### Data Flow: Browsing & Metadata
 
 ```
 User opens app
-  → Renderer calls GET /catalog/browse/home
-  → Catalog service calls TMDB API (trending + popular by genre)
-  → Returns ContentSummary[] with TMDB poster URLs, titles, IDs
-  → React renders genre rows + hero banner
+  → Renderer calls TMDB directly via ipcRenderer (CORS bypassed by Main proxy)
+  → TMDB API returns details (popular, trending, specific titles)
+  → React displays catalog content
 ```
 
-### Data Flow: Watching
+### Data Flow: Playback & Positions
 
 ```
-User clicks Watch on a title
-  → ContentDetail calls POST /catalog/sync (TMDB full detail → DB)
-  → IPC: providers:getFirstStream({ imdbId, tmdbId, type, season?, episode? })
-  → Main process races all enabled providers in parallel batches of 4 (staggered 1.5s)
-  → Each provider creates a hidden BrowserWindow with a persistent session
-  → Hidden window loads provider embed URL (e.g. https://vidsrc.to/embed/movie/tt1234567)
-  → webRequest.onSendHeaders intercepts first *.m3u8 or *.mp4 request
-  → First provider to succeed aborts all others via AbortController
-  → Stream URL + headers returned to Renderer
-  → Player page opens with directStreamUrl in navigation state
-  → VideoPlayer creates HLS.js instance, loads manifest
-  → webRequest.onBeforeSendHeaders injects provider headers on segment requests
-  → Video plays
+User watches content
+  → Main process runs scraping race across enabled providers in hidden windows
+  → Winner stream URL is sent back; VideoPlayer mounts
+  → Every 10s, Player emits position update
+  → Main process updates the local SQLite 'playback_positions' table
+  → Browse page fetches continue-watching lists directly from SQLite, hydrating details from TMDB
 ```
 
 ---
@@ -167,414 +125,121 @@ User clicks Watch on a title
 ```
 Main Process (Node.js)
 ├── BrowserWindow (main app, HashRouter)
-├── IPC handlers
+├── SQLite Manager (better-sqlite3)
+├── IPC Handlers
 │   ├── keychain:* — OS keychain via keytar
-│   ├── api:request — CORS proxy (net.fetch)
-│   ├── providers:* — provider registry + stream extraction
-│   └── download:* — offline HLS download queue
-├── initStreamHeaderInjector() — permanent webRequest interceptor
-├── Stream Extractor
-│   └── Hidden BrowserWindows (per extraction, persistent sessions)
-└── Provider Registry
-    └── provider-prefs.json (userData dir)
+│   ├── api:request — CORS-free TMDB API proxy
+│   ├── library:* — watchlist, history, position CRUD
+│   ├── providers:* — provider preferences & scrape
+│   └── download:* — offline HLS downloader
+├── Stream Extractor (Hidden BrowserWindows)
+└── Local Stream Proxy (bypasses browser CORS & rewrites manifests)
 
 Renderer Process (Chromium)
-└── React app (HashRouter, prevents black screen on Ctrl+R from file://)
-    ├── Pages: Browse, Search, ContentDetail, Player, Providers, Downloads, ...
-    ├── Components: AppLayout, VideoPlayer, PlayerControls, ContentCard, ...
-    ├── API clients → window.electronAPI (contextBridge IPC)
-    └── Stores: auth (Zustand), queryClient (TanStack Query)
+└── React app (HashRouter)
+    ├── Pages: Browse, Search, ContentDetail, Player, Settings, Downloads, ...
+    ├── API clients → window.electronAPI (contextBridge IPC calls)
+    └── Stores: auth (Zustand, seeds local identity), queryClient (TanStack Query)
 ```
-
-### Key Security Settings
-
-```typescript
-new BrowserWindow({
-  webPreferences: {
-    contextIsolation: true,   // isolates renderer from Node.js
-    nodeIntegration: false,   // no Node.js in renderer
-    sandbox: true,
-    preload: preloadPath,
-  }
-})
-```
-
-All renderer ↔ main communication goes through `contextBridge.exposeInMainWorld('electronAPI', {...})`. The preload script whitelists each IPC channel explicitly.
-
-### Content Security Policy (dev)
-
-```
-default-src 'self'
-script-src 'self' 'unsafe-inline' 'unsafe-eval'
-style-src 'self' 'unsafe-inline'
-media-src 'self' blob: https:
-connect-src 'self' http://localhost:* ws://localhost:* https:
-img-src 'self' data: blob: https:
-frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
-```
-
-### State Management
-
-| Layer | Tool | What |
-|---|---|---|
-| Server state | TanStack Query | Catalog data, watchlists, playback positions |
-| Auth/UI/Settings state | Zustand | Active profile, authenticated user, and local settings (e.g. user-configured TMDB API key) |
-| Navigation state | React Router | TMDB IDs passed between Browse → Detail → Player |
 
 ---
 
 ## 5. Providers Framework
 
-### Provider Interface
-
-```typescript
-interface Provider {
-  readonly id: string
-  readonly name: string
-  readonly sessionName: string        // persistent Electron session partition key
-  getEmbedUrl(req: StreamRequest): string | null
-}
-
-interface StreamRequest {
-  imdbId?: string; tmdbId?: number
-  type: 'movie' | 'tv'
-  season?: number; episode?: number
-  title?: string
-}
-```
-
-### Registered Providers (by priority)
-
-| ID | Name | Domain | ID type |
-|---|---|---|---|
-| `vidbinge` | VidBinge | vidbinge.com | IMDB ID |
-| `vidsrc` | VidSrc | vidsrc.to | IMDB ID preferred, TMDB fallback |
-| `vidsrc-su` | VidSrc.su | vidsrc.su | TMDB ID |
-| `vidsrc-pm` | VidSrc.pm | vidsrc.pm | TMDB ID |
-| `vidsrc-in` | VidSrc.in | vidsrc.in | TMDB ID |
-| `vidlink` | VidLink | vidlink.pro | IMDB ID |
-| `vidsrc-cc` | VidSrc.cc | vidsrc.cc | IMDB ID |
-| `multiembed` | MultiEmbed | multiembed.mov | TMDB ID |
-| `vidsrc-pro` | VidSrc.pro | vidsrc.pro | TMDB ID |
-| `vidsrc-rip` | VidSrc.rip | vidsrc.rip | TMDB ID |
-| `autoembed` | AutoEmbed | autoembed.cc | TMDB ID |
-| `superembed` | SuperEmbed | multiembed.mov | TMDB ID |
-| `vidsrc-me` | VidSrc.me | vidsrc.me | TMDB ID |
-| `2embed` | 2Embed | 2embed.cc | IMDB ID preferred, TMDB fallback |
-| `smashystream` | SmashyStream | smashystream.com | TMDB ID |
-| `moviesapi` | MoviesAPI | moviesapi.to | TMDB ID |
-| `embed-su` | EmbedSu | embed.su | TMDB ID |
-
-### Stream Extraction Pipeline
-
-```
-extractStreamWithRetry(embedUrl, { sessionName, maxAttempts: 2, timeoutMs: 30s })
-  → extractStream(embedUrl, options)
-      → BrowserWindow (show: false, persistent session)
-      → webRequest.onSendHeaders: detect *.m3u8 URL → capture URL + headers
-      → webRequest.onHeadersReceived: detect by Content-Type (fallback)
-      → webRequest.onBeforeRequest: block ads/trackers
-      → loadURL(embedUrl, { httpReferrer: origin })
-      → resolve({ url, headers }) or null on timeout
-```
-
-### Header Injection
-
-Provider streams often require a `Referer` or custom auth header. Since hls.js runs in the Renderer and can't add cross-origin headers, the Main process intercepts all outbound requests:
-
-```typescript
-// initStreamHeaderInjector() — called once on app startup
-session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
-  const host = new URL(details.url).host
-  const headers = streamHeadersRegistry.get(host)  // keyed by URL host
-  if (headers) { callback({ requestHeaders: { ...details.requestHeaders, ...headers } }); return }
-  callback({ requestHeaders: details.requestHeaders })
-})
-```
-
-Headers are registered via `providers:registerStreamHeaders` IPC with a 4-hour expiry.
-
-### Local Stream Proxy
-
-To bypass Chromium's strict Cross-Origin Resource Sharing (CORS) enforcement and handle forbidden HTTP headers (such as `Referer` or `Origin` demanded by stream CDNs), the Electron Main process hosts a lightweight local HTTP streaming proxy.
-
-1. **Proxy Startup**: A local HTTP server is initialized on a dynamic port during application bootstrap.
-2. **CORS Bypassing via `fetchNode`**: Instead of Electron's `net.fetch` (which strips forbidden headers), the proxy uses a custom `fetchNode` module backed by Node's native `http`/`https` engines. This permits absolute control over headers like `Referer` and `Origin`.
-3. **Keep-Alive Connections**: Global persistent HTTP/HTTPS agents with `keepAlive: true` and a 30s connection timeout are configured to minimize the latency overhead of continuous TCP/TLS handshakes during HLS segment fetches.
-4. **Manifest Parsing & Rewriting**: The proxy intercepts HLS `.m3u8` manifest requests, parses them, and rewrites all segment URLs (both absolute and relative) to point back to the local proxy URL. It also filters out low-resolution stream variants (below 720p) if high-quality streams are available.
-5. **Direct Segment Piping**: To prevent micro-stuttering and memory bloat, video segment files (`.ts`, `.mp4`) are piped directly to the player as they stream in, bypassing any full-payload buffering.
-6. **On-the-Fly Subtitle Conversion**: Sideloaded SubRip (`.srt`) subtitle tracks are requested through the proxy with a `format=vtt` flag, which converts them on-the-fly to browser-compatible WebVTT (`.vtt`) format before serving.
-
-### Offline Downloads
-
-The offline download system allows users to download movies and TV episodes for offline viewing. It is designed to be resilient to network drops, CDN throttling, and application restarts.
-
-1. **Persistent SQLite Queue**: All download records (URLs, target file paths, status, custom CDN headers, and progress details) are saved in the local SQLite database.
-2. **Resilient Download Loop**:
-   - Downloads fetch the HLS manifest and download segments concurrently (up to 3 parallel workers).
-   - If a segment request fails due to temporary network drops, the downloader retries the segment up to 3 times with exponential backoff (1s, 2s, 4s).
-   - Segment fetch timeout is set to 30 seconds to support throttled CDN networks.
-3. **AES-256-GCM Encryption**: To protect content, each downloaded segment is encrypted using AES-256-GCM. The key is derived on-the-fly using HKDF-SHA256 based on a unique device fingerprint (composed of user data path, OS platform, and local hostname) and a random salt. The key is never persisted to disk.
-4. **Privileged `offline://` Scheme**: Playback of downloaded content is routed through Electron's custom `offline:` protocol. This scheme acts as a secure local protocol that intercepts requests, decrypts the local `.enc` segment files on-the-fly, and returns standard video streams to the player.
+The client races multiple streaming providers in parallel. Refer to the provider registry and hidden window extraction logic outlined in standard repository developer documentation.
 
 ---
 
-## 6. Backend Microservices
+## 6. [DEPRECATED] Backend Microservices
 
-All services run as Node.js 22 + Fastify 5 + TypeScript 5.5 (strict). JWT RS256 authentication on all endpoints via `authenticate` middleware (verifies against `GET /auth/public-key`).
+All services in the `services/` directory (Auth, User, Catalog, Playback, Recommendation) and their associated Docker container setup (`docker-compose.yml`) are **deprecated and completely unused**. 
 
-### 6.1 Auth Service (port 3001)
-
-Handles identity, sessions, OAuth. JWT RS4096 with 15-min access tokens, 30-day refresh tokens. Tokens stored in OS keychain via `keytar`, never `localStorage`.
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/auth/register` | Email/password registration |
-| POST | `/auth/login` | Login, returns JWT pair |
-| POST | `/auth/refresh` | Refresh token rotation |
-| POST | `/auth/logout` | Revoke refresh token |
-| GET | `/auth/oauth/google` | Google OAuth2 flow |
-| POST | `/auth/mfa/setup` | TOTP setup |
-| POST | `/auth/mfa/verify` | TOTP verification |
-| GET | `/auth/public-key` | RS4096 public key (used by all services) |
-
-**Data:** PostgreSQL (accounts, sessions) + Redis (token denylist)
-
-### 6.2 Catalog Service (port 3002)
-
-Manages content metadata. Primary source is TMDB. Local PostgreSQL DB is populated on-demand as users browse.
-
-**TMDB key handling (per-account, required):** The TMDB key is supplied *only* by the client via the `X-TMDB-Key` HTTP header. As of 1.0.4-beta there is **no** server-side `TMDB_API_KEY` fallback — it was removed to prevent one user's key leaking into another user's session. The key is stored per account in the OS keychain (`tmdb-key-{accountId}`) and re-loaded automatically on reconnect, so each account enters its key once. Both v3 API keys and v4 read access tokens (JWT → `Authorization: Bearer`) are accepted.
-
-When no valid key reaches the service, catalog endpoints fall back to whatever has been synced into the local PostgreSQL DB and tag the response with `meta.source: 'local'` (vs `'tmdb'`). The client uses this to show an "API key required" gate (no key configured) or a limited-catalog banner (key set but TMDB unreachable), rather than silently serving a thin catalog.
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/catalog/browse/home` | Genre rows + featured + trending (TMDB) |
-| GET | `/catalog/browse` | Paginated browse with genre/type/year filters |
-| GET | `/catalog/trending` | Trending content (TMDB) |
-| GET | `/catalog/content/:id` | Full detail: genres, cast, seasons, episodes |
-| GET | `/catalog/search` | Full-text search (TMDB `/search/multi`) |
-| POST | `/catalog/sync` | Sync a TMDB item into local DB (fetch imdbId, cast, episodes) |
-| POST | `/catalog/ingest` | Manual content ingestion |
-
-**TMDB sync flow:**
-1. Browse/trending returns lightweight `ContentSummary` with `tmdbId` embedded
-2. When user opens detail, client calls `POST /catalog/sync` to fully hydrate the row (imdbId, cast, all season episodes)
-3. `GET /catalog/content/:id` serves from DB; lazily syncs any seasons still missing episodes
-
-**Data:** PostgreSQL (content, seasons, episodes, cast) + Redis (1hr–30min cache per endpoint)
-
-### 6.3 Playback Service (port 3003)
-
-Manages playback sessions and watch positions. No video hosting — sessions reference the provider stream URL. Continue Watching and position heartbeats work the same regardless of stream source.
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/playback/session` | Create session (records start, returns sessionId) |
-| PUT | `/playback/position` | Heartbeat every 10s |
-| GET | `/playback/position/:contentId` | Resume position |
-| GET | `/playback/continue-watching` | In-progress content (5–95% complete) |
-| POST | `/playback/quality-report` | ABR quality telemetry |
-
-**Data:** DynamoDB Local (sessions with 24hr TTL, positions with 90-day TTL)
-
-### 6.4 User Service (port 3004)
-
-Profiles, watchlists, history, preferences, GDPR export.
-
-| Method | Path | Description |
-|---|---|---|
-| GET/POST/PUT/DELETE | `/user/profiles` | Profile CRUD (max 5) |
-| GET/POST/DELETE | `/user/watchlist/:contentId` | Watchlist management |
-| GET | `/user/history` | Paginated viewing history |
-| GET/PUT | `/user/preferences` | Profile preferences |
-| GET | `/user/export` | GDPR data export |
-
-**Data:** PostgreSQL (accounts, profiles, preferences) + DynamoDB Local (watchlists, history)
-
-### 6.5 Recommendation Service (port 3005)
-
-Generates homepage rows, similar content, and trending. Falls back gracefully when catalog data is sparse.
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/recommendations/home` | Personalised rows (A/B tested row order) |
-| GET | `/recommendations/similar/:contentId` | "More Like This" |
-| GET | `/recommendations/trending` | Trending by segment |
-
-**Data:** Redis (2-min cache) + DynamoDB Local (A/B experiment assignments)
+All database operations and business logic are now integrated directly inside the main and renderer processes of the Electron application.
 
 ---
 
-## 7. Data Architecture
+## 7. Data Architecture — Local SQLite
 
-### PostgreSQL Schema (Catalog + Auth + User)
+Watchlist, playback tracking, preferences, and download queues are managed in a local SQLite database named `kokomovie.db` located inside the Electron app's `userData` directory.
+
+### SQLite Schema
 
 ```sql
--- catalog schema
-content(id, title, type, tmdb_id, imdb_id, backdrop_url, s3_thumbnail, ...)
-seasons(id, content_id, season_number, ...)
-episodes(id, season_id, content_id, episode_number, ...)
-genres, content_genres, cast_members, content_cast
+-- Track offline HLS video segments
+CREATE TABLE downloads (
+  id              TEXT PRIMARY KEY,
+  content_id      TEXT NOT NULL,
+  episode_id      TEXT,
+  title           TEXT NOT NULL,
+  content_type    TEXT NOT NULL DEFAULT 'movie',
+  thumbnail_url   TEXT,
+  duration_mins   INTEGER,
+  s3_hls_key      TEXT NOT NULL,
+  drm_key_id      TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  progress_percent INTEGER NOT NULL DEFAULT 0,
+  download_speed_kbps INTEGER DEFAULT 0,
+  total_segments  INTEGER DEFAULT 0,
+  completed_segments INTEGER DEFAULT 0,
+  local_dir       TEXT NOT NULL,
+  manifest_path   TEXT,
+  downloaded_at   TEXT,
+  expires_at      TEXT NOT NULL,
+  error_message   TEXT,
+  headers         TEXT
+);
 
--- auth schema
-accounts(id, email, password_hash, ...)
-sessions(id, account_id, refresh_token_hash, ...)
+-- Bookmark list
+CREATE TABLE watchlist (
+  content_id   TEXT PRIMARY KEY,
+  content_type TEXT NOT NULL DEFAULT 'movie',
+  added_at     TEXT NOT NULL
+);
 
--- user schema
-accounts_ext(id, ...)
-profiles(id, account_id, name, avatar_url, ...)
+-- Position tracking for Continue Watching
+CREATE TABLE playback_positions (
+  content_id       TEXT NOT NULL,
+  episode_id       TEXT NOT NULL DEFAULT '',
+  content_type     TEXT NOT NULL DEFAULT 'movie',
+  position_seconds INTEGER NOT NULL DEFAULT 0,
+  duration_seconds INTEGER NOT NULL DEFAULT 0,
+  completed_at     TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (content_id, episode_id)
+);
+
+-- Local app settings
+CREATE TABLE preferences (
+  id               INTEGER PRIMARY KEY CHECK (id = 1),
+  language         TEXT NOT NULL DEFAULT 'en',
+  subtitle_default TEXT,
+  autoplay         INTEGER NOT NULL DEFAULT 1,
+  maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA'
+);
 ```
-
-### DynamoDB Local Tables
-
-```
-playback_sessions   PK: sessionId         TTL: 24hr
-playback_positions  PK: profileId  SK: contentId#episodeId  TTL: 90d
-watchlists          PK: profileId  SK: contentId
-viewing_history     PK: profileId  SK: watchedAt#contentId  TTL: 90d
-ab_experiments      PK: experimentId
-ab_assignments      PK: profileId  SK: experimentId
-```
-
-### Redis Cache Keys
-
-| Key | TTL | Contents |
-|---|---|---|
-| `browse:home` | 1hr | Homepage rows from TMDB |
-| `browse:{params}` | 30min | Filtered browse results |
-| `trending:global` | 1hr | Trending 20 items |
-| `content:{id}` | 30min | Full content detail |
-| `genres:all` | 24hr | Genre list |
-| `rec:{profileId}:{variant}` | 2min | Recommendation rows |
 
 ---
 
 ## 8. Security Architecture
 
-### Electron Security
-
-| Setting | Value | Why |
-|---|---|---|
-| `contextIsolation` | `true` | Isolates renderer from Node.js APIs |
-| `nodeIntegration` | `false` | Renderer cannot access Node.js directly |
-| `sandbox` | `true` | OS-level process sandboxing |
-| `webSecurity` | `true` (main), `false` (extractor) | Extractor needs cross-origin for providers |
-| preload | contextBridge only | Whitelist-only IPC surface |
-
-The stream extractor `BrowserWindow` uses `webSecurity: false` specifically to allow cross-origin embed loading. The main window always has `webSecurity: true`.
-
-### Auth Security
-
-- **Passwords:** bcrypt cost 12
-- **JWT:** RS4096 asymmetric, 15-min access token TTL
-- **Refresh tokens:** SHA-256 hashed before storage, rotated on every use
-- **Storage:** OS keychain via `keytar` — never `localStorage`
-- **Token denylist:** Redis (for logout + device revocation)
-- **MFA:** TOTP with brute-force protection (5 attempts / 5 min via Redis)
-
-### CORS / Network
-
-All renderer HTTP calls go through the `api:request` IPC channel → `net.fetch` in Main process. This bypasses Chromium CORS restrictions for the local microservices and any external API.
-
-### 8.4 Snyk Hardening & IPC Mitigations (2026-05-28)
-
-- **IPC and Proxy Isolation**: All main process IPC listeners and microservice ports bind strictly to the loopback interface (`127.0.0.1` / `localhost`) to prevent unauthorized cross-network access, complete with request size caps and execution timeouts.
-- **Downloader Directory Lock**: Strict input validation and regex checks prevent path traversal attacks (`../`) when resolving save directories for HLS video segments.
-- **PostMessage Security**: Event listener messaging target origin is locked explicitly to `https://www.youtube.com` for background hero video controllers.
-- **Error Payload Sanitization**: Output payloads from services and IPC are filtered to strip development traces, server directory trees, or execution stacks in production.
-- **DRM Buffer Validation**: Widevine license challenge proxies enforce boundary and type checks on inputs prior to payload handling.
+- **Context Isolation**: Enabled in all windows. Renderer processes communicate only through whitelisted IPC channels in the preload script.
+- **Keychain Storage**: API keys are saved in the OS keychain via `keytar` to prevent raw exposure on disk or in standard localStorage.
+- **Local SQLite DB**: The SQLite file lives in the system's protected user data folders.
+- **Offline AES-256-GCM**: Downloaded segments are encrypted on-the-fly using AES-256-GCM keys dynamically derived from a device hardware fingerprint, preventing unauthorized sharing or raw file access.
 
 ---
 
 ## 9. Infrastructure
 
-### Local Development (Docker Compose)
-
-Three containers are required. No cloud accounts needed.
-
-```yaml
-services:
-  db:           # PostgreSQL 16 — port 5432
-  redis:        # Redis 7 — port 6379
-  dynamodb-local: # DynamoDB Local — port 8000
-```
-
-### Microservice Ports
-
-| Service | Port |
-|---|---|
-| Auth | 3001 |
-| Catalog | 3002 |
-| Playback | 3003 |
-| User | 3004 |
-| Recommendation | 3005 |
-
-### Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `TMDB_API_KEY` | Yes (for catalog) | Free key from themoviedb.org |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | Yes | Redis connection string |
-| `DYNAMODB_*` | Yes | DynamoDB Local endpoint + fake credentials |
-| `JWT_PRIVATE_KEY` | Yes (auth) | RSA-4096 private key (generate with `scripts/generate-keys.mjs`) |
-| `JWT_PUBLIC_KEY` | Yes (other services) | RSA-4096 public key |
-
-### Electron Build Targets
-
-| Platform | Format | Command |
-|---|---|---|
-| Linux | `.AppImage` + `.deb` | `cd client && npm run dist:linux` |
-| Windows | NSIS installer | `cd client && npm run dist:win` |
-| macOS | `.dmg` | `cd client && npm run dist:mac` |
+No hosting infrastructure or local Docker orchestration is required. The application only requires the local desktop runtime.
 
 ---
 
-## 10. API Contracts
+## 10. IPC Bridge & API Contracts
 
-### Authentication Header
+All transactions between the UI and backend logic are defined by the IPC contracts exposed in `client/src/main/preload.ts` under the global `window.electronAPI` bridge:
 
-All authenticated endpoints require:
-```
-Authorization: Bearer <access_token>
-X-Profile-Id: <profile_uuid>
-```
-
-### Standard Response Envelope
-
-```json
-{
-  "success": true,
-  "data": { ... },
-  "meta": { "requestId": "uuid", "timestamp": "ISO8601" }
-}
-```
-
-### Error Response
-
-```json
-{
-  "success": false,
-  "error": { "code": "CONTENT_NOT_FOUND", "message": "..." },
-  "meta": { "requestId": "uuid", "timestamp": "ISO8601" }
-}
-```
-
-### Error Codes
-
-| Code | HTTP | Description |
-|---|---|---|
-| `AUTH_TOKEN_EXPIRED` | 401 | Refresh required |
-| `AUTH_TOKEN_INVALID` | 401 | Malformed JWT |
-| `CONTENT_NOT_FOUND` | 404 | Content ID does not exist |
-| `PROFILE_LIMIT_REACHED` | 422 | Account has 5 profiles |
-| `VALIDATION_ERROR` | 400 | Request body/query schema failed |
-| `NO_TMDB` | 503 | Catalog service has no TMDB API key |
-| `SYNC_ERROR` | 500 | TMDB sync failed |
-| `RATE_LIMITED` | 429 | Too many requests |
-
----
-
-*Architecture v2.0.0 — Aggregator model. Replaces v1.0.0 (self-hosted Netflix / AWS architecture). May 2026.*
+- `electronAPI.getTmdbApiKey(accountId)` / `setTmdbApiKey(accountId, key)`
+- `electronAPI.watchlistGet(profileId)` / `watchlistAdd(contentId, type, profileId)` / `watchlistRemove(contentId, profileId)`
+- `electronAPI.positionGet(contentId, episodeId, profileId)` / `positionSave(contentId, episodeId, type, pos, dur, completedAt, profileId)`
+- `electronAPI.preferencesGet(profileId)` / `preferencesSave(prefs, profileId)`

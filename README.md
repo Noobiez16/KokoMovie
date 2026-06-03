@@ -38,12 +38,12 @@ Pick your system and click to grab the latest version from the
 
 KokoMovie is a desktop app that brings movies and TV shows together in one place,
 with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
-stream for you automatically — no juggling websites, pop-ups, or sign-ups.
+working stream for you automatically — no juggling websites, pop-ups, or sign-ups.
 
 - 🎬 **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
 - ▶️ **One-click play** — KokoMovie finds a working stream and starts playing
 - 📺 **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
-- 👤 **Profiles** — separate watchlists and "continue watching" for each person
+- 💾 **On-device storage** — watchlists, history, and preferences are stored locally on your machine
 - ⬇️ **Watch offline** — download titles (securely encrypted) for when you're without internet
 - 🔄 **Always up to date** — the app updates itself in the background
 
@@ -63,10 +63,9 @@ already on the latest version. No re-downloading, no reinstalling.
 ## 🚀 Getting Started
 
 1. **Download and install** KokoMovie for your system (buttons above).
-2. **Open the app** and create an account, then pick or create a profile.
-3. **Add a free TMDB key** so the catalog fills with movies and shows
+2. **Add a free TMDB key** so the catalog fills with movies and shows
    (one-time, 2 minutes — see below).
-4. **Browse or search**, click any poster, and press **Watch**. That's it.
+3. **Browse or search**, click any poster, and press **Watch**. That's it.
 
 ### Getting your free TMDB key
 
@@ -76,7 +75,7 @@ many popular apps) to show posters, titles, and details. It's free and takes a m
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org/).
 2. Go to **[Settings → API](https://www.themoviedb.org/settings/api)** and request a key
    (choose "Developer", non-commercial use — it's instant).
-3. Copy your **API Key**.
+3. Copy your **API Key** or **Read Access Token**.
 4. In KokoMovie, open **Settings → API Configuration**, paste the key, and click
    **Validate & Save**. Done — your key is stored securely on your device.
 
@@ -92,22 +91,20 @@ the web — and plays it in its built-in player.
 
 **Do I need the TMDB key?** Yes, to see the catalog. It's free and one-time (steps above).
 
-**Will my data be uploaded anywhere?** No. Your profiles, watchlist, and history stay
-on your computer.
+**Will my data be uploaded anywhere?** No. Your watchlist, preferences, and viewing history are stored locally in an on-device SQLite database.
 
 ---
 
 <details>
 <summary><h2>🛠️ For Developers</h2></summary>
 
-KokoMovie is an Electron + React desktop client backed by local Node.js (Fastify)
-microservices. Metadata comes from TMDB; streams are located by loading third-party
-embed pages in a sandboxed hidden window and intercepting the video URL.
+KokoMovie is a fully local Electron + React desktop application. All state (watchlists, settings, playback positions) is managed on-device via SQLite. Metadata is fetched directly from TMDB; streams are located by loading third-party embed pages in a sandboxed hidden window and intercepting the video URL.
+
+> ⚠️ **Legacy code**: The `services/` directory contains legacy microservices and backend infrastructure (Docker Compose, PostgreSQL, Redis, DynamoDB Local) from previous hosted versions. These are now completely unused and deprecated.
 
 ### Prerequisites
 
 - Node.js 22+, npm 10+
-- Docker (PostgreSQL, Redis, DynamoDB Local)
 - A free [TMDB API key](https://www.themoviedb.org/settings/api)
 
 ### Run locally
@@ -116,12 +113,10 @@ embed pages in a sandboxed hidden window and intercepting the video URL.
 git clone https://github.com/Noobiez16/KokoMovie
 cd KokoMovie
 npm install
-cp .env.example .env
-npm run dev
+npm run dev:client
 ```
 
-`npm run dev` starts the Docker containers, runs migrations, launches all services
-(auth, user, catalog, playback, recommendation), and opens the Electron app.
+This starts the main compiler in watch mode and launches the Electron application on your desktop.
 
 ### Project structure
 
@@ -129,28 +124,18 @@ npm run dev
 KokoMovie/
 ├── client/                 # Electron app
 │   └── src/
-│       ├── main/           # Main process (Node.js): providers, stream-extractor, ipc, updater
-│       └── renderer/       # React app (Vite): pages, components, api clients
-├── services/
-│   ├── auth/               # JWT auth, refresh tokens, OAuth
-│   ├── user/               # Profiles, watchlist, preferences
-│   ├── catalog/            # TMDB integration, metadata, search
-│   ├── playback/           # Sessions, watch position
-│   └── recommendation/     # Home rows, similar content
-├── scripts/                # DB init, dev setup
-└── docker-compose.yml      # PostgreSQL, Redis, DynamoDB Local
+│       ├── main/           # Main process (Node.js): providers, stream-extractor, local SQLite DB, IPC
+│       └── renderer/       # React app (Vite): pages, components, local API connectors
+├── services/               # [DEPRECATED] Unused legacy microservices
+└── docker-compose.yml      # [DEPRECATED] Unused legacy Docker setup
 ```
 
 ### Development commands
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start everything (Docker + services + Electron) |
-| `npm run dev:services` | Start only the backend services |
-| `npm run dev:client` | Start only the Electron/Vite client |
-| `npm run docker:up` / `docker:down` | Start / stop infrastructure |
-| `npm run migrate:all` | Run DB migrations for all services |
-| `npm run build` | Build all packages |
+| `npm run dev:client` | Start the Electron/Vite client locally |
+| `npm run build` | Build the production bundle |
 | `npm run lint` | Run ESLint |
 
 ### Building installers
@@ -171,9 +156,7 @@ cd client && npm run dist:mac
 
 Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on any
 `v*` tag. The workflow builds Windows + Linux, then publishes the installers **plus the
-`latest.yml` / `latest-linux.yml` and `.blockmap` files** to a GitHub Release. Those
-metadata files are what `electron-updater` reads to deliver automatic updates, so they
-must be attached to every release.
+`latest.yml` / `latest-linux.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
 git tag v1.0.4-beta
@@ -181,20 +164,11 @@ git push origin v1.0.4-beta
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
-each `client/electron-builder.*.yml` (GitHub provider → `Noobiez16/KokoMovie`).
-
-### Stream providers
-
-Providers live in `client/src/main/providers/` and are registered in `registry.ts`.
-Each enabled provider joins a staggered parallel race; the first to return a working
-stream wins. To add one, implement the `Provider` interface and register it. Manage
-active providers in the app under **Providers**.
+each `client/electron-builder.*.yml`.
 
 ### Tech stack
 
-**Client:** Electron 31 · React 19 · Vite 5 · TypeScript · TailwindCSS 3 · TanStack Query v5 · Zustand v5 · hls.js v1.5
-**Services:** Fastify 5 · Drizzle ORM · PostgreSQL 16 · ioredis · AWS SDK v3 (DynamoDB Local) · Zod · Jose (JWT RS256)
-**Infra:** Docker Compose · PostgreSQL 16 · Redis 7 · DynamoDB Local
+**Client:** Electron 31 · React 19 · Vite 5 · TypeScript · SQLite 3 (via `better-sqlite3`) · TanStack Query v5 · Zustand v5 · hls.js v1.5
 
 </details>
 

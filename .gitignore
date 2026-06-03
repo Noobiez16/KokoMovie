@@ -28,3 +28,6 @@ infra/*.tfstate
 infra/*.tfstate.backup
 infra/*.tfvars
 infra/.terraform.lock.hcl
+
+# Unnecessary Files
+AGENTS.md
