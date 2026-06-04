@@ -7,9 +7,11 @@ interface Props {
   items: ContentSummary[]
   size?: 'sm' | 'md' | 'lg'
   onViewAll?: () => void
+  /** When set, each card shows a hover "remove" (×) button calling this with the item id. */
+  onRemove?: (id: string) => void
 }
 
-export function ContentRow({ title, items, size = 'md', onViewAll }: Props) {
+export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
   const scroll = (dir: 'left' | 'right') => {
@@ -53,7 +55,7 @@ export function ContentRow({ title, items, size = 'md', onViewAll }: Props) {
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {items.map((item) => (
-            <ContentCard key={item.id} content={item} size={size} />
+            <ContentCard key={item.id} content={item} size={size} onRemove={onRemove} />
           ))}
         </div>
 

@@ -138,10 +138,14 @@ export function tmdbItemsToSummaries(items: TmdbItem[]): ContentSummary[] {
   return summaries(items)
 }
 function summaries(items: TmdbItem[]): ContentSummary[] {
-  return items
+  const mapped = items
     .filter((i) => i.media_type !== 'person')
     .filter((i) => i.poster_path)
     .map(toSummary)
+  // De-duplicate by content id. TMDB occasionally returns the same title twice in a
+  // single result set, which otherwise renders a duplicate card (and trips React's
+  // "two children with the same key" warning).
+  return [...new Map(mapped.map((s) => [s.id, s])).values()]
 }
 
 function pickTrailer(videos: Array<{ key: string; site: string; type: string; official: boolean }>): string | undefined {

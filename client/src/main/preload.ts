@@ -70,6 +70,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update:downloaded', handler)
   },
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
+  getAutoUpdateEnabled: () => ipcRenderer.invoke('app:get-auto-update'),
+  setAutoUpdateEnabled: (enabled: boolean) => ipcRenderer.invoke('app:set-auto-update', enabled),
+  checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
 
   // ─── Deep-link OAuth callback ─────────────────────────────────────────────
   onOAuthCallback: (callback: (url: string) => void) => {
@@ -91,6 +94,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   positionGet: (contentId: string, episodeId?: string | null) => ipcRenderer.invoke('library:position:get', contentId, episodeId),
   positionList: () => ipcRenderer.invoke('library:position:list'),
   positionDelete: (contentId: string, episodeId?: string | null) => ipcRenderer.invoke('library:position:delete', contentId, episodeId),
+  positionDeleteContent: (contentId: string) => ipcRenderer.invoke('library:position:delete-content', contentId),
   prefsGet: () => ipcRenderer.invoke('library:prefs:get'),
   prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) =>
     ipcRenderer.invoke('library:prefs:set', p),

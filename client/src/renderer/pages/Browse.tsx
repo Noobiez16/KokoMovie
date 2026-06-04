@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
-import { recommendationApi } from '../api/recommendation'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { HeroBanner } from '../components/catalog/HeroBanner'
@@ -47,19 +46,31 @@ export function BrowsePage() {
     enabled: !!genre,
   })
 
-  const { data: recData } = useQuery({
-    queryKey: ['recommendations', profileId],
-    queryFn: () => recommendationApi.getHomeRows(profileId),
-    staleTime: 2 * 60 * 1000,
-    enabled: !genre,
-  })
-
   const { data: cwData } = useQuery({
     queryKey: ['continue-watching', profileId],
     queryFn: () => playbackApi.getContinueWatching(profileId),
     refetchOnWindowFocus: 'always',
     enabled: !genre,
   })
+
+  const queryClient = useQueryClient()
+
+  // Remove a title from Continue Watching: drop it from the UI immediately (optimistic), then
+  // cascade-delete its in-progress records so it also leaves Viewing History's In-Progress.
+  const handleRemoveFromHistory = useCallback(async (mediaId: string) => {
+    const key = ['continue-watching', profileId]
+    const previous = queryClient.getQueryData(key)
+    queryClient.setQueryData(key, (old: any) =>
+      old?.data ? { ...old, data: old.data.filter((i: { contentId: string }) => i.contentId !== mediaId) } : old,
+    )
+    try {
+      await playbackApi.removeFromContinueWatching(mediaId, profileId)
+      queryClient.invalidateQueries({ queryKey: ['history'] })
+    } catch {
+      // Restore the row if the deletion failed.
+      if (previous !== undefined) queryClient.setQueryData(key, previous)
+    }
+  }, [queryClient, profileId])
 
   if (genre) {
     if (isGenreLoading) {
@@ -163,7 +174,6 @@ export function BrowsePage() {
   }
 
   const homeData = data?.data
-  const recRows = recData?.data ?? []
   const trending: ContentSummary[] = homeData?.trending ?? []
   const featured = homeData?.featured as import('../api/catalog').ContentDetail | null | undefined
 
@@ -217,6 +227,7 @@ export function BrowsePage() {
           <ContentRow
             title="Continue Watching"
             items={mappedCw}
+            onRemove={handleRemoveFromHistory}
           />
         )}
 
@@ -227,14 +238,6 @@ export function BrowsePage() {
             onViewAll={() => navigate('/browse?genre=trending')}
           />
         )}
-
-        {recRows.map((row) => (
-          <ContentRow
-            key={row.id}
-            title={row.title}
-            items={row.items as ContentSummary[]}
-          />
-        ))}
 
         {homeData?.rows?.map((row) => (
           <ContentRow

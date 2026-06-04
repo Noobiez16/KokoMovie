@@ -594,6 +594,18 @@ export function ContentDetailPage() {
           <div className="h-16" />
         )}
 
+        {/* Back button — overlays the top-left of the backdrop */}
+        <button
+          onClick={() => navigate(-1)}
+          aria-label="Go back"
+          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-white/90 hover:text-white px-3 py-2 text-sm font-medium backdrop-blur-md transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
+          </svg>
+          Back
+        </button>
+
         <div className={thumbnail ? 'px-8 -mt-24 relative z-10' : 'px-8 pt-8'}>
           <h1 className="text-4xl font-bold text-white mb-3">{content.title}</h1>
 

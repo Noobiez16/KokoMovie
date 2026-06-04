@@ -100,6 +100,14 @@ export function registerLibraryIpc(): void {
     return { ok: true }
   })
 
+  // Remove a whole title from Continue Watching: delete every IN-PROGRESS position row for
+  // the content (across episodes). Completed rows are kept so finished episodes still show in
+  // Viewing History — only the in-progress records are cleared from CW and History-In-Progress.
+  ipcMain.handle('library:position:delete-content', (_e, contentId: string) => {
+    db.prepare('DELETE FROM playback_positions WHERE content_id = ? AND completed_at IS NULL').run(contentId)
+    return { ok: true }
+  })
+
   // ─── Preferences ─────────────────────────────────────────────────────────
   ipcMain.handle('library:prefs:get', () =>
     db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating FROM preferences WHERE id = 1').get() as PreferencesRow,

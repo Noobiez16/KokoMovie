@@ -167,31 +167,6 @@ export function AppLayout({ children, transparentNav = false }: Props) {
               })}
             </nav>
           </div>
-
-          <div>
-            <p className="px-3 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest mb-2">Library</p>
-            <nav className="space-y-1">
-              {settingsLinks.map((link) => {
-                const active = isActive(link.path)
-                return (
-                  <button
-                    key={link.path}
-                    onClick={() => navigate(link.path)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 group ${
-                      active
-                        ? 'bg-gradient-to-r from-violet-600/20 to-fuchsia-600/10 text-white border border-violet-500/20 shadow-inner'
-                        : 'text-purple-300/60 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <span className={active ? 'text-violet-400' : 'text-purple-300/40 group-hover:text-purple-300 transition-colors'}>
-                      {link.icon}
-                    </span>
-                    {link.label}
-                  </button>
-                )
-              })}
-            </nav>
-          </div>
         </div>
 
         {/* Profile Card / Sign Out */}
@@ -227,13 +202,25 @@ export function AppLayout({ children, transparentNav = false }: Props) {
               </button>
 
               {profileOpen && (
-                <div className="absolute bottom-14 left-0 right-0 bg-[#120d24] border border-km-border/50 rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-xl animate-fade-in">
-                  <button
-                    onClick={() => { setProfileOpen(false); navigate('/settings') }}
-                    className="w-full text-left px-4 py-2 text-purple-300/70 hover:text-white hover:bg-violet-600/20 text-xs font-medium transition-colors"
-                  >
-                    Settings
-                  </button>
+                <div className="absolute bottom-14 left-0 right-0 bg-[#120d24] border border-km-border/50 rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-xl animate-fade-in overflow-hidden">
+                  <p className="px-4 pt-1.5 pb-2 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest">Library</p>
+                  {settingsLinks.map((link) => {
+                    const active = isActive(link.path)
+                    return (
+                      <button
+                        key={link.path}
+                        onClick={() => { setProfileOpen(false); navigate(link.path) }}
+                        className={`w-full flex items-center gap-2.5 px-4 py-2 text-xs font-medium transition-colors ${
+                          active ? 'text-white bg-violet-600/20' : 'text-purple-300/70 hover:text-white hover:bg-violet-600/20'
+                        }`}
+                      >
+                        <span className={`flex-shrink-0 ${active ? 'text-violet-400' : 'text-purple-300/50'}`}>
+                          {link.icon}
+                        </span>
+                        {link.label}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>

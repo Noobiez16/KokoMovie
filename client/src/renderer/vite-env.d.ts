@@ -47,6 +47,9 @@ interface ElectronAPI {
   onUpdateAvailable: (callback: (version?: string) => void) => () => void
   onUpdateDownloaded: (callback: (version?: string) => void) => () => void
   installUpdate: () => Promise<void>
+  getAutoUpdateEnabled: () => Promise<boolean>
+  setAutoUpdateEnabled: (enabled: boolean) => Promise<boolean>
+  checkForUpdates: () => Promise<{ status: 'available' | 'not-available' | 'error' | 'dev'; version?: string; message?: string }>
 
   // OAuth
   onOAuthCallback: (callback: (url: string) => void) => () => void
@@ -64,6 +67,7 @@ interface ElectronAPI {
   positionGet: (contentId: string, episodeId?: string | null) => Promise<{ content_id: string; episode_id: string; content_type: string; position_seconds: number; duration_seconds: number; completed_at: string | null; updated_at: string } | null>
   positionList: () => Promise<Array<{ content_id: string; episode_id: string; content_type: string; position_seconds: number; duration_seconds: number; completed_at: string | null; updated_at: string }>>
   positionDelete: (contentId: string, episodeId?: string | null) => Promise<{ ok: boolean }>
+  positionDeleteContent: (contentId: string) => Promise<{ ok: boolean }>
   prefsGet: () => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
   prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
 

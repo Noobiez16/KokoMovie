@@ -803,6 +803,24 @@ export async function startStreamProxy(): Promise<void> {
           text = text.replace(/^(\/[^\/][^\r\n]*)$/gm, `/proxy/${currentProto}/${host}$1`)
           // Rewrite full URLs (https://... or http://...)
           text = text.replace(/^(https?):\/\/([^\r\n]+)$/gm, '/proxy/$1/$2')
+
+          // Rewrite URI="..." attributes inside tags (EXT-X-KEY, EXT-X-MAP, EXT-X-MEDIA,
+          // EXT-X-SESSION-KEY, etc.). The line-based rewrites above are anchored to the start
+          // of a line and only catch segment URIs on their own line — they MISS the AES-128
+          // decryption key, whose URL lives inside the #EXT-X-KEY tag as URI="https://...".
+          // Left un-proxied, hls.js fetches that key straight from the CDN with no
+          // Referer/Origin/cookies → 403/timeout → keyLoadError → playback stalls. Routing it
+          // through the proxy (with the registered stream headers) makes the key load cleanly.
+          // Relative URIs are left alone: hls.js resolves them against the proxied manifest URL.
+          text = text.replace(/URI="([^"]+)"/g, (_m, uri: string) => {
+            if (/^https?:\/\//i.test(uri)) {
+              const p = /^https:/i.test(uri) ? 'https' : 'http'
+              return `URI="/proxy/${p}/${uri.replace(/^https?:\/\//i, '')}"`
+            }
+            if (uri.startsWith('//')) return `URI="/proxy/${currentProto}/${uri.slice(2)}"`
+            if (uri.startsWith('/')) return `URI="/proxy/${currentProto}/${host}${uri}"`
+            return `URI="${uri}"`
+          })
           buffer = Buffer.from(text, 'utf8')
         }
 

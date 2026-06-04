@@ -5,9 +5,11 @@ import type { ContentSummary } from '../../api/catalog'
 interface Props {
   content: ContentSummary
   size?: 'sm' | 'md' | 'lg'
+  /** When provided, shows a hover "remove" (×) button — used by the Continue Watching row. */
+  onRemove?: (id: string) => void
 }
 
-export function ContentCard({ content, size = 'md' }: Props) {
+export function ContentCard({ content, size = 'md', onRemove }: Props) {
   const navigate = useNavigate()
   const [imgError, setImgError] = useState(false)
 
@@ -66,6 +68,22 @@ export function ContentCard({ content, size = 'md' }: Props) {
             </svg>
           </div>
         </div>
+
+        {/* Remove from Continue Watching (× on hover). Stops the click from reaching the
+            card so it deletes the record instead of starting playback. */}
+        {onRemove && (
+          <button
+            type="button"
+            aria-label="Remove from Continue Watching"
+            title="Remove from Continue Watching"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(content.id) }}
+            className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
 
         {/* Type badge */}
         <div className="absolute top-1.5 left-1.5">

@@ -153,6 +153,20 @@ export function tmdbEpisodeId(tvId: number, season: number, episode: number): st
   return `ep-${tvId}-${season}-${episode}`
 }
 
+// Inverse of tmdbEpisodeId. Returns null for movie rows (empty episode id).
+export function decodeTmdbEpisodeId(id: string | null | undefined): { tvId: number; season: number; episode: number } | null {
+  const m = /^ep-(\d+)-(\d+)-(\d+)$/.exec(id ?? '')
+  if (!m) return null
+  return { tvId: Number(m[1]), season: Number(m[2]), episode: Number(m[3]) }
+}
+
+// Sortable rank for "most advanced episode" comparisons (season-major so S2E1 > S1E9).
+// Movies (no episode id) rank 0, which is fine since each movie has a single row.
+export function episodeRank(id: string | null | undefined): number {
+  const d = decodeTmdbEpisodeId(id)
+  return d ? d.season * 10000 + d.episode : 0
+}
+
 // TMDB accepts two credential styles: a v3 API key (query param) or a v4 read
 // token (Bearer JWT). Support both — the Settings UI tells users either is fine.
 export function isV4Token(key: string): boolean {

@@ -185,6 +185,8 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 - Attempt to sideload raw SRT files directly to the video element without converting them to WebVTT first.
 - Lock `hls.currentLevel` on initial load when in Auto mode, which overrides Hls.js's adaptive quality switching.
 
+> **Superseded (2026-06-04, see DN-035):** Point #3's "start at the highest resolution via `hls.nextLevel`" was reverted. Forcing the top resolution for the first fragment guaranteed a startup buffer stall on slow providers. The player now starts in pure AUTO and lets ABR ramp up. The buffer-capacity guidance here and in DN-021 still stands.
+
 ---
 
 ## DN-012: YouTube/GoogleVideo domains must be blocked in the stream extractor
@@ -532,5 +534,93 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 **Fix:** Exposed the dynamic stream proxy port from the main process via IPC `'providers:getProxyPort'`, and updated `VideoPlayer.tsx` to fall back to `window.electronAPI.getProxyPort()` if it cannot parse a port from the stream URL.  
 **DO NOT:**
 - Assume the stream URL is always a localhost proxy URL, or fail to load external subtitles when direct video playback is active.
+
+---
+
+## DN-035: On a provider-bound stall, build a buffer — do not drop quality; and never force the start level to highest
+
+**Date:** 2026-06-04  
+**Area:** `client/src/renderer/components/player/VideoPlayer.tsx`  
+**Symptom:** Constant non-fatal `bufferStalledError` / `fragLoadTimeOut` on certain provider streams (e.g. MovieAPI on Spider-Noir ep 5–6) despite very high client bandwidth (400+ Mbps). The only way to watch was to manually pause, let it buffer, then play — and it would stall again shortly after.  
+**Root cause:** The provider CDN delivers segments at or below real-time, so the buffer drains as fast as it fills. Two earlier "fixes" made it worse: (1) forcing the first fragment to the **highest** resolution (`hls.nextLevel = highest`, from DN-011) guaranteed a startup stall on a slow source; (2) a later attempt to **cap the bitrate down** on repeated stalls didn't help, because the bottleneck is the provider, not client bandwidth — capping to the lowest level (0/1) still stalled. The real-world failure that masqueraded as a buffer stall was often a `keyLoadError` (the HLS AES key URI failing), which no buffer/quality tuning can fix.  
+**Fix:**  
+1. **Auto-rebuffer-to-goal** (`startRebuffer`/`endRebuffer`): on a stall, pause once and resume only after a healthy forward cushion (`bufferAhead`) has built — 8s base, growing +6s per quick re-stall up to 30s, decaying back to 8s after ~60s of smooth playback. This automates the manual pause-to-load and is bandwidth-agnostic.  
+2. **No manual quality capping.** ABR (start level `-1`) adapts quality to measured throughput on its own. We do **not** touch `hls.autoLevelCapping` on stalls.  
+3. **Start in pure AUTO** — removed the `hls.nextLevel = highest` override (supersedes DN-011 #3).  
+4. **`keyLoadError` / `keyLoadTimeOut` → fall back** to the next collected source after 2 failures (capping/nudging can't decrypt segments).  
+5. **Progress-aware source watchdog:** the "stuck → switch source" net only fires when the buffered end makes **no progress for 20s**, so a slow-but-advancing source the user deliberately chose is never switched away.
+
+**DO NOT:**
+- Force the HLS start level to the highest resolution (`hls.nextLevel = highest` / `startLevel = <top>`) — it guarantees a startup stall on slow providers. Start in AUTO (`-1`).
+- Cap `hls.autoLevelCapping` down in response to buffer stalls as a primary remedy — on a provider-bound stall it degrades quality without fixing the stall. Let ABR handle quality; build a buffer instead.
+- Make the buffering source-fallback watchdog purely time-based — it must require **no buffer progress** before switching, or it will abandon a deliberately-chosen slow source mid-rebuffer.
+- Treat `keyLoadError` as a recoverable buffer/quality problem — it isn't; fall back to another source.
+- Reduce `maxBufferLength` / `maxBufferSize` below DN-021's high-capacity values (the deep buffer is what the rebuffer goal fills).
+
+---
+
+## DN-036: Continue Watching & History store one row per episode — collapse to one entry per title
+
+**Date:** 2026-06-04  
+**Area:** `client/src/renderer/api/playback.ts`, `client/src/renderer/api/user.ts`, `client/src/renderer/pages/Browse.tsx`  
+**Symptom:** A single series appeared multiple times in **Continue Watching** and **Viewing History** (once per watched episode), tripping React's "two children with the same key" warning. **Trending Now** and genre categories also appeared twice.  
+**Root cause:**  
+1. The local `playback_positions` table has primary key `(content_id, episode_id)`, i.e. one row per episode. Continue Watching and History rendered every row, so a series showed up once per episode.  
+2. `Browse.tsx` rendered the recommendation rows (`getHomeRows`, which already contains Trending + every genre) **and** a standalone Trending row **and** the home genre rows — duplicating each.  
+**Fix:**  
+1. `dedupeByTitle()` in `api/playback.ts` collapses a title's episode rows to one — the **most advanced episode** (highest season/episode via `episodeRank`), tie-broken by most-recent activity. Used by both Continue Watching and History. History also populates `seasonNumber`/`episodeNumber` from the episode id so the row is labelled.  
+2. Removed the redundant `recommendationApi.getHomeRows` query/render from `Browse.tsx` (the standalone Trending row + `homeData.rows` already cover it).  
+3. Defensive de-dupe-by-id inside the catalog mapper (`summaries()`) so a title TMDB returns twice in one result set never renders twice.
+
+**DO NOT:**
+- List `playback_positions` rows directly in Continue Watching or History without collapsing per `content_id` — a series has one row per episode and will duplicate.
+- Render both `recommendationApi.getHomeRows` and `catalogApi.getHome`'s trending/rows on the same page — `getHomeRows` is derived from `getHome`, so you get every row twice.
+- Pick the *most recent* episode row for the per-title entry when the requirement is the *most advanced* one — use `episodeRank` (season-major), not `updated_at` alone.
+
+---
+
+## DN-037: The HLS proxy must rewrite `URI="..."` tag attributes — not just on-their-own-line segment URLs (or the AES key bypasses the proxy)
+
+**Date:** 2026-06-04  
+**Area:** `client/src/main/ipc/providers.ts` (proxy manifest rewriter), `client/src/renderer/components/player/VideoPlayer.tsx` (`keyLoadPolicy`)  
+**Symptom:** Encrypted provider streams (e.g. MovieAPI) play for a few seconds then stall with a non-fatal `networkError / keyLoadError` in the console, repeatedly. No amount of buffer/quality tuning helps, and the source-fallback watchdog eventually switches the user off the source they wanted.  
+**Root cause:** The proxy's m3u8 rewriter rewrote segment URLs with **start-of-line-anchored** regexes (`/^(\/...)$/gm` and `/^(https?):\/\/...$/gm`). Those match a segment URI sitting alone on its line, but the **AES-128 decryption key URL lives inside a tag**: `#EXT-X-KEY:METHOD=AES-128,URI="https://cdn/key.bin",IV=…`. The `URI="…"` is mid-line, so it was never rewritten. hls.js then fetched the key **directly from the CDN**, bypassing the proxy — so it had no `Referer`/`Origin`/cookies and got a 403/timeout. Compounding it, hls.js's default `keyLoadPolicy.timeoutRetry.maxNumRetry` is **1**, so a slow key gave up almost immediately.  
+**Fix:**  
+1. After the line-based rewrites, run a global `text.replace(/URI="([^"]+)"/g, …)` that routes absolute (`https://…`), protocol-relative (`//…`), and absolute-path (`/…`) URIs through `/proxy/{proto}/{host}/…`. Relative URIs are left untouched (hls.js resolves them against the already-proxied manifest URL). This covers `#EXT-X-KEY`, `#EXT-X-MAP`, `#EXT-X-MEDIA`, `#EXT-X-SESSION-KEY`, etc.  
+2. Override hls.js `keyLoadPolicy` to 8 timeout/error retries with 20s first-byte / 60s load timeouts and backoff.
+
+**DO NOT:**
+- Rewrite only line-anchored URLs in the HLS manifest. The encryption key, init segment (`#EXT-X-MAP`), and alternate media (`#EXT-X-MEDIA`) all carry their URL in a mid-line `URI="..."` attribute and must be proxied too — otherwise they bypass the proxy's headers and fail on protected CDNs.
+- Leave the default `keyLoadPolicy` (it retries a timed-out key only once) on flaky/slow encrypted sources.
+- Rewrite *relative* `URI="..."` values — they already resolve against the proxied manifest base; double-proxying them produces a broken path.
+
+---
+
+## DN-038: A user-selected playback source must be pinned — the auto-fallback must never silently switch away from it
+
+**Date:** 2026-06-04  
+**Area:** `client/src/renderer/components/player/VideoPlayer.tsx`  
+**Symptom:** The user manually switches to a specific source (e.g. the *only* mirror that has a series in black-and-white), and a short while later the player silently swaps them onto a different, unwanted source (a colour mirror) because the chosen one was briefly slow.  
+**Root cause:** `autoFallback` treated every source equally. A deliberate user choice was indistinguishable from the initial auto-picked source, so the "stuck → switch source" watchdog (and the key-error path) would move the user to the next collected stream regardless of intent.  
+**Fix:** `handleSourceChange(providerId, isAuto = false)` sets `userPinnedSourceRef` when called from the UI (not from `autoFallback`, which passes `isAuto = true`). While pinned, `autoFallback` refuses to switch and instead kicks the loader (`hls.startLoad()`) to keep recovering the chosen source. The content fix (DN-037) is what actually makes the pinned source play; the pin guarantees we never trade the user's content choice for smoothness.
+
+**DO NOT:**
+- Call `handleSourceChange` from `autoFallback` without `isAuto = true` — it would pin the auto-chosen source and defeat future fallbacks.
+- Let `autoFallback` switch sources while `userPinnedSourceRef` is set — the user picked that mirror deliberately (it may be the only one with the content they want); recover it, don't replace it.
+
+---
+
+## DN-039: The persistent player must stay a single keyed instance mounted outside `<Routes>` — never render VideoPlayer from a route
+
+**Date:** 2026-06-04  
+**Area:** `client/src/renderer/App.tsx`, `components/player/PlayerHost.tsx`, `pages/Player.tsx`, `store/player.ts`, `components/player/VideoPlayer.tsx`  
+**Symptom (the trap):** Rendering `<VideoPlayer>` from inside the `/player` route (the old design) means navigating away unmounts it — playback stops and progress is lost. Naively re-adding it per-route, or swapping which wrapper `<div>` contains it between fullscreen and PiP, **remounts** the `<video>` element (black flash, re-buffer, lost position).  
+**Root cause / design:** Playback state was lifted into `usePlayerStore` (Zustand: `request` + `mode: 'full' | 'pip'`). `PlayerHost` is mounted **once at the app root, outside `<Routes>`**, owns all orchestration (content fetch, session, offline, next-episode), and renders exactly one `<VideoPlayer key="km-active-player">`. Fullscreen vs PiP changes only the wrapper's CSS (size/position) and the `embedded` prop — the element's tree position and key never change, so React keeps the same instance and the `<video>` keeps playing. `pages/Player.tsx` is a thin launcher that writes the URL/state into the store. `VideoPlayer` is lazy-loaded by the host so hls.js isn't pulled into the main bundle at startup.  
+**DO NOT:**
+- Render `<VideoPlayer>` directly from a route/page again — it must live only in `PlayerHost` so it survives navigation.
+- Change the `key` of the `<VideoPlayer>`, or move it between different parent elements, when toggling full ⇄ PiP. Keep one wrapper whose className/style changes; keep the key stable. Different parents or keys = remount = lost playback.
+- Mount `PlayerHost` inside `<Routes>` or any route element — it must be a sibling of `<Routes>` (app root) or it unmounts on navigation.
+- Statically `import` `VideoPlayer` into `PlayerHost` (or anything eagerly loaded) — that drags hls.js (~570 kB) into the startup bundle. Keep it behind `lazy()`.
+- Bump `launchToken` / call `play()` on a PiP "expand" — that rebuilds the session and resets progress. Expanding must only set `mode = 'full'` (the launcher detects the same title and skips re-launch).
 
 ---

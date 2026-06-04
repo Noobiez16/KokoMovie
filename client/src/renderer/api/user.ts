@@ -2,6 +2,8 @@
 // history and preferences live in local SQLite (via IPC). Same exported shapes
 // as before so pages/components are unchanged.
 import { catalogApi } from './catalog'
+import { dedupeByTitle } from './playback'
+import { decodeTmdbEpisodeId } from '../lib/tmdb'
 import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from '../lib/local-identity'
 
 export { LOCAL_PROFILE, LOCAL_PROFILE_ID }
@@ -119,10 +121,13 @@ export const userApi = {
 
   // ─── History ──────────────────────────────────────────────────────────────
   getHistory: async (_profileId?: string, limit = 50, _cursor?: string) => {
-    const rows = (await api().positionList()).slice(0, limit)
+    // One entry per title: collapse a series' episodes to the most advanced one watched
+    // (e.g. after finishing 1–3 and jumping to 4, history shows S1:E4, not four rows).
+    const rows = dedupeByTitle(await api().positionList()).slice(0, limit)
     const items = await Promise.all(
       rows.map(async (r): Promise<HistoryItem> => {
         const s = await catalogApi.getSummary(r.content_id)
+        const ep = decodeTmdbEpisodeId(r.episode_id)
         return {
           profileId: LOCAL_PROFILE_ID,
           watchedAtContentId: `${r.content_id}:${r.episode_id}`,
@@ -135,6 +140,7 @@ export const userApi = {
           completedAt: r.completed_at,
           watchedAt: r.updated_at,
           episodeId: r.episode_id || null,
+          ...(ep ? { seasonNumber: ep.season, episodeNumber: ep.episode } : {}),
         }
       }),
     )

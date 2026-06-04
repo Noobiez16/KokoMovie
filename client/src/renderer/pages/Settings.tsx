@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { userApi, type Preferences } from '../api/user'
 import { AppLayout } from '../components/layout/AppLayout'
+import { ToggleSwitch } from '../components/ui/ToggleSwitch'
 
 const LANGUAGES = [
   { code: 'en-US', label: 'English (US)' },
@@ -255,6 +256,10 @@ export function SettingsPage() {
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [downloadPath, setDownloadPath] = useState('')
   const [defaultDownloadPath, setDefaultDownloadPath] = useState('')
+  // Auto-update preference. Authoritative copy lives in the main process (so startup
+  // respects it); we hydrate the toggle from there and mirror to localStorage for instant UI.
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(() => localStorage.getItem('km_auto_update') !== 'false')
+  const [updateCheck, setUpdateCheck] = useState<{ status: 'idle' | 'checking' | 'available' | 'up-to-date' | 'error' | 'dev'; version?: string; message?: string }>({ status: 'idle' })
 
   // Layout Tab selection
   const [activeTab, setActiveTab] = useState<'preferences' | 'api' | 'downloads' | 'privacy'>('preferences')
@@ -277,12 +282,42 @@ export function SettingsPage() {
         const custom = localStorage.getItem('custom_download_path')
         setDownloadPath(custom || dir)
       })
+      // Hydrate the auto-update toggle from the main process (the source of truth).
+      window.electronAPI.getAutoUpdateEnabled?.().then((enabled) => {
+        setAutoUpdateEnabled(enabled)
+        localStorage.setItem('km_auto_update', String(enabled))
+      }).catch(() => {})
     }
   }, [])
 
   const flashSaved = useCallback(() => {
     setSaveStatus('saved')
     setTimeout(() => setSaveStatus('idle'), 2500)
+  }, [])
+
+  // Persist the auto-update choice to the main process (which gates the real updater) and
+  // mirror it locally. This is the handler the toggle calls with the next value.
+  const onToggleAutoUpdate = useCallback((newValue: boolean) => {
+    setAutoUpdateEnabled(newValue)
+    localStorage.setItem('km_auto_update', String(newValue))
+    window.electronAPI?.setAutoUpdateEnabled?.(newValue)
+      .then(() => flashSaved())
+      .catch(() => setSaveStatus('error'))
+  }, [flashSaved])
+
+  // On-demand update check — no need to wait for the automatic 4-hour cycle.
+  const handleCheckForUpdates = useCallback(async () => {
+    setUpdateCheck({ status: 'checking' })
+    try {
+      const res = await window.electronAPI?.checkForUpdates?.()
+      if (!res) { setUpdateCheck({ status: 'error', message: 'Updater unavailable' }); return }
+      if (res.status === 'available') setUpdateCheck({ status: 'available', version: res.version })
+      else if (res.status === 'not-available') setUpdateCheck({ status: 'up-to-date', version: res.version })
+      else if (res.status === 'dev') setUpdateCheck({ status: 'dev', version: res.version })
+      else setUpdateCheck({ status: 'error', message: res.message })
+    } catch (e) {
+      setUpdateCheck({ status: 'error', message: e instanceof Error ? e.message : 'Check failed' })
+    }
   }, [])
 
   const handleBrowseFolder = async () => {
@@ -626,6 +661,53 @@ export function SettingsPage() {
                         onChange={(e) => updateMutation.mutate({ subtitleDefault: e.target.value || null })}
                         className="bg-white/[0.06] border border-white/[0.12] text-white text-sm rounded-lg px-3 py-1.5 w-24 text-center focus:border-violet-500 focus:outline-none transition-colors"
                       />
+                    </SettingRow>
+                  </SectionCard>
+
+                  <SectionCard
+                    icon={(
+                      <svg className="w-5 h-5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    )}
+                    title="Application Updates"
+                    description="Keep KokoMovie up to date automatically"
+                  >
+                    <SettingRow
+                      label="Automatic Updates"
+                      description="Download and install new versions."
+                    >
+                      <ToggleSwitch checked={autoUpdateEnabled} onChange={onToggleAutoUpdate} label="Automatic updates" />
+                    </SettingRow>
+
+                    <SettingRow
+                      label="Check for Updates"
+                      description="Look for a new version."
+                    >
+                      <div className="flex flex-col items-end gap-1.5">
+                        <button
+                          onClick={handleCheckForUpdates}
+                          disabled={updateCheck.status === 'checking'}
+                          className="flex items-center gap-2 rounded-lg bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white hover:bg-white/10 hover:border-violet-500/40 disabled:opacity-60 transition-colors"
+                        >
+                          {updateCheck.status === 'checking' && (
+                            <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          )}
+                          {updateCheck.status === 'checking' ? 'Checking…' : 'Check Now'}
+                        </button>
+                        {updateCheck.status === 'up-to-date' && (
+                          <span className="text-[11px] text-emerald-300/80">You&apos;re on the latest version{updateCheck.version ? ` (v${updateCheck.version})` : ''}</span>
+                        )}
+                        {updateCheck.status === 'available' && (
+                          <span className="text-[11px] text-violet-300">Update {updateCheck.version ? `v${updateCheck.version} ` : ''}found — downloading…</span>
+                        )}
+                        {updateCheck.status === 'dev' && (
+                          <span className="text-[11px] text-white/40">Available only in the installed app</span>
+                        )}
+                        {updateCheck.status === 'error' && (
+                          <span className="text-[11px] text-red-300/80">{updateCheck.message || 'Check failed'}</span>
+                        )}
+                      </div>
                     </SettingRow>
                   </SectionCard>
                 </>

@@ -1,12 +1,28 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import type Hls from 'hls.js'
+import type { Episode } from '../../api/catalog'
+import { NextEpisodeButton } from './NextEpisodeButton'
 
 // Premium player exposes only the meaningful tiers: AUTO, 720p, 1080p.
 // Lower tiers (240/360/480/540p) are still picked by AUTO when bandwidth requires,
 // but never as a manual choice — there's no reason to deliberately downgrade.
 const VISIBLE_QUALITY_HEIGHTS = [720, 1080] as const
 
-type MenuView = 'home' | 'source' | 'subtitles' | 'quality'
+type MenuView = 'home' | 'source' | 'subtitles' | 'quality' | 'audio'
+
+// Shape of a selectable audio track. SCAFFOLD ONLY — no real tracks are wired yet.
+// When HLS audio rendition support lands, the parent will map hls.js `audioTracks`
+// into this structure (id = hls audio track index, lang = BCP-47 / ISO code) and pass
+// them in via the `audioTracks` prop; the menu below already renders whatever it's given.
+export interface AudioTrackOption {
+  id: number
+  name: string
+  lang: string
+}
+
+// Placeholder until real localization tracks are populated. Intentionally empty so the
+// Audio menu shows its "no extra tracks" state rather than fake languages.
+const AUDIO_TRACKS_PLACEHOLDER: AudioTrackOption[] = []
 
 interface Props {
   hls: Hls | null
@@ -40,6 +56,19 @@ interface Props {
   activeSourceId?: string | null
   onSourceChange?: (id: string) => void
   switchingSource?: boolean
+  /** Next episode to advance to (null = movie or last episode of the series). */
+  nextEpisode?: Episode | null
+  /** Transition to the given episode (re-initialises the stream). */
+  onNextEpisode?: (ep: Episode) => void
+  // ── Audio language tracks (scaffold) ──────────────────────────────────────
+  /** Selectable audio tracks. Empty for now — ready for future localization tracks. */
+  audioTracks?: AudioTrackOption[]
+  /** Currently selected audio track id (-1 = the stream's default/original audio). */
+  currentAudioTrack?: number
+  /** Switch to the given audio track id. */
+  onAudioTrackChange?: (id: number) => void
+  /** Minimise the player into Picture-in-Picture. Hidden when not provided. */
+  onPip?: () => void
 }
 
 function formatTime(secs: number): string {
@@ -63,6 +92,9 @@ export function PlayerControls({
   onAutoSync, autoSyncState = 'idle',
   onFullscreen, introEndSecs, creditsStartSecs,
   sources = [], availableSourceIds, activeSourceId = null, onSourceChange, switchingSource = false,
+  nextEpisode = null, onNextEpisode,
+  audioTracks = AUDIO_TRACKS_PLACEHOLDER, currentAudioTrack = -1, onAudioTrackChange,
+  onPip,
 }: Props) {
   // One gear button opens a single settings panel. It uses a drill-down layout
   // (home list → category) like mainstream players, instead of dumping every option
@@ -78,6 +110,15 @@ export function PlayerControls({
     })
   }, [])
   const closeSettings = useCallback(() => { setShowSettings(false); setMenuView('home') }, [])
+
+  // Dismiss the settings overlay when playback resumes (paused → playing). Tracking the
+  // transition — rather than just `isPlaying` — means opening the menu mid-playback keeps it
+  // open; it only auto-closes on an actual resume. Click-away is handled by the backdrop below.
+  const wasPlayingRef = useRef(isPlaying)
+  useEffect(() => {
+    if (!wasPlayingRef.current && isPlaying) closeSettings()
+    wasPlayingRef.current = isPlaying
+  }, [isPlaying, closeSettings])
 
   const handleSeekClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -117,6 +158,7 @@ export function PlayerControls({
     : 'Off'
   const activeSourceName = sources.find((s) => s.id === activeSourceId)?.name || 'Server'
   const activeQualityName = currentLevel === -1 ? 'Auto' : `${levels[currentLevel]?.height ?? ''}p`
+  const activeAudioName = audioTracks.find((t) => t.id === currentAudioTrack)?.name || 'Original'
 
   // Reusable bits ----------------------------------------------------------------
   const BackHeader = ({ title }: { title: string }) => (
@@ -163,15 +205,10 @@ export function PlayerControls({
         </div>
       )}
 
-      {/* Skip credits button */}
-      {showSkipCredits && (
+      {/* During credits, offer the next episode (or an end-of-series state on the finale). */}
+      {showSkipCredits && onNextEpisode && (
         <div className="absolute bottom-24 right-6 z-20">
-          <button
-            onClick={() => { /* next episode handled by parent */ }}
-            className="bg-km-accent text-black font-semibold px-5 py-2 rounded hover:bg-km-accent/90 transition-colors"
-          >
-            Skip Credits ›
-          </button>
+          <NextEpisodeButton nextEpisode={nextEpisode} onPlay={onNextEpisode} variant="credits" />
         </div>
       )}
 
@@ -205,6 +242,11 @@ export function PlayerControls({
                 </svg>
               )}
             </button>
+
+            {/* Next episode (hidden for movies and the final episode) */}
+            {onNextEpisode && (
+              <NextEpisodeButton nextEpisode={nextEpisode} onPlay={onNextEpisode} variant="control" />
+            )}
 
             {/* Volume */}
             <div className="flex items-center gap-2 group/vol">
@@ -274,6 +316,7 @@ export function PlayerControls({
                       <div className="py-0.5">
                         <p className="px-4 pt-1 pb-2 text-[10px] font-bold text-white/35 uppercase tracking-wider">Settings</p>
                         {hasSources && <HomeRow label="Source" value={activeSourceName} onClick={() => setMenuView('source')} />}
+                        <HomeRow label="Audio" value={activeAudioName} onClick={() => setMenuView('audio')} />
                         <HomeRow label="Subtitles" value={activeSubtitleName} onClick={() => setMenuView('subtitles')} />
                         {hasQuality && <HomeRow label="Quality" value={activeQualityName} onClick={() => setMenuView('quality')} />}
                       </div>
@@ -423,6 +466,33 @@ export function PlayerControls({
                       </div>
                     )}
 
+                    {/* ── Audio language (scaffold — no real tracks wired yet) ──── */}
+                    {menuView === 'audio' && (
+                      <div>
+                        <BackHeader title="Audio" />
+                        {/* The stream's default/original audio is always selectable. */}
+                        <button
+                          onClick={() => { onAudioTrackChange?.(-1); setMenuView('home') }}
+                          className={optionClass(currentAudioTrack < 0)}
+                        >
+                          <span>Original</span>
+                          {currentAudioTrack < 0 && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
+                        </button>
+                        {/* Future localization tracks render here once populated. */}
+                        {audioTracks.map((t) => (
+                          <button key={t.id} onClick={() => { onAudioTrackChange?.(t.id); setMenuView('home') }} className={optionClass(currentAudioTrack === t.id)}>
+                            <span className="truncate pr-2">{t.name}</span>
+                            {currentAudioTrack === t.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
+                          </button>
+                        ))}
+                        {audioTracks.length === 0 && (
+                          <div className="px-3 py-3 text-[11px] text-white/40 italic text-center">
+                            No additional audio tracks for this title
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* ── Quality ──────────────────────────────────────────────── */}
                     {menuView === 'quality' && (
                       <div>
@@ -443,6 +513,16 @@ export function PlayerControls({
                 </>
               )}
             </div>
+
+            {/* Picture-in-Picture (minimise) */}
+            {onPip && (
+              <button onClick={onPip} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center w-8 h-8" title="Picture-in-Picture" aria-label="Picture-in-Picture">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <rect x="3" y="4" width="18" height="15" rx="2" />
+                  <rect x="12.5" y="11" width="7" height="5.5" rx="1" fill="currentColor" stroke="none" />
+                </svg>
+              </button>
+            )}
 
             {/* Fullscreen */}
             <button onClick={onFullscreen} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center" title="Fullscreen">

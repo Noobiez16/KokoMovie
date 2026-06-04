@@ -2,6 +2,34 @@
 // SQLite (via IPC). Actual streams are located by the provider framework in the
 // main process; the "session" here is just a local handle for position tracking.
 import { catalogApi } from './catalog'
+import { episodeRank } from '../lib/tmdb'
+
+export interface PositionRowLite {
+  content_id: string
+  episode_id: string
+  position_seconds: number
+  duration_seconds: number
+  completed_at: string | null
+  updated_at: string
+  content_type?: string
+}
+
+// Collapse multiple per-episode rows of the same title down to one — the most
+// advanced episode (highest season/episode), tie-broken by most recent activity.
+// Keeps a series from appearing once per watched episode in Continue Watching / History.
+export function dedupeByTitle<T extends PositionRowLite>(rows: T[]): T[] {
+  const byContent = new Map<string, T>()
+  for (const r of rows) {
+    const cur = byContent.get(r.content_id)
+    if (!cur) { byContent.set(r.content_id, r); continue }
+    const rRank = episodeRank(r.episode_id)
+    const curRank = episodeRank(cur.episode_id)
+    if (rRank > curRank || (rRank === curRank && r.updated_at > cur.updated_at)) {
+      byContent.set(r.content_id, r)
+    }
+  }
+  return [...byContent.values()].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
+}
 
 export interface PlaybackSession {
   sessionId: string
@@ -87,7 +115,9 @@ export const playbackApi = {
 
   getContinueWatching: async (_profileId?: string) => {
     const rows = await api().positionList()
-    const active = rows.filter((r) => r.position_seconds > 0 && !r.completed_at && !isComplete(r.position_seconds, r.duration_seconds))
+    const active = dedupeByTitle(
+      rows.filter((r) => r.position_seconds > 0 && !r.completed_at && !isComplete(r.position_seconds, r.duration_seconds)),
+    )
     const items = (
       await Promise.all(
         active.map(async (r): Promise<ContinueWatchingItem | null> => {
@@ -114,6 +144,13 @@ export const playbackApi = {
 
   deletePosition: async (contentId: string, episodeId: string | null | undefined, _profileId?: string) => {
     await api().positionDelete(contentId, episodeId ?? null)
+    return { success: true as const, data: null }
+  },
+
+  // Remove an entire title from Continue Watching — clears every in-progress position row
+  // for the content (so it leaves both Continue Watching and Viewing History's In-Progress).
+  removeFromContinueWatching: async (contentId: string, _profileId?: string) => {
+    await api().positionDeleteContent(contentId)
     return { success: true as const, data: null }
   },
 }

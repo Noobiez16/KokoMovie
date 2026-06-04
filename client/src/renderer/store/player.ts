@@ -1,69 +1,55 @@
 import { create } from 'zustand'
 
-type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'error'
-
-interface PlayerState {
-  contentId: string | null
-  episodeId: string | null
-  title: string
-  status: PlayerStatus
-  currentTime: number
-  duration: number
-  volume: number
-  muted: boolean
-  quality: string | null
-  subtitleTrack: string | null
-  isFullscreen: boolean
-  isPip: boolean
-
-  setContent: (contentId: string, episodeId: string | null, title: string) => void
-  setStatus: (status: PlayerStatus) => void
-  setTime: (current: number, duration: number) => void
-  setVolume: (volume: number) => void
-  toggleMute: () => void
-  setQuality: (quality: string | null) => void
-  setSubtitleTrack: (track: string | null) => void
-  setFullscreen: (fullscreen: boolean) => void
-  setPip: (pip: boolean) => void
-  reset: () => void
+// A collected provider stream (mirrors the shape VideoPlayer/ContentDetail already use).
+export interface CachedStream {
+  providerId: string
+  providerName: string
+  streams: Array<{ url: string; quality: string; headers?: Record<string, string> }>
 }
 
-const initialState = {
-  contentId: null,
-  episodeId: null,
-  title: '',
-  status: 'idle' as PlayerStatus,
-  currentTime: 0,
-  duration: 0,
-  volume: 1,
-  muted: false,
-  quality: null,
-  subtitleTrack: null,
-  isFullscreen: false,
-  isPip: false,
+// Everything the global PlayerHost needs to render playback. This is the single source of
+// truth for "what is playing", lifted out of the /player route so the player can persist
+// across navigation (and shrink into Picture-in-Picture) without unmounting.
+export interface PlaybackRequest {
+  contentId: string
+  episodeId?: string
+  streamUrl?: string
+  streamHeaders?: Record<string, string>
+  providerId?: string
+  allStreams?: CachedStream[]
+  resumeAtSeconds?: number
+  offlineId?: string
+}
+
+export type PlayerMode = 'full' | 'pip'
+
+interface PlayerState {
+  request: PlaybackRequest | null
+  mode: PlayerMode
+  // Bumped on every brand-new play() so the host can (re)build a session even when two
+  // requests look similar. patchRequest() (next episode etc.) deliberately does NOT bump it.
+  launchToken: number
+
+  /** Start a fresh playback (always opens fullscreen). */
+  play: (req: PlaybackRequest) => void
+  /** Update fields of the active request in place (e.g. advancing to the next episode). */
+  patchRequest: (patch: Partial<PlaybackRequest>) => void
+  setMode: (mode: PlayerMode) => void
+  enterPip: () => void
+  exitPip: () => void
+  /** Tear playback down entirely (unmounts the player, which saves the final position). */
+  stop: () => void
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
-  ...initialState,
+  request: null,
+  mode: 'full',
+  launchToken: 0,
 
-  setContent: (contentId, episodeId, title) =>
-    set({ contentId, episodeId, title, status: 'loading', currentTime: 0 }),
-
-  setStatus: (status) => set({ status }),
-
-  setTime: (currentTime, duration) => set({ currentTime, duration }),
-
-  setVolume: (volume) => set({ volume, muted: volume === 0 }),
-
-  toggleMute: () => set((s) => ({ muted: !s.muted })),
-
-  setQuality: (quality) => set({ quality }),
-
-  setSubtitleTrack: (subtitleTrack) => set({ subtitleTrack }),
-
-  setFullscreen: (isFullscreen) => set({ isFullscreen }),
-
-  setPip: (isPip) => set({ isPip }),
-
-  reset: () => set(initialState),
+  play: (req) => set((s) => ({ request: req, mode: 'full', launchToken: s.launchToken + 1 })),
+  patchRequest: (patch) => set((s) => (s.request ? { request: { ...s.request, ...patch } } : {})),
+  setMode: (mode) => set({ mode }),
+  enterPip: () => set({ mode: 'pip' }),
+  exitPip: () => set({ mode: 'full' }),
+  stop: () => set({ request: null, mode: 'full' }),
 }))

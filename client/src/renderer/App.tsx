@@ -4,6 +4,7 @@ import { useAuthStore } from './store/auth'
 import { useSettingsStore } from './store/settings'
 import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from './api/user'
 import { UpdateNotification } from './components/UpdateNotification'
+import { PlayerHost } from './components/player/PlayerHost'
 
 const BrowsePage = lazy(() => import('./pages/Browse').then((m) => ({ default: m.BrowsePage })))
 const MoviesPage = lazy(() => import('./pages/Movies').then((m) => ({ default: m.MoviesPage })))
@@ -70,6 +71,9 @@ export function App() {
         <Route path="/" element={<Navigate to="/browse" replace />} />
         <Route path="*" element={<Navigate to="/browse" replace />} />
       </Routes>
+      {/* Persistent player: lives outside <Routes> so playback continues across navigation
+          and can shrink into a draggable Picture-in-Picture overlay. */}
+      <PlayerHost />
     </Suspense>
   )
 }

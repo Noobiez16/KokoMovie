@@ -19,7 +19,7 @@ function formatDate(iso: string): string {
 export function HistoryPage() {
   const { isAuthenticated, activeProfile } = useAuthStore()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<'all' | 'in-progress' | 'completed' | 'list'>('all')
+  const [activeTab, setActiveTab] = useState<'history' | 'list'>('history')
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (!activeProfile) return <Navigate to="/profiles" replace />
@@ -61,18 +61,13 @@ export function HistoryPage() {
 
   const watchlistItems = watchlistData?.data ?? []
 
+  // Unify the formerly-split "In Progress" and "Completed" streams into one Viewing History
+  // collection, newest first by last-viewed timestamp. Completion is now a per-row badge
+  // rather than a separate tab.
   const items: HistoryItem[] = data?.pages.flatMap((p) => p.data) ?? []
-
-  const filteredItems = items.filter((item) => {
-    const pct = item.durationSeconds > 0
-      ? (item.positionSeconds / item.durationSeconds) * 100
-      : 0
-    const isCompleted = item.completedAt !== null || pct >= 95
-
-    if (activeTab === 'completed') return isCompleted
-    if (activeTab === 'in-progress') return item.positionSeconds > 0 && !isCompleted
-    return true
-  })
+  const historyItems = [...items].sort(
+    (a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime(),
+  )
 
   const handleItemClick = (item: HistoryItem, forceResume = false) => {
     const pct = item.durationSeconds > 0
@@ -100,9 +95,9 @@ export function HistoryPage() {
       <div className="px-6 py-8">
         <h1 className="text-white text-2xl font-bold mb-6">Viewing History</h1>
 
-        {/* Glassmorphic Tabs */}
+        {/* Glassmorphic Tabs — Viewing History (unified) vs the saved Watchlist */}
         <div className="flex gap-2 mb-6">
-          {(['all', 'in-progress', 'completed', 'list'] as const).map((tab) => (
+          {([['history', 'Viewing History'], ['list', 'My List']] as const).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -112,12 +107,12 @@ export function HistoryPage() {
                   : 'bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white'
               }`}
             >
-              {tab === 'in-progress' ? 'In Progress' : tab === 'completed' ? 'Completed' : tab === 'list' ? 'List' : 'All'}
+              {label}
             </button>
           ))}
         </div>
 
-        {activeTab !== 'list' ? (
+        {activeTab === 'history' ? (
           <>
             {isLoading && (
               <div className="flex justify-center py-16">
@@ -129,20 +124,20 @@ export function HistoryPage() {
               <p className="text-white/40 text-center py-16">Failed to load history. Is the user service running?</p>
             )}
 
-            {!isLoading && filteredItems.length === 0 && (
+            {!isLoading && historyItems.length === 0 && (
               <div className="text-center text-white/20 py-16 bg-white/[0.02] backdrop-blur-md rounded-2xl max-w-2xl">
                 <p className="text-5xl mb-4">📺</p>
-                <p className="text-sm font-medium">No items found in this section.</p>
+                <p className="text-sm font-medium">Nothing here yet — what you watch will show up here.</p>
               </div>
             )}
 
-            {filteredItems.length > 0 && (
+            {historyItems.length > 0 && (
               <div className="space-y-2 max-w-2xl">
-                {filteredItems.map((item) => {
+                {historyItems.map((item) => {
                   const pct = item.durationSeconds > 0
                     ? Math.round((item.positionSeconds / item.durationSeconds) * 100)
                     : 0
-                  const isCompleted = item.completedAt !== null || pct >= 95
+                  const isCompleted = item.completedAt !== null || pct >= 95 || pct === 100
 
                   return (
                     <div
@@ -177,9 +172,20 @@ export function HistoryPage() {
                       </div>
 
                       <div className="flex-shrink-0 flex flex-col items-end gap-2 text-right">
+                        {/* Dynamic status badge — completed vs in-progress (with %). */}
                         {isCompleted ? (
-                          <span className="text-green-400/70 text-xs font-semibold px-2 py-0.5 rounded-lg bg-green-500/10">Completed</span>
+                          <span className="inline-flex items-center gap-1 text-green-300 text-xs font-semibold px-2 py-0.5 rounded-lg bg-green-500/15 border border-green-500/20">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Completed
+                          </span>
                         ) : (
+                          <span className="inline-flex items-center text-violet-300 text-xs font-semibold px-2 py-0.5 rounded-lg bg-violet-500/15 border border-violet-500/20">
+                            In Progress · {pct}%
+                          </span>
+                        )}
+                        {!isCompleted && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation()

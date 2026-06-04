@@ -26,6 +26,11 @@ interface Props {
   onClose: () => void
   onNextEpisode?: (ep: Episode) => void
   nextEpisode?: Episode | null
+  /** Rendered inside a Picture-in-Picture box: fill the parent (not the viewport) and hide
+   *  the heavy chrome (title, close, controls) — the PiP host supplies its own controls. */
+  embedded?: boolean
+  /** Minimise the player into Picture-in-Picture (shown as a control in fullscreen mode). */
+  onPip?: () => void
 }
 
 // Maps ISO 639-2 (3-letter) codes to ISO 639-1 (2-letter) for language deduplication.
@@ -220,7 +225,7 @@ SubtitleTracks.displayName = 'SubtitleTracks'
 
 export function VideoPlayer({
   content, episode, session, streamHeaders, initialProviderId, allStreams = [], profileId, resumeAtSeconds: initialResumeAt,
-  onClose, onNextEpisode, nextEpisode,
+  onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -286,10 +291,30 @@ export function VideoPlayer({
   const [isBuffering, setIsBuffering] = useState(false)
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── Auto-rebuffer-to-goal ────────────────────────────────────────────────────
+  // Some provider CDNs deliver segments at (or below) real-time, so the buffer drains
+  // as fast as it fills — the classic "play a second, freeze, play a second" stutter
+  // (e.g. MovieAPI on certain episodes). Rather than stutter-loop, when the buffer runs
+  // dry we PAUSE once and resume only after a healthy forward cushion has built — exactly
+  // what a user does by hand when they pause to "let it load". The goal grows on repeated
+  // stalls, so a chronically slow source ends up building one big buffer and then playing
+  // straight through. This is bandwidth-agnostic: ABR still picks the quality, this just
+  // governs when playback is allowed to run.
+  const rebufferingRef = useRef(false)
+  const rebufferGoalRef = useRef(8) // seconds of forward buffer required to (re)start
+  const rebufferTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastResumeWallRef = useRef(0)
+  const hasPlayedRef = useRef(false) // don't rebuffer before the first frame ever plays
+  const startRebufferRef = useRef<() => void>(() => {})
+  const cancelRebufferRef = useRef<() => void>(() => {})
+
   const durationRef = useRef(duration)
   durationRef.current = duration
   const currentTimeRef = useRef(currentTime)
   currentTimeRef.current = currentTime
+  // Read inside the rarely-recreated rebuffer trigger so it never sees a stale value.
+  const isPlayingRef = useRef(isPlaying)
+  isPlayingRef.current = isPlaying
 
   // Latest subtitle selection, read inside the (rarely re-created) HLS handlers so a
   // source switch re-applies the user's choice instead of letting hls.js auto-enable
@@ -303,6 +328,10 @@ export function VideoPlayer({
   const triedSourcesRef = useRef<Set<string>>(new Set())
   const networkErrorCountRef = useRef(0)
   const autoFallbackRef = useRef<(reason: string) => void>(() => {})
+  // Set once the user explicitly picks a source. While pinned, the player keeps trying to
+  // recover the chosen source instead of auto-switching to a different one — important when
+  // only one mirror has the content the user actually wants (e.g. the black-and-white cut).
+  const userPinnedSourceRef = useRef(false)
 
   // Reset local state on external prop changes (e.g. initial load)
   useEffect(() => {
@@ -380,8 +409,12 @@ export function VideoPlayer({
     setSwitchingError(null)
   }, [])
 
-  const handleSourceChange = async (providerId: string) => {
+  const handleSourceChange = async (providerId: string, isAuto = false) => {
     if (providerId === activeSourceId) return
+
+    // An explicit pick (e.g. the user choosing the only black-and-white mirror) pins the
+    // source so the auto-fallback never silently switches them back to a different one.
+    if (!isAuto) userPinnedSourceRef.current = true
 
     const currentPos = videoRef.current ? videoRef.current.currentTime : 0
     const gen = ++switchGenRef.current
@@ -457,6 +490,14 @@ export function VideoPlayer({
   // keeps playback reliable on flaky CDNs instead of spinning on "Loading video…".
   const autoFallback = (reason: string) => {
     if (switchingSource) return
+    // The user pinned this source (only it has what they want). Never switch away — keep
+    // trying to recover the current stream instead (the key/segment loaders retry on their own).
+    if (userPinnedSourceRef.current) {
+      console.warn(`[auto-fallback] ${reason} — source is user-pinned, retrying instead of switching`)
+      networkErrorCountRef.current = 0
+      try { hlsRef.current?.startLoad() } catch { /* noop */ }
+      return
+    }
     if (activeSourceId) triedSourcesRef.current.add(activeSourceId)
     const next = allStreams.find(
       (s) => s.providerId !== activeSourceId && !triedSourcesRef.current.has(s.providerId) && s.streams.length > 0,
@@ -465,7 +506,7 @@ export function VideoPlayer({
       console.warn(`[auto-fallback] ${reason} — switching to ${next.providerName} (${next.providerId})`)
       networkErrorCountRef.current = 0
       setSwitchingError(null)
-      handleSourceChange(next.providerId)
+      handleSourceChange(next.providerId, true)
     } else {
       console.warn(`[auto-fallback] ${reason} — no untried sources left`)
       setInitialLoading(false)
@@ -474,16 +515,44 @@ export function VideoPlayer({
   }
   autoFallbackRef.current = autoFallback
 
-  // Watchdog: if playback stays stuck (initial load or buffering) past the cap without
-  // a frame advancing, give up on this source and fall back to the next one.
+  // Watchdog: give up on a source only when it's genuinely dead — never when it's just slow.
   useEffect(() => {
     if (switchingSource) return
     if (!initialLoading && !isBuffering) return
-    const STUCK_MS = 25000
-    const t = setTimeout(() => {
-      autoFallbackRef.current(initialLoading ? 'initial-load timeout' : 'buffering timeout')
-    }, STUCK_MS)
-    return () => clearTimeout(t)
+
+    // Initial load: no frame has played yet, so judge on elapsed time alone.
+    if (initialLoading) {
+      const t = setTimeout(() => autoFallbackRef.current('initial-load timeout'), 25000)
+      return () => clearTimeout(t)
+    }
+
+    // Buffering mid-playback: only fall back if the buffer makes NO progress for a sustained
+    // window. A slow-but-advancing source (e.g. MovieAPI building a cushion during a rebuffer)
+    // is working and must be left alone — the user may have chosen it deliberately. We track
+    // the buffered end; as long as it keeps growing, we never switch away.
+    let lastEnd = (() => {
+      const v = videoRef.current
+      return v && v.buffered.length > 0 ? v.buffered.end(v.buffered.length - 1) : 0
+    })()
+    let stalledMs = 0
+    const STEP = 1000
+    const NO_PROGRESS_LIMIT = 20000
+    const iv = setInterval(() => {
+      const v = videoRef.current
+      if (!v) return
+      const end = v.buffered.length > 0 ? v.buffered.end(v.buffered.length - 1) : 0
+      if (end > lastEnd + 0.1) {
+        lastEnd = end
+        stalledMs = 0
+      } else {
+        stalledMs += STEP
+        if (stalledMs >= NO_PROGRESS_LIMIT) {
+          clearInterval(iv)
+          autoFallbackRef.current('buffering timeout (no buffer progress)')
+        }
+      }
+    }, STEP)
+    return () => clearInterval(iv)
   }, [initialLoading, isBuffering, switchingSource, activeStreamUrl])
 
   // Fetch external subtitles on content or episode change
@@ -668,22 +737,48 @@ export function VideoPlayer({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 30,
+        // Keep a deep forward buffer so a slow patch of a provider CDN doesn't drain
+        // playback. hls.js fills up to maxBufferLength seconds, and beyond that up to
+        // maxMaxBufferLength when the bitrate is low enough to fit inside maxBufferSize.
+        // A 10-minute ceiling lets the player ride out long fetch hiccups silently.
         maxBufferLength: 60,
-        maxMaxBufferLength: 120,
+        maxMaxBufferLength: 600,
         maxBufferSize: 180 * 1024 * 1024,
+        maxBufferHole: 0.5,
+        // Stall watchdog: when the buffer goes stuck, nudge the playhead past tiny gaps
+        // / discontinuities instead of freezing (the "pause to let it load" symptom).
+        highBufferWatchdogPeriod: 1,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 15,
         startPosition: resumeAtSeconds && resumeAtSeconds > 0 ? resumeAtSeconds : -1,
         startLevel: -1,
         abrEwmaFastLive: 3.0,
         abrEwmaSlowLive: 9.0,
         abrEwmaFastVoD: 3.0,
         abrEwmaSlowVoD: 9.0,
-        // Retry settings for unreliable provider streams
-        manifestLoadingMaxRetry: 5,
+        // Be patient with slow/flaky provider CDNs: more retries, longer timeouts, and
+        // exponential backoff so a single slow segment doesn't escalate to a fatal error.
+        manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 5,
-        fragLoadingMaxRetry: 5,
-        fragLoadingTimeOut: 20000,
+        levelLoadingMaxRetry: 6,
         levelLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 8,
+        fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetryTimeout: 64000,
+        fragLoadingTimeOut: 30000,
+        // Encryption-key loading: the default policy only retries ONCE on timeout, so a slow
+        // AES-128 key fetch (common on the encrypted MovieAPI streams) gives up almost
+        // immediately → keyLoadError → permanent stall. Make it as patient as fragment loading:
+        // many retries, long timeouts, exponential backoff. Paired with proxying the key URL
+        // (see the proxy's URI="..." rewrite), this makes encrypted sources play reliably.
+        keyLoadPolicy: {
+          default: {
+            maxTimeToFirstByteMs: 20000,
+            maxLoadTimeMs: 60000,
+            timeoutRetry: { maxNumRetry: 8, retryDelayMs: 1000, maxRetryDelayMs: 8000, backoff: 'linear' },
+            errorRetry: { maxNumRetry: 8, retryDelayMs: 1000, maxRetryDelayMs: 8000, backoff: 'linear' },
+          },
+        },
       })
 
       // Don't let hls.js auto-render an internal subtitle unless the user actually has
@@ -704,20 +799,11 @@ export function VideoPlayer({
         }))
         setLevels(mapped)
 
-        // Prioritize starting at the highest resolution (1080p minimum priority) immediately
-        if (data.levels.length > 0) {
-          let highestIdx = 0
-          let maxRes = 0
-          for (let i = 0; i < data.levels.length; i++) {
-            const stdH = getStandardHeight(data.levels[i].width || 0, data.levels[i].height || 0)
-            if (stdH > maxRes) {
-              maxRes = stdH
-              highestIdx = i
-            }
-          }
-          hls.nextLevel = highestIdx
-          setCurrentLevel(-1) // Start in AUTO mode to preserve native adaptive quality scaling
-        }
+        // Stay in AUTO and let ABR ramp the quality up from a safe starting level.
+        // Forcing the highest resolution up-front (the previous behaviour) guaranteed a
+        // buffer stall on slower provider CDNs — the very interruption we're avoiding.
+        // ABR climbs to full quality on its own once the connection proves it can keep up.
+        setCurrentLevel(-1)
       })
 
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, data) => {
@@ -753,6 +839,23 @@ export function VideoPlayer({
         ).catch(() => {})
       })
 
+      // ── Buffer-stall recovery ──────────────────────────────────────────────
+      // Some provider CDNs deliver fragments at (or below) real-time, draining the buffer
+      // mid-playback (bufferStalledError / fragLoadTimeOut). These arrive as NON-FATAL
+      // errors that hls.js retries on its own; we add two things. (1) A loader kick in case
+      // it stopped fetching. (2) Hand off to the auto-rebuffer-to-goal controller so
+      // playback waits for a real forward cushion instead of stutter-looping. We deliberately
+      // do NOT force the bitrate down: ABR already adapts quality to the measured throughput,
+      // and on a provider-bound stall (where the client has bandwidth to spare) dropping
+      // quality doesn't help — building a buffer does.
+      let keyErrorCount = 0
+
+      const onStall = (reason: string) => {
+        console.warn(`[hls] ${reason} — kicking loader + rebuffering`)
+        try { hls.startLoad() } catch { /* noop */ }
+        startRebufferRef.current()
+      }
+
       // Log ALL hls.js errors — non-fatal demux/parse errors are silently swallowed by
       // the recovery handler below and are usually what causes "duration shown, 0:00 stuck".
       hls.on(Hls.Events.ERROR, (_, data) => {
@@ -764,7 +867,26 @@ export function VideoPlayer({
           response: data.response ? { code: data.response.code, text: data.response.text } : undefined,
           frag: data.frag ? { sn: (data.frag as any).sn, url: data.frag.url?.slice(0, 140) } : undefined,
         })
-        if (!data.fatal) return
+        if (!data.fatal) {
+          // Non-fatal stalls/timeouts are the #1 cause of stuttering playback — recover
+          // actively instead of waiting for them to escalate into a fatal failure.
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) onStall('bufferStalledError')
+          else if (
+            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+            data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR
+          ) onStall('fragLoadTimeOut')
+          else if (
+            data.details === Hls.ErrorDetails.KEY_LOAD_ERROR ||
+            data.details === Hls.ErrorDetails.KEY_LOAD_TIMEOUT
+          ) {
+            // The HLS decryption key won't load — segments can't be decrypted, so quality
+            // capping / nudging can't help (this is the MovieAPI failure mode). The source
+            // is effectively dead; after a couple of failures, jump to the next collected
+            // source rather than spinning on a permanent stall.
+            if (++keyErrorCount >= 2) autoFallbackRef.current('key load error')
+          }
+          return
+        }
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             // Try to recover a couple of times; if the source keeps failing to
@@ -843,19 +965,98 @@ export function VideoPlayer({
       setIsBuffering(false)
     }
 
+    // Seconds of contiguous buffer ahead of the playhead (0 if the playhead sits in a gap).
+    const bufferAhead = () => {
+      const t = video.currentTime
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) - 0.25 <= t && t < video.buffered.end(i)) {
+          return video.buffered.end(i) - t
+        }
+      }
+      return 0
+    }
+
+    const endRebuffer = () => {
+      if (rebufferTimerRef.current) { clearInterval(rebufferTimerRef.current); rebufferTimerRef.current = null }
+      if (!rebufferingRef.current) return
+      rebufferingRef.current = false
+      lastResumeWallRef.current = Date.now()
+      setIsBuffering(false)
+      video.play().catch(() => {})
+    }
+
+    const cancelRebuffer = () => {
+      if (rebufferTimerRef.current) { clearInterval(rebufferTimerRef.current); rebufferTimerRef.current = null }
+      rebufferingRef.current = false
+    }
+    cancelRebufferRef.current = cancelRebuffer
+
+    // Pause once and resume only after a healthy forward buffer has built — turning a
+    // stutter-storm on a slow provider into a single, deliberate wait.
+    const startRebuffer = () => {
+      if (rebufferingRef.current) return
+      if (!hasPlayedRef.current) return           // initial load is handled elsewhere
+      if (video.ended || video.seeking) return
+      if (video.paused && !isPlayingRef.current) return // genuinely user-paused → leave it
+
+      // Re-stalling soon after a resume means this source needs a deeper cushion: grow the
+      // goal so we wait longer (and thus less often). Caps at 30s. A calm stretch resets it.
+      const sinceResume = Date.now() - lastResumeWallRef.current
+      if (lastResumeWallRef.current > 0 && sinceResume < 25000) {
+        rebufferGoalRef.current = Math.min(30, rebufferGoalRef.current + 6)
+      }
+      const goal = rebufferGoalRef.current
+
+      rebufferingRef.current = true
+      setIsBuffering(true)
+      try { hlsRef.current?.startLoad() } catch { /* noop */ }
+      video.pause()
+      console.warn(`[rebuffer] buffer dry — holding until ${goal}s buffered ahead`)
+
+      let waited = 0
+      rebufferTimerRef.current = setInterval(() => {
+        waited += 250
+        const ahead = bufferAhead()
+        const remaining = (video.duration || 0) - video.currentTime
+        const nearEnd = remaining > 0 && ahead >= remaining - 0.5
+        // Resume when the cushion is built, the rest of the title is buffered, or we've
+        // waited long enough that holding further is pointless (let hls.js nudge/recover).
+        if (ahead >= goal || nearEnd || waited >= 30000) {
+          console.warn(`[rebuffer] resuming with ${ahead.toFixed(1)}s buffered (waited ${(waited / 1000).toFixed(1)}s)`)
+          endRebuffer()
+        }
+      }, 250)
+    }
+    startRebufferRef.current = startRebuffer
+
     const onPlay = () => setIsPlaying(true)
-    const onPause = () => { setIsPlaying(false); clearBuffering() }
-    // First frame is actually rendering — drop the loading overlays and reset the
-    // network-error streak (the source is clearly working now).
-    const onPlaying = () => { setIsPlaying(true); setInitialLoading(false); clearBuffering(); networkErrorCountRef.current = 0 }
+    // Skip the "paused" UI while we're auto-rebuffering — the intent is still to play, and
+    // the buffering overlay communicates the wait.
+    const onPause = () => { if (rebufferingRef.current) return; setIsPlaying(false); clearBuffering() }
+    // First frame is actually rendering — drop the loading overlays, mark that playback has
+    // begun (so stalls may now trigger a rebuffer), and reset the network-error streak.
+    const onPlaying = () => {
+      setIsPlaying(true); setInitialLoading(false); clearBuffering()
+      hasPlayedRef.current = true
+      networkErrorCountRef.current = 0
+    }
     const onCanPlay = () => clearBuffering()
-    const onWaiting = () => showBufferingSoon()
+    const onWaiting = () => { showBufferingSoon(); startRebuffer() }
     const onSeeking = () => showBufferingSoon()
-    const onStalled = () => showBufferingSoon()
+    const onStalled = () => { showBufferingSoon(); startRebuffer() }
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime)
       if (video.buffered.length > 0) {
         setBuffered(video.buffered.end(video.buffered.length - 1))
+      }
+
+      // Decay the rebuffer goal back toward the base once the source has proven it can
+      // play smoothly for a while, so a single rough patch doesn't keep us over-buffering.
+      if (
+        !rebufferingRef.current && rebufferGoalRef.current > 8 &&
+        lastResumeWallRef.current > 0 && Date.now() - lastResumeWallRef.current > 60000
+      ) {
+        rebufferGoalRef.current = 8
       }
 
       if (nextEpisode && video.duration > 0 && video.duration - video.currentTime < 30) {
@@ -894,6 +1095,7 @@ export function VideoPlayer({
         clearTimeout(bufferingTimerRef.current)
         bufferingTimerRef.current = null
       }
+      cancelRebuffer()
     }
   }, [nextEpisode, activeStreamUrl])
 
@@ -963,7 +1165,7 @@ export function VideoPlayer({
       if (!video) return
       resetControlsTimeout()
       switch (e.key) {
-        case ' ': case 'k': e.preventDefault(); isPlaying ? video.pause() : video.play(); break
+        case ' ': case 'k': e.preventDefault(); cancelRebufferRef.current(); isPlaying ? video.pause() : video.play(); break
         case 'ArrowLeft': video.currentTime = Math.max(0, video.currentTime - 10); break
         case 'ArrowRight': video.currentTime = Math.min(video.duration, video.currentTime + 10); break
         case 'ArrowUp': video.volume = Math.min(1, video.volume + 0.1); break
@@ -980,6 +1182,8 @@ export function VideoPlayer({
   const handlePlayPause = () => {
     const video = videoRef.current
     if (!video) return
+    // An explicit play/pause always wins over an in-progress auto-rebuffer.
+    cancelRebufferRef.current()
     isPlaying ? video.pause() : video.play()
   }
   const handleMute = () => { if (videoRef.current) videoRef.current.muted = !isMuted }
@@ -1079,7 +1283,7 @@ export function VideoPlayer({
   // HLS error state
   if (hlsError) {
     return (
-      <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
+      <div className={`${embedded ? 'absolute' : 'fixed'} inset-0 bg-black z-50 flex items-center justify-center`}>
         <div className="text-center max-w-md px-6">
           <p className="text-white/50 text-4xl mb-4">⚠</p>
           <p className="text-white font-semibold mb-2">Stream Error</p>
@@ -1098,11 +1302,12 @@ export function VideoPlayer({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 bg-black z-50"
+      className={`${embedded ? 'absolute' : 'fixed'} inset-0 bg-black z-50`}
       onMouseMove={resetControlsTimeout}
       onClick={resetControlsTimeout}
     >
-      {/* Close button */}
+      {/* Close button (hidden in PiP — the PiP chrome supplies its own) */}
+      {!embedded && (
       <button
         onClick={onClose}
         className={`absolute top-4 right-4 z-30 text-white/70 hover:text-white transition-opacity duration-300 flex items-center justify-center ${showControls ? 'opacity-100' : 'opacity-0'}`}
@@ -1112,8 +1317,10 @@ export function VideoPlayer({
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
+      )}
 
       {/* Title */}
+      {!embedded && (
       <div className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
         <p className="text-white font-semibold">{content.title}</p>
         {episode && (
@@ -1123,6 +1330,7 @@ export function VideoPlayer({
           </p>
         )}
       </div>
+      )}
 
       {/* Initial buffering overlay — shown until the first frame plays so the
           user sees progress instead of a black screen while the stream loads. */}
@@ -1193,6 +1401,7 @@ export function VideoPlayer({
         />
       )}
 
+      {!embedded && (
       <div className={`transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <PlayerControls
           hls={hlsRef.current}
@@ -1226,8 +1435,12 @@ export function VideoPlayer({
           activeSourceId={activeSourceId}
           onSourceChange={handleSourceChange}
           switchingSource={switchingSource}
+          nextEpisode={nextEpisode}
+          onNextEpisode={(ep) => { setShowNextEpisode(false); onNextEpisode?.(ep) }}
+          onPip={onPip}
         />
       </div>
+      )}
     </div>
   )
 }
