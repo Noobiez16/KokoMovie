@@ -18,6 +18,8 @@ import { vidsrcRipProvider } from './vidsrcrip.js'
 import { vidsrcSuProvider } from './vidsrcsu.js'
 import { vidsrcPmProvider } from './vidsrcpm.js'
 import { vidsrcInProvider } from './vidsrcin.js'
+import { vixsrcProvider } from './vixsrc.js'
+import { indraProvider } from './indra.js'
 
 const ALL_PROVIDERS: Provider[] = [
   vidBingeProvider,
@@ -26,6 +28,10 @@ const ALL_PROVIDERS: Provider[] = [
   vidsrcPmProvider,
   vidsrcInProvider,
   vidlinkProvider,
+  // VixSrc carries multi-audio HLS masters → real dub tracks surface in the player's Audio
+  // menu when a title has them. Placed mid-pack (proven enough, but not displacing the
+  // top-tier racers) per DN-005's reliability ordering.
+  vixsrcProvider,
   vidsrcccProvider,
   multiembedProvider,
   vidsrcProProvider,
@@ -37,6 +43,8 @@ const ALL_PROVIDERS: Provider[] = [
   smashyStreamProvider,
   moviesApiProvider,
   embedSuProvider,
+  // Experimental multi-audio source (off by default — see indra.ts / DN-017).
+  indraProvider,
 ]
 
 interface ProviderPrefs {

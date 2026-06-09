@@ -1,6 +1,6 @@
 # KokoMovie PC — Architecture
 
-**Version:** 3.0.0 (Fully Local Architecture)  
+**Version:** 1.1.6-beta (Fully Local Architecture)  
 **Date:** June 2026  
 **Status:** Current
 

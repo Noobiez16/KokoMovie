@@ -118,30 +118,34 @@ resource "aws_route_table_association" "private" {
 # snyk:ignore:SNYK-CC-TF-73
 # snyk:ignore:SNYK-CC-00170
 # snyk:ignore:SNYK-CC-00171
+# snyk:ignore:SNYK-CC-00176  -- ALB must accept inbound from internet (public load balancer by design)
 resource "aws_security_group" "alb" {
   name        = "streamflix-${var.environment}-alb"
-  description = "ALB: allow HTTPS inbound from internet"
+  description = "ALB: allow HTTPS inbound from internet (public-facing load balancer)"
   vpc_id      = aws_vpc.main.id
 
+  # Intentionally open to 0.0.0.0/0 — this is the public entry point for the hosted backend.
+  # Restricting to specific CIDRs is not feasible for a consumer-facing service.
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTPS inbound from internet"
+    description = "Allow HTTPS inbound from internet (public-facing ALB)"
   }
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP redirect to HTTPS"
+    description = "HTTP redirect to HTTPS (public-facing ALB)"
   }
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound (health checks, backend services)"
   }
   tags = { Name = "streamflix-${var.environment}-alb-sg" }
 }

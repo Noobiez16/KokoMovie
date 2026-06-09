@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
+import { useSettingsStore } from '../store/settings'
 import { catalogApi, type Episode, type Season } from '../api/catalog'
 import { userApi } from '../api/user'
 import { recommendationApi } from '../api/recommendation'
@@ -27,6 +28,7 @@ export function ContentDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { isAuthenticated, activeProfile } = useAuthStore()
+  const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const [selectedSeason, setSelectedSeason] = useState(0)
   const [autoStreamState, setAutoStreamState] = useState<{
     loading: boolean
@@ -106,7 +108,7 @@ export function ContentDetailPage() {
 
 
   const { data: continueWatchingData } = useQuery({
-    queryKey: ['continue-watching', profileId],
+    queryKey: ['continue-watching', profileId, tmdbApiKey],
     queryFn: () => {
       if (!profileId) throw new Error('Missing parameters')
       return playbackApi.getContinueWatching(profileId)
@@ -470,11 +472,15 @@ export function ContentDetailPage() {
       ` | IMDB=${req.imdbId ?? 'none'} TMDB=${req.tmdbId ?? 'none'}`
     )
 
+    // Correlate this search with its background source-collection event so the
+    // late-arriving mirrors are merged into THIS playback only.
+    const searchId = crypto.randomUUID()
+
     try {
       // Defense-in-depth: the main process already hard-caps the provider race, but
       // guard the IPC round-trip too so the loading overlay can never hang forever.
       const result = await Promise.race([
-        providersApi.getFirstStream(req),
+        providersApi.getFirstStream(req, searchId),
         new Promise<null>((_, reject) =>
           setTimeout(() => reject(new Error('Timed out searching for a stream')), 50000)
         ),
@@ -502,6 +508,7 @@ export function ContentDetailPage() {
             providerId: result.providerId,
             allStreams: result.allStreams || [],
             resumeAtSeconds,
+            searchId,
           },
         })
       } else {

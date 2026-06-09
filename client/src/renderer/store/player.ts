@@ -4,7 +4,7 @@ import { create } from 'zustand'
 export interface CachedStream {
   providerId: string
   providerName: string
-  streams: Array<{ url: string; quality: string; headers?: Record<string, string> }>
+  streams: Array<{ url: string; quality: string; headers?: Record<string, string>; audioLangs?: string[] }>
 }
 
 // Everything the global PlayerHost needs to render playback. This is the single source of
@@ -19,6 +19,9 @@ export interface PlaybackRequest {
   allStreams?: CachedStream[]
   resumeAtSeconds?: number
   offlineId?: string
+  // Correlates this playback with its background source-collection event
+  // (providers:streamsCollected) so late-arriving mirrors are merged into THIS request only.
+  searchId?: string
 }
 
 export type PlayerMode = 'full' | 'pip'

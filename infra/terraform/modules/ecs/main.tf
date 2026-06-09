@@ -71,6 +71,7 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 # snyk:ignore:SNYK-CC-TF-124
 # snyk:ignore:SNYK-CC-TF-125
 # snyk:ignore:SNYK-CC-00231
+# snyk:ignore:SNYK-CC-00232  -- ALB is intentionally internet-facing (public API gateway)
 resource "aws_lb" "main" {
   name               = "streamflix-${var.environment}"
   internal           = false

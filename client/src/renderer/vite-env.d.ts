@@ -75,9 +75,16 @@ interface ElectronAPI {
   listProviders: () => Promise<Array<{ id: string; name: string; enabled: boolean }>>
   toggleProvider: (id: string, enabled: boolean) => Promise<{ ok: boolean }>
   getStream: (providerId: string, req: StreamRequest) => Promise<ProviderResult>
-  getFirstStream: (req: StreamRequest) => Promise<ProviderResult | null>
+  getFirstStream: (req: StreamRequest, searchId?: string) => Promise<ProviderResult | null>
+  onStreamsCollected: (
+    callback: (payload: { searchId: string; allStreams: ProviderResult[] }) => void
+  ) => () => void
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) => Promise<{ ok: boolean }>
   getProxyPort: () => Promise<number>
+
+  // Built-in P2P torrent streaming (free dub sourcing)
+  torrentGetStreams: (req: StreamRequest) => Promise<ProviderResult[]>
+  torrentResolve: (magnet: string, audioLang?: string) => Promise<{ url?: string; transcoded?: boolean; error?: string }>
 }
 
 interface StreamRequest {
@@ -87,12 +94,15 @@ interface StreamRequest {
   season?: number
   episode?: number
   title?: string
+  // Optional preferred audio/dub language (ISO 639-1). See providers/interface.ts.
+  audioLang?: string
 }
 
 interface StreamSource {
   url: string
   quality: string
   headers?: Record<string, string>
+  audioLangs?: string[]
 }
 
 interface ProviderResult {

@@ -67,7 +67,7 @@ export function registerLibraryIpc(): void {
          ON CONFLICT(content_id, episode_id) DO UPDATE SET
            position_seconds = excluded.position_seconds,
            duration_seconds = excluded.duration_seconds,
-           completed_at     = COALESCE(excluded.completed_at, playback_positions.completed_at),
+           completed_at     = excluded.completed_at,
            updated_at       = excluded.updated_at`,
       ).run({
         content_id: p.contentId,

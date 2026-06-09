@@ -8,7 +8,53 @@ import * as nodeHttp from 'http'
 import * as nodeHttps from 'https'
 import * as zlib from 'zlib'
 import { setMaxListeners, EventEmitter } from 'events'
-import { lookup } from 'dns'
+import { lookup, Resolver } from 'dns'
+import type { LookupAddress } from 'dns'
+
+// Some ISPs (especially in regions that block piracy CDNs — VixSrc's `*.vix-content.net` is a
+// prime example) return NXDOMAIN for stream segment hosts even though those domains resolve
+// fine on public resolvers. The renderer never hits these directly (it only talks to our
+// localhost proxy), but the MAIN-process proxy does — and a blocked system resolver makes
+// every segment fail with `getaddrinfo ENOTFOUND` → 502 in the player. So all outbound proxy
+// requests use `resilientLookup`: try the system resolver first (fast, respects /etc/hosts &
+// VPNs), then fall back to public DNS (Cloudflare/Google/Quad9) on failure. See DN-047.
+const publicDnsResolver = new Resolver()
+publicDnsResolver.setServers(['1.1.1.1', '8.8.8.8', '9.9.9.9'])
+
+function resilientLookup(
+  hostname: string,
+  options: unknown,
+  callback: (err: NodeJS.ErrnoException | null, address?: string | LookupAddress[], family?: number) => void,
+): void {
+  const cb = (typeof options === 'function' ? options : callback) as typeof callback
+  const opts = (typeof options === 'object' && options !== null ? options : {}) as { all?: boolean }
+  const sysLookup = lookup as unknown as (
+    h: string,
+    o: object,
+    c: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family: number) => void,
+  ) => void
+  sysLookup(hostname, opts, (err, address, family) => {
+    if (!err) {
+      cb(null, address, family)
+      return
+    }
+    publicDnsResolver.resolve4(hostname, (e4, addrs4) => {
+      if (!e4 && addrs4 && addrs4.length > 0) {
+        if (opts.all) cb(null, addrs4.map((a) => ({ address: a, family: 4 })))
+        else cb(null, addrs4[0], 4)
+        return
+      }
+      publicDnsResolver.resolve6(hostname, (e6, addrs6) => {
+        if (!e6 && addrs6 && addrs6.length > 0) {
+          if (opts.all) cb(null, addrs6.map((a) => ({ address: a, family: 6 })))
+          else cb(null, addrs6[0], 6)
+          return
+        }
+        cb(err)
+      })
+    })
+  })
+}
 
 const HTTP_REQUEST_KEY = ['req', 'uest'].join('')
 const HTTP_CREATE_SERVER_KEY = ['create', 'Server'].join('')
@@ -67,7 +113,9 @@ function checkDomainResolves(url: string): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const hostname = new URL(url).hostname
-      lookup(hostname, (err) => {
+      // Use the same public-DNS fallback as outbound proxy requests, so a host that's only
+      // blocked by the ISP resolver (but live on public DNS) isn't falsely treated as dead.
+      resilientLookup(hostname, {}, (err) => {
         if (err) resolve(false)
         else resolve(true)
       })
@@ -165,6 +213,7 @@ function fetchNode(
           headers: reqHeaders,
           timeout: 15000,
           agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
+          lookup: resilientLookup as nodeHttp.RequestOptions['lookup'],
         }
 
         const handleResponse = (nodeRes: nodeHttp.IncomingMessage) => {
@@ -372,6 +421,7 @@ function streamSegment(
       headers: reqHeaders,
       timeout: 30000,
       agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
+      lookup: resilientLookup as nodeHttp.RequestOptions['lookup'],
     }
 
     const onResponse = (clientRes: nodeHttp.IncomingMessage) => {
@@ -582,6 +632,52 @@ export function mergeHeadersCaseInsensitive(
   return result
 }
 
+// Does this URL look like an HLS *playlist* (so it must be fetched, rewritten, and have its
+// rendition/segment URLs re-proxied) rather than a binary segment (which must stream-pipe
+// through streamSegment with its retry/Range resilience)?
+//
+// Most playlists end in `.m3u(8)`. But some providers (notably VixSrc) serve BOTH the master
+// and the per-rendition playlists from EXTENSION-LESS URLs like
+// `vixsrc.to/playlist/718930?type=video&rendition=480p`. We can't just treat *every*
+// extension-less URL as a playlist: other providers (e.g. VidLink) route their actual
+// *segments* through extension-less nested proxies like `storm.vodvidl.site/proxy/wiwii/<blob>`.
+// Pulling those off streamSegment breaks them with ERR_EMPTY_RESPONSE (DN-046). So an
+// extension-less URL only counts as a playlist when its path actually NAMES a playlist
+// endpoint (`/playlist`, `/manifest`, `/master`). Real segments keep their extensions
+// (`.ts`/`.mp4`/`.m4s`/even disguised `.html`) and never match.
+function looksLikeManifestUrl(rawUrl: string): boolean {
+  if (rawUrl.includes('.m3u')) return true
+  try {
+    const path = new URL(rawUrl).pathname.toLowerCase()
+    const last = path.slice(path.lastIndexOf('/') + 1)
+    if (last.includes('.')) return false
+    return /(^|\/)(playlist|manifest|master)(\/|$)/.test(path)
+  } catch {
+    return false
+  }
+}
+
+// fetchNode, but resilient to the transient "socket hang up" / empty responses some playlist
+// hosts (VixSrc in particular) throw under concurrent requests. Manifests are tiny and
+// idempotent, so retrying a few times is safe and stops a flaky socket from surfacing as a
+// 502 in the player (DN-046).
+async function fetchManifest(
+  url: string,
+  options: { headers?: Record<string, string>; method?: string },
+  attempts = 3,
+): Promise<{ status: number; headers: Record<string, string>; buffer: Buffer }> {
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetchNode(url, options)
+    } catch (err) {
+      lastErr = err
+      logExtraction(`[Manifest retry ${i + 1}/${attempts}] ${err instanceof Error ? err.message : String(err)} → ${url.slice(0, 140)}`)
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
 export async function startStreamProxy(): Promise<void> {
   return new Promise((resolve) => {
     const server = (nodeHttp as any)[HTTP_CREATE_SERVER_KEY](async (req: nodeHttp.IncomingMessage, res: nodeHttp.ServerResponse) => {
@@ -701,7 +797,13 @@ export async function startStreamProxy(): Promise<void> {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         })
 
-        const isManifest = realUrl.includes('.m3u')
+        // A manifest is anything ending in `.m3u(8)` OR an extension-less *playlist* endpoint
+        // (e.g. VixSrc's `/playlist/718930?type=video&rendition=480p`). Both must reach the
+        // rewrite path below so their rendition/segment URLs get routed back through the proxy
+        // (with our headers) instead of hls.js hitting the raw CDN — which fails with
+        // ERR_NAME_NOT_RESOLVED and bypasses the sub-720p quality filter. Extension-less
+        // *segment* proxies (VidLink) deliberately do NOT match, so they keep stream-piping.
+        const isManifest = looksLikeManifestUrl(realUrl)
         if (!isManifest && !isVtt) {
           streamSegment(realUrl, fetchHeaders, req, res)
           return
@@ -709,7 +811,7 @@ export async function startStreamProxy(): Promise<void> {
 
         logExtraction(`[Proxy Request] Target: ${realUrl} | Referer: ${fetchHeaders['Referer'] || fetchHeaders['referer']} | Origin: ${fetchHeaders['Origin'] || fetchHeaders['origin']}`)
 
-        const response = await fetchNode(realUrl, {
+        const response = await fetchManifest(realUrl, {
           method: req.method,
           headers: fetchHeaders,
         })
@@ -744,7 +846,13 @@ export async function startStreamProxy(): Promise<void> {
             buffer = Buffer.from(srtToVtt(raw, offsetSecs), 'utf8')
           }
           contentType = 'text/vtt; charset=utf-8'
-        } else if (realUrl.includes('.m3u') || contentType.includes('mpegurl')) {
+        } else if (
+          realUrl.includes('.m3u') ||
+          contentType.includes('mpegurl') ||
+          // Extension-less playlists (e.g. VixSrc) may come back as text/plain or
+          // octet-stream — confirm by sniffing the HLS magic header so we still rewrite them.
+          buffer.subarray(0, 16).toString('utf8').replace(/^\uFEFF/, '').trimStart().startsWith('#EXTM3U')
+        ) {
           let text = buffer.toString('utf8')
 
           // DIAGNOSTIC: detect encryption, master vs. media playlist, variant + segment counts.
@@ -753,7 +861,8 @@ export async function startStreamProxy(): Promise<void> {
           const variantCount = (text.match(/#EXT-X-STREAM-INF/g) || []).length
           const segmentCount = (text.match(/#EXTINF/g) || []).length
           const keyLine = hasEncKey ? (text.split('\n').find((l) => l.startsWith('#EXT-X-KEY')) ?? '') : ''
-          logExtraction(`[Manifest ${response.status}] master=${isMaster} variants=${variantCount} segments=${segmentCount} encKey=${hasEncKey}${keyLine ? ` | ${keyLine.slice(0, 200)}` : ''} | size=${buffer.length}`)
+          const audioMediaCount = (text.match(/#EXT-X-MEDIA:[^\n]*TYPE=AUDIO/gi) || []).length
+          logExtraction(`[Manifest ${response.status}] master=${isMaster} variants=${variantCount} segments=${segmentCount} audioMedia=${audioMediaCount} encKey=${hasEncKey}${keyLine ? ` | ${keyLine.slice(0, 200)}` : ''} | size=${buffer.length}`)
 
           // Extract all resolutions to check if high resolution is available
           const resMatches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
@@ -881,10 +990,38 @@ export function getStandardHeight(width: number, height: number): number {
 }
 
 // Fetch HLS manifest in the main process to check its maximum resolution
-async function getMaxResolution(url: string, headers: Record<string, string>): Promise<number> {
+// ISO 639-2/B (3-letter) → 639-1 (2-letter) for the most common dub languages, so the source
+// switcher can label a stream's available audio with short codes (EN, ES, FR, IT, RU…).
+const AUDIO_LANG_3TO2: Record<string, string> = {
+  eng: 'en', spa: 'es', fra: 'fr', fre: 'fr', deu: 'de', ger: 'de', ita: 'it',
+  por: 'pt', pob: 'pt', rus: 'ru', zho: 'zh', chi: 'zh', jpn: 'ja', kor: 'ko',
+  ara: 'ar', tur: 'tr', pol: 'pl', nld: 'nl', dut: 'nl', hin: 'hi', swe: 'sv',
+}
+
+function normalizeAudioLang(raw: string): string {
+  const l = (raw || '').toLowerCase().trim().split(/[-_]/)[0] ?? ''
+  return AUDIO_LANG_3TO2[l] ?? l.slice(0, 2)
+}
+
+// Parse the alternate audio dub languages declared in an HLS master (#EXT-X-MEDIA:TYPE=AUDIO).
+// Returns deduped 2-letter codes in manifest order. Muxed-audio masters (no AUDIO media tags)
+// return [] so the source switcher shows a badge ONLY for genuinely multi-dub sources.
+function parseAudioLangs(masterText: string): string[] {
+  const langs: string[] = []
+  for (const line of masterText.split(/\r?\n/)) {
+    if (!/^#EXT-X-MEDIA:/i.test(line) || !/TYPE=AUDIO/i.test(line)) continue
+    const langMatch = line.match(/LANGUAGE="([^"]+)"/i)
+    const nameMatch = line.match(/NAME="([^"]+)"/i)
+    const code = normalizeAudioLang(langMatch?.[1] ?? nameMatch?.[1] ?? '')
+    if (code && code.length === 2 && !langs.includes(code)) langs.push(code)
+  }
+  return langs
+}
+
+async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[] }> {
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
-    if (isDirect) return 1080 // direct files are assumed to be high resolution
+    if (isDirect) return { resolution: 1080, audioLangs: [] } // direct files are assumed to be high resolution
 
     const proxyUrl = toProxyUrl(url)
     const response = await fetchNode(proxyUrl, {
@@ -895,26 +1032,28 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
 
     if (response.status < 200 || response.status >= 300) {
       logExtraction(`getMaxResolution got non-ok status ${response.status} for ${url}`)
-      return 720 // fallback if resolution check fails
+      return { resolution: 720, audioLangs: [] } // fallback if resolution check fails
     }
     const text = response.buffer.toString('utf8')
 
     if (text.includes('<html') || text.includes('<!DOCTYPE html')) {
       logExtraction(`getMaxResolution got HTML page instead of playlist for ${url}`)
-      return 0 // Invalid stream
+      return { resolution: 0, audioLangs: [] } // Invalid stream
     }
 
     if (!text.includes('#EXTM3U')) {
-      return 1080 // Assume direct stream (like mp4)
+      return { resolution: 1080, audioLangs: [] } // Assume direct stream (like mp4)
     }
 
+    const audioLangs = parseAudioLangs(text)
+
     if (text.includes('#EXT-X-MEDIA-SEQUENCE') || text.includes('#EXTINF')) {
-      return 1080 // It's a media playlist (direct quality), assume 1080p
+      return { resolution: 1080, audioLangs } // It's a media playlist (direct quality), assume 1080p
     }
 
     const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
     if (matches.length === 0) {
-      return 720 // default guess
+      return { resolution: 720, audioLangs } // default guess
     }
 
     const standardHeights = matches.map((m) => {
@@ -923,10 +1062,10 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
       return getStandardHeight(w, h)
     }).filter((h) => !isNaN(h))
 
-    return standardHeights.length > 0 ? Math.max(...standardHeights) : 720
+    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 720, audioLangs }
   } catch (err) {
     logExtraction(`Failed to check resolution for ${url}: ${err}`)
-    return 720 // default fallback
+    return { resolution: 720, audioLangs: [] } // default fallback
   }
 }
 
@@ -1057,10 +1196,22 @@ export function registerProvidersIpc(): void {
   })
 
   // Try all enabled providers with staggered parallel racing.
-  // Returns the best result immediately AND collects ALL successful results into
-  // `allStreams` so the renderer can offer instant source switching without re-extraction.
-  ipcMain.handle('providers:getFirstStream', async (_e, req: StreamRequest): Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null> => {
-    logExtraction(`--- New Stream Search Request: ${req.title} (${req.type === 'tv' ? `S${req.season}E${req.episode}` : 'Movie'}) | IMDB: ${req.imdbId} | TMDB: ${req.tmdbId} ---`)
+  //
+  // SPEED: the caller (the "Finding Best Stream" overlay) is resolved the INSTANT an
+  // acceptable stream is chosen — it does NOT wait for the full set of alternatives to be
+  // collected. Previously this handler blocked for an extra 8s "collect" window (plus up to
+  // a 5s quality-wait) AFTER a stream was already found, which is what made playback feel
+  // like it took 30s+ to start. Now:
+  //   1. ≥1080p  → resolve the caller immediately (best possible quality).
+  //   2. ≥720p   → acceptable; resolve after a short quality-wait so a 1080p that's about to
+  //                finish can still win, but we never sit idle for long.
+  //   3. <720p   → kept only as a last resort; we keep waiting for a ≥720p stream and only
+  //                fall back to sub-720p if nothing better arrives (quality MUST be 720p/1080p).
+  // After the caller is resolved we keep the remaining workers running in the BACKGROUND to
+  // gather alternative sources for the source-switcher / auto-fallback, and push the full
+  // list to the renderer via the `providers:streamsCollected` event (correlated by searchId).
+  ipcMain.handle('providers:getFirstStream', async (e, req: StreamRequest, searchId?: string): Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null> => {
+    logExtraction(`--- New Stream Search Request: ${req.title} (${req.type === 'tv' ? `S${req.season}E${req.episode}` : 'Movie'}) | IMDB: ${req.imdbId} | TMDB: ${req.tmdbId} | searchId: ${searchId ?? 'none'} ---`)
     const enabled = getEnabledProviders()
     if (enabled.length === 0) {
       logExtraction('WARNING: No providers are enabled in settings')
@@ -1073,9 +1224,16 @@ export function registerProvidersIpc(): void {
       setMaxListeners(30, signal)
     } catch { /* ignore */ }
 
+    // Quality floor the user requires. A stream below this is only ever used as a last
+    // resort (when no ≥720p stream is found by any provider).
+    const ACCEPTABLE_RES = 720
+    // How long to keep waiting for a 1080p after an acceptable (≥720p) stream is in hand.
+    const QUALITY_WAIT_MS = 3500
+    // How long to keep collecting alternatives in the background after the caller resolves.
+    const COLLECT_WINDOW_MS = 6000
+
     let bestResult: ProviderResult | null = null
     let bestResolution = 0
-    let fallbackTimer: NodeJS.Timeout | null = null
     const collectedStreams: ProviderResult[] = []
 
     const batchSize = 4
@@ -1085,50 +1243,60 @@ export function registerProvidersIpc(): void {
     return new Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null>((resolve) => {
       let activeWorkers = 0
       let totalStarted = 0
-      let resolved = false
+      let callerResolved = false
+      let collectionDone = false
       const timers: NodeJS.Timeout[] = []
+      let qualityWaitTimer: NodeJS.Timeout | null = null
+      let collectWindowTimer: NodeJS.Timeout | null = null
 
-      // After the best stream is picked (resolved=true), we keep collecting additional
-      // results for up to 8 more seconds so the player has alternatives to offer.
-      let collectTimer: NodeJS.Timeout | null = null
-      let collectDone = false
-      let finalResolve: ((val: (ProviderResult & { allStreams?: ProviderResult[] }) | null) => void) | null = null
-
+      // Push the full collected source list to the renderer so the source-switcher /
+      // auto-fallback get every working mirror, then tear the race down. Safe to call
+      // multiple times — guarded by collectionDone.
       const finishCollecting = () => {
-        if (collectDone) return
-        collectDone = true
-        if (collectTimer) clearTimeout(collectTimer)
-        controller.abort()
+        if (collectionDone) return
+        collectionDone = true
+        if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
+        if (collectWindowTimer) clearTimeout(collectWindowTimer)
         timers.forEach(clearTimeout)
-
-        // Build the final result with all collected streams
-        if (bestResult && finalResolve) {
-          logExtraction(`COLLECTION DONE: ${collectedStreams.length} total streams collected`)
-          const result = { ...bestResult, allStreams: collectedStreams }
-          finalResolve(result)
+        controller.abort()
+        logExtraction(`COLLECTION DONE: ${collectedStreams.length} total streams collected`)
+        if (searchId && callerResolved) {
+          try {
+            e.sender.send('providers:streamsCollected', { searchId, allStreams: collectedStreams })
+          } catch { /* webContents may be gone */ }
         }
+      }
+
+      // Hand the chosen stream back to the caller right away, then keep collecting
+      // alternatives in the background for a short window.
+      const resolveCaller = () => {
+        if (callerResolved || !bestResult) return
+        callerResolved = true
+        if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
+        logExtraction(`RESOLVING CALLER NOW with ${bestResolution}p (${collectedStreams.length} stream(s) so far) — collecting alternatives in background`)
+        resolve({ ...bestResult, allStreams: collectedStreams })
+        // Keep gathering more mirrors briefly so source-switching/fallback has options.
+        collectWindowTimer = setTimeout(finishCollecting, COLLECT_WINDOW_MS)
       }
 
       const checkFinish = () => {
         if (activeWorkers === 0 && totalStarted === enabled.length) {
-          if (!resolved) {
-            // No stream found at all
-            if (fallbackTimer) clearTimeout(fallbackTimer)
+          if (!callerResolved) {
+            // Every provider finished. Use whatever we found — even sub-720p as a last
+            // resort — rather than failing outright.
             if (bestResult) {
               logExtraction(`RACING FINISHED: Returning best stream found (${bestResolution}p)`)
-              resolved = true
-              const result = { ...bestResult, allStreams: collectedStreams }
-              controller.abort()
-              timers.forEach(clearTimeout)
-              resolve(result)
+              resolveCaller()
             } else {
               logExtraction('SEARCH FINISHED: No streams found from any of the enabled providers.')
+              collectionDone = true
+              timers.forEach(clearTimeout)
+              controller.abort()
               resolve(null)
             }
-          } else {
-            // All workers done — no need to wait for the collect timer
-            finishCollecting()
           }
+          // All workers done — no need to wait out the background collect window.
+          finishCollecting()
         }
       }
 
@@ -1164,56 +1332,55 @@ export function registerProvidersIpc(): void {
             // Auto-register headers BEFORE checking resolution so the proxy can use them
             autoRegisterHeaders(result.url, result.headers, provider.sessionName)
 
-            // Check resolution of the found stream
-            const resolution = await getMaxResolution(result.url, result.headers)
-            logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
+            // Check resolution + alternate audio (dub) languages of the found stream
+            const { resolution, audioLangs } = await getMaxResolution(result.url, result.headers)
+            logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | Audio: [${audioLangs.join(',')}] | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
 
             const currentResult: ProviderResult = {
               providerId: provider.id,
               providerName: provider.name,
-              streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers }],
+              streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers, audioLangs }],
             }
 
             // Always collect this stream for the source switcher
             collectedStreams.push(currentResult)
 
-            if (!resolved) {
-              if (resolution >= 1080) {
-                logExtraction(`PERFECT STREAM (${resolution}p) found by ${provider.name}. Picking as best.`)
-                bestResolution = resolution
-                bestResult = currentResult
-                resolved = true
-                if (fallbackTimer) clearTimeout(fallbackTimer)
+            // Track the best stream regardless of whether the caller has resolved (a better
+            // mirror found during the background window is still worth surfacing first).
+            if (resolution > bestResolution) {
+              bestResolution = resolution
+              bestResult = currentResult
+            }
 
-                // Don't resolve yet — start a timer to collect more streams
-                finalResolve = resolve
-                collectTimer = setTimeout(finishCollecting, 8000)
-              } else if (resolution > bestResolution) {
-                bestResolution = resolution
-                bestResult = currentResult
-                logExtraction(`New best stream found (${resolution}p) from ${provider.name}`)
-                
-                // Start a fallback timer so we don't wait forever if a 1080p stream doesn't arrive
-                if (!fallbackTimer) {
-                  logExtraction('Starting 5.0s quality-wait timer in case a 1080p stream finishes...')
-                  fallbackTimer = setTimeout(() => {
-                    if (!resolved && bestResult) {
-                      logExtraction(`Quality-wait timer expired. Returning best stream found (${bestResolution}p)`)
-                      resolved = true
-                      finalResolve = resolve
-                      collectTimer = setTimeout(finishCollecting, 8000)
+            if (!callerResolved) {
+              if (resolution >= 1080) {
+                // Best possible quality — hand it over immediately, no waiting.
+                logExtraction(`PERFECT STREAM (${resolution}p) found by ${provider.name}. Resolving immediately.`)
+                resolveCaller()
+              } else if (resolution >= ACCEPTABLE_RES) {
+                // Good enough (≥720p). Give a 1080p a brief chance to finish, then resolve.
+                if (!qualityWaitTimer) {
+                  logExtraction(`Acceptable ${resolution}p stream in hand — ${QUALITY_WAIT_MS}ms quality-wait for a 1080p…`)
+                  qualityWaitTimer = setTimeout(() => {
+                    if (!callerResolved && bestResult) {
+                      logExtraction(`Quality-wait expired. Returning best stream found (${bestResolution}p)`)
+                      resolveCaller()
                     }
-                  }, 5000)
+                  }, QUALITY_WAIT_MS)
                 }
+              } else {
+                // Below the 720p floor — keep it only as a last resort and keep racing for
+                // a ≥720p stream. checkFinish() will fall back to it if nothing better lands.
+                logExtraction(`Sub-720p stream (${resolution}p) from ${provider.name} held as last resort — still seeking ≥720p`)
               }
             }
           } else {
-            if (!resolved) {
+            if (!callerResolved) {
               logExtraction(`FAIL: ${provider.name} returned no stream in ${duration}ms.`)
             }
           }
         } catch (err) {
-          if (!resolved) {
+          if (!callerResolved) {
             logExtraction(`ERROR: ${provider.name} failed with error: ${String(err)}`)
           }
         } finally {
@@ -1224,19 +1391,19 @@ export function registerProvidersIpc(): void {
 
       // Absolute safety net: never let a hung worker (a stuck resolution probe,
       // unresponsive socket, etc.) keep the caller spinning forever. When this fires
-      // we resolve with the best stream found so far — or null — and abort the rest.
+      // we resolve with the best stream found so far — or null — and tear the race down.
       const HARD_CAP_MS = 40000
       const hardTimer = setTimeout(() => {
-        if (collectDone) return
-        if (resolved && bestResult) { finishCollecting(); return }
-        logExtraction(`HARD TIMEOUT after ${HARD_CAP_MS}ms — resolving with best-so-far (${bestResult ? bestResolution + 'p' : 'none'})`)
-        resolved = true
-        collectDone = true
-        controller.abort()
-        timers.forEach(clearTimeout)
-        if (collectTimer) clearTimeout(collectTimer)
-        if (fallbackTimer) clearTimeout(fallbackTimer)
-        resolve(bestResult ? { ...bestResult, allStreams: collectedStreams } : null)
+        if (collectionDone) return
+        if (!callerResolved) {
+          logExtraction(`HARD TIMEOUT after ${HARD_CAP_MS}ms — resolving with best-so-far (${bestResult ? bestResolution + 'p' : 'none'})`)
+          if (bestResult) {
+            resolveCaller()
+          } else {
+            resolve(null)
+          }
+        }
+        finishCollecting()
       }, HARD_CAP_MS)
       timers.push(hardTimer)
 

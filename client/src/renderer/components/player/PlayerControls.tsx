@@ -10,18 +10,17 @@ const VISIBLE_QUALITY_HEIGHTS = [720, 1080] as const
 
 type MenuView = 'home' | 'source' | 'subtitles' | 'quality' | 'audio'
 
-// Shape of a selectable audio track. SCAFFOLD ONLY — no real tracks are wired yet.
-// When HLS audio rendition support lands, the parent will map hls.js `audioTracks`
-// into this structure (id = hls audio track index, lang = BCP-47 / ISO code) and pass
-// them in via the `audioTracks` prop; the menu below already renders whatever it's given.
+// A selectable audio track. The parent (VideoPlayer) maps hls.js `audioTracks` into this
+// shape — id = hls audio-track index, lang = BCP-47 / ISO code — and passes them via the
+// `audioTracks` prop. The menu renders whatever it's given.
 export interface AudioTrackOption {
   id: number
   name: string
   lang: string
 }
 
-// Placeholder until real localization tracks are populated. Intentionally empty so the
-// Audio menu shows its "no extra tracks" state rather than fake languages.
+// Default when a stream has no alternate audio tracks: empty, so the Audio menu shows its
+// "no additional audio tracks" state with only the stream's original audio selectable.
 const AUDIO_TRACKS_PLACEHOLDER: AudioTrackOption[] = []
 
 interface Props {
@@ -53,6 +52,8 @@ interface Props {
   creditsStartSecs: number | null
   sources?: Array<{ id: string; name: string; enabled: boolean }>
   availableSourceIds?: string[]
+  /** providerId → available audio dub languages (2-letter codes), for the source switcher. */
+  audioLangsBySource?: Record<string, string[]>
   activeSourceId?: string | null
   onSourceChange?: (id: string) => void
   switchingSource?: boolean
@@ -67,8 +68,15 @@ interface Props {
   currentAudioTrack?: number
   /** Switch to the given audio track id. */
   onAudioTrackChange?: (id: number) => void
+  /** Dub languages available on OTHER collected sources (current source doesn't carry them). */
+  crossSourceAudio?: Array<{ lang: string; label: string; sourceId: string; sourceName: string }>
+  /** Switch to the source that carries `lang` and auto-select that dub. */
+  onCrossSourceAudio?: (lang: string, sourceId: string) => void
   /** Minimise the player into Picture-in-Picture. Hidden when not provided. */
   onPip?: () => void
+  /** Bumped by the parent to force the settings panel open (home view). Used by the Stream-Error
+   *  "Choose another source" flow so the user lands back in the player with the menu open. */
+  openSettingsSignal?: number
 }
 
 function formatTime(secs: number): string {
@@ -91,10 +99,11 @@ export function PlayerControls({
   onPlayPause, onMute, onVolumeChange, onSeek, onLevelChange, onSubtitleChange, onSubtitleSizeChange, onSubtitleOffsetChange,
   onAutoSync, autoSyncState = 'idle',
   onFullscreen, introEndSecs, creditsStartSecs,
-  sources = [], availableSourceIds, activeSourceId = null, onSourceChange, switchingSource = false,
+  sources = [], availableSourceIds, audioLangsBySource, activeSourceId = null, onSourceChange, switchingSource = false,
   nextEpisode = null, onNextEpisode,
   audioTracks = AUDIO_TRACKS_PLACEHOLDER, currentAudioTrack = -1, onAudioTrackChange,
-  onPip,
+  crossSourceAudio = [], onCrossSourceAudio,
+  onPip, openSettingsSignal = 0,
 }: Props) {
   // One gear button opens a single settings panel. It uses a drill-down layout
   // (home list → category) like mainstream players, instead of dumping every option
@@ -119,6 +128,12 @@ export function PlayerControls({
     if (!wasPlayingRef.current && isPlaying) closeSettings()
     wasPlayingRef.current = isPlaying
   }, [isPlaying, closeSettings])
+
+  // Parent asked us to open the settings panel (e.g. the Stream-Error "Choose another source"
+  // button). Skip the initial 0 so the menu doesn't pop open on every fresh mount.
+  useEffect(() => {
+    if (openSettingsSignal > 0) { setShowSettings(true); setMenuView('home') }
+  }, [openSettingsSignal])
 
   const handleSeekClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -336,6 +351,13 @@ export function PlayerControls({
                             <span className="flex items-center gap-2 min-w-0">
                               <span className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex-shrink-0">A</span>
                               <span className="truncate">{s.name}</span>
+                              {(audioLangsBySource?.[s.id]?.length ?? 0) >= 2 && (
+                                <span className="flex items-center gap-0.5 flex-shrink-0" title="Audio dub languages">
+                                  {audioLangsBySource![s.id]!.slice(0, 5).map((lang) => (
+                                    <span key={lang} className="inline-flex items-center justify-center px-1 h-3.5 rounded-sm text-[8px] font-bold uppercase bg-sky-500/15 text-sky-300 border border-sky-500/25">{lang}</span>
+                                  ))}
+                                </span>
+                              )}
                             </span>
                             {activeSourceId === s.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
                           </button>
@@ -470,23 +492,44 @@ export function PlayerControls({
                     {menuView === 'audio' && (
                       <div>
                         <BackHeader title="Audio" />
-                        {/* The stream's default/original audio is always selectable. */}
-                        <button
-                          onClick={() => { onAudioTrackChange?.(-1); setMenuView('home') }}
-                          className={optionClass(currentAudioTrack < 0)}
-                        >
-                          <span>Original</span>
-                          {currentAudioTrack < 0 && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
-                        </button>
-                        {/* Future localization tracks render here once populated. */}
-                        {audioTracks.map((t) => (
-                          <button key={t.id} onClick={() => { onAudioTrackChange?.(t.id); setMenuView('home') }} className={optionClass(currentAudioTrack === t.id)}>
-                            <span className="truncate pr-2">{t.name}</span>
-                            {currentAudioTrack === t.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
+                        {audioTracks.length > 0 ? (
+                          // Multi-track manifest: one rendition is always active, so list the
+                          // real tracks (no separate "Original" pseudo-option to confuse things).
+                          audioTracks.map((t) => (
+                            <button key={t.id} onClick={() => { onAudioTrackChange?.(t.id); setMenuView('home') }} className={optionClass(currentAudioTrack === t.id)}>
+                              <span className="truncate pr-2">{t.name}</span>
+                              {currentAudioTrack === t.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
+                            </button>
+                          ))
+                        ) : (
+                          // Single-audio current source: only its original track is selectable here.
+                          <button onClick={() => setMenuView('home')} className={optionClass(true)}>
+                            <span>Original</span>
+                            <span className="text-violet-400 text-[10px] font-bold">✓</span>
                           </button>
-                        ))}
-                        {audioTracks.length === 0 && (
-                          <div className="px-3 py-3 text-[11px] text-white/40 italic text-center">
+                        )}
+
+                        {/* Dubs that live on OTHER providers — picking one switches source and
+                            auto-selects that language (we can't merge audio across providers). */}
+                        {crossSourceAudio.length > 0 && (
+                          <>
+                            <div className="border-t border-white/8 my-1" />
+                            <p className="px-3 pt-1 pb-1 text-[10px] text-white/40 uppercase tracking-wider font-semibold">More languages · other sources</p>
+                            {crossSourceAudio.map((c) => (
+                              <button
+                                key={`${c.sourceId}:${c.lang}`}
+                                onClick={() => { onCrossSourceAudio?.(c.lang, c.sourceId); setMenuView('home') }}
+                                className="w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition-colors hover:bg-white/5 text-white/70 hover:text-white"
+                              >
+                                <span className="truncate pr-2">{c.label}</span>
+                                <span className="text-[9px] text-sky-300/70 flex-shrink-0">{c.sourceName}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+
+                        {audioTracks.length === 0 && crossSourceAudio.length === 0 && (
+                          <div className="px-3 py-2 text-[11px] text-white/40 italic text-center">
                             No additional audio tracks for this title
                           </div>
                         )}

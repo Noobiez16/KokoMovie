@@ -103,12 +103,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listProviders: () => ipcRenderer.invoke('providers:list'),
   toggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('providers:toggle', id, enabled),
   getStream: (providerId: string, req: {
-    imdbId?: string; tmdbId?: number; type: 'movie' | 'tv'; season?: number; episode?: number; title?: string
+    imdbId?: string; tmdbId?: number; type: 'movie' | 'tv'; season?: number; episode?: number; title?: string; audioLang?: string
   }) => ipcRenderer.invoke('providers:getStream', providerId, req),
   getFirstStream: (req: {
-    imdbId?: string; tmdbId?: number; type: 'movie' | 'tv'; season?: number; episode?: number; title?: string
-  }) => ipcRenderer.invoke('providers:getFirstStream', req),
+    imdbId?: string; tmdbId?: number; type: 'movie' | 'tv'; season?: number; episode?: number; title?: string; audioLang?: string
+  }, searchId?: string) => ipcRenderer.invoke('providers:getFirstStream', req, searchId),
+  // Background-collected alternative sources for a getFirstStream call, correlated by
+  // searchId. Fires after the caller has already received the first playable stream so
+  // playback can start fast while the source-switcher fills in.
+  onStreamsCollected: (
+    callback: (payload: { searchId: string; allStreams: unknown[] }) => void
+  ) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      payload: { searchId: string; allStreams: unknown[] }
+    ) => callback(payload)
+    ipcRenderer.on('providers:streamsCollected', handler)
+    return () => ipcRenderer.removeListener('providers:streamsCollected', handler)
+  },
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) =>
     ipcRenderer.invoke('providers:registerStreamHeaders', streamUrl, headers),
   getProxyPort: () => ipcRenderer.invoke('providers:getProxyPort'),
+
+  // ─── Built-in P2P torrent streaming (free dub sourcing, e.g. Spanish/Latino) ──
+  // Discovery returns selectable sources whose URL is a magnet; the renderer resolves it to a
+  // localhost, Chromium-playable MP4 URL on demand when the user actually picks the source.
+  torrentGetStreams: (req: {
+    imdbId?: string; tmdbId?: number; type: 'movie' | 'tv'; season?: number; episode?: number; title?: string
+  }) => ipcRenderer.invoke('torrent:get-streams', req),
+  torrentResolve: (magnet: string, audioLang?: string) => ipcRenderer.invoke('torrent:resolve', magnet, audioLang),
 })

@@ -21,6 +21,7 @@ asarUnpack:
   - "**/*.node"
   - node_modules/better-sqlite3/**/*
   - node_modules/keytar/**/*
+  - node_modules/ffmpeg-static/**/*
 compression: maximum
 
 # ─── Windows ──────────────────────────────────────────────────────────────────

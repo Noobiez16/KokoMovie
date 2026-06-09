@@ -4,9 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { catalogApi, type Episode } from '../../api/catalog'
 import { playbackApi, type PlaybackSession } from '../../api/playback'
 import { downloadsApi } from '../../api/downloads'
-import { providersApi } from '../../api/providers'
+import { providersApi, torrentApi } from '../../api/providers'
 import { useAuthStore } from '../../store/auth'
-import { usePlayerStore } from '../../store/player'
+import { usePlayerStore, type CachedStream } from '../../store/player'
 import { LOCAL_PROFILE_ID } from '../../lib/local-identity'
 
 // Lazy-load the heavy player (pulls in hls.js, ~570 kB). PlayerHost is always mounted at
@@ -100,6 +100,64 @@ export function PlayerHost() {
   // Revoke the offline blob URL when it changes / on teardown.
   useEffect(() => () => { if (offlineManifestUrl) URL.revokeObjectURL(offlineManifestUrl) }, [offlineManifestUrl])
 
+  // Merge background-collected alternative sources into the active request. The provider
+  // race resolves the FIRST playable stream immediately (fast start) and finishes gathering
+  // the other mirrors a few seconds later — this folds them in, correlated by searchId, so
+  // the source-switcher / auto-fallback get every working mirror. Patching `allStreams` does
+  // NOT remount the <video> (it isn't a session/HLS-init dependency — see DN-039).
+  useEffect(() => {
+    const unsub = providersApi.onStreamsCollected(({ searchId, allStreams }) => {
+      const cur = usePlayerStore.getState().request
+      if (!cur?.searchId || cur.searchId !== searchId) return
+      if (!Array.isArray(allStreams) || allStreams.length === 0) return
+      // Preserve any already-merged P2P torrent sources (id 'p2p-*') so the embed list arriving
+      // here doesn't wipe them — torrent discovery runs on its own (slower) timeline.
+      const existing = cur.allStreams ?? []
+      const ids = new Set(allStreams.map((s) => (s as { providerId: string }).providerId))
+      const torrentKept = existing.filter((s) => s.providerId.startsWith('p2p-') && !ids.has(s.providerId))
+      usePlayerStore.getState().patchRequest({ allStreams: [...allStreams, ...torrentKept] as unknown as CachedStream[] })
+    })
+    return unsub
+  }, [])
+
+  // Free P2P torrent-sourced dubs (e.g. Spanish/Latino). Runs in the background once a title
+  // launches; discovers dubbed releases via Torrentio and folds them into allStreams as
+  // selectable sources (each resolved to a playable URL on demand when picked — see
+  // VideoPlayer). No-op when there's no IMDB id, or for offline/direct playback.
+  useEffect(() => {
+    if (!sortedContent) return
+    const imdbId = sortedContent.imdbId ?? undefined
+    const tmdbId = sortedContent.tmdbId ?? undefined
+    if (!imdbId && !tmdbId) return
+    let cancelled = false
+
+    let season: number | undefined
+    if (episodeId) {
+      for (const s of sortedContent.seasons) if (s.episodes.some((e) => e.id === episodeId)) { season = s.seasonNumber; break }
+    }
+    const ep = episodeId ? sortedContent.seasons.flatMap((s) => s.episodes).find((e) => e.id === episodeId) : null
+
+    const req: StreamRequest = {
+      imdbId, tmdbId,
+      type: sortedContent.type === 'series' ? 'tv' : 'movie',
+      title: sortedContent.title,
+      ...(season !== undefined && ep ? { season, episode: ep.episodeNumber } : {}),
+    }
+
+    torrentApi.getStreams(req).then((tor) => {
+      if (cancelled || !Array.isArray(tor) || tor.length === 0) return
+      const cur = usePlayerStore.getState().request
+      if (!cur) return
+      const existing = cur.allStreams ?? []
+      const ids = new Set(existing.map((s) => s.providerId))
+      const merged = [...existing, ...tor.filter((r) => !ids.has(r.providerId))]
+      usePlayerStore.getState().patchRequest({ allStreams: merged as unknown as CachedStream[] })
+    }).catch(() => { /* torrent discovery is best-effort */ })
+
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedContent?.id, episodeId, launchToken])
+
   // Build a playback session for the active request. Re-runs on a fresh launch (launchToken),
   // an episode change, or a new stream URL (next-episode / source switch via patchRequest).
   useEffect(() => {
@@ -158,9 +216,10 @@ export function PlayerHost() {
 
     setNextEpisodeLoading(true)
     setSessionError(null)
+    const searchId = crypto.randomUUID()
     try {
       const result = await Promise.race([
-        providersApi.getFirstStream(req),
+        providersApi.getFirstStream(req, searchId),
         new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 50000)),
       ])
       if (result && result.streams.length > 0) {
@@ -172,6 +231,7 @@ export function PlayerHost() {
           allStreams: result.allStreams || [],
           resumeAtSeconds: 0,
           offlineId: undefined,
+          searchId,
         })
       } else {
         setSessionError('No working stream found for the next episode.')

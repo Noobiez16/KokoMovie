@@ -31,3 +31,4 @@ infra/.terraform.lock.hcl
 
 # Unnecessary Files
 AGENTS.md
+CONTEXT.md

@@ -47,7 +47,7 @@ export function BrowsePage() {
   })
 
   const { data: cwData } = useQuery({
-    queryKey: ['continue-watching', profileId],
+    queryKey: ['continue-watching', profileId, tmdbApiKey],
     queryFn: () => playbackApi.getContinueWatching(profileId),
     refetchOnWindowFocus: 'always',
     enabled: !genre,
@@ -58,19 +58,20 @@ export function BrowsePage() {
   // Remove a title from Continue Watching: drop it from the UI immediately (optimistic), then
   // cascade-delete its in-progress records so it also leaves Viewing History's In-Progress.
   const handleRemoveFromHistory = useCallback(async (mediaId: string) => {
-    const key = ['continue-watching', profileId]
+    const key = ['continue-watching', profileId, tmdbApiKey]
     const previous = queryClient.getQueryData(key)
     queryClient.setQueryData(key, (old: any) =>
       old?.data ? { ...old, data: old.data.filter((i: { contentId: string }) => i.contentId !== mediaId) } : old,
     )
     try {
       await playbackApi.removeFromContinueWatching(mediaId, profileId)
+      queryClient.invalidateQueries({ queryKey: ['continue-watching', profileId] })
       queryClient.invalidateQueries({ queryKey: ['history'] })
     } catch {
       // Restore the row if the deletion failed.
       if (previous !== undefined) queryClient.setQueryData(key, previous)
     }
-  }, [queryClient, profileId])
+  }, [queryClient, profileId, tmdbApiKey])
 
   if (genre) {
     if (isGenreLoading) {

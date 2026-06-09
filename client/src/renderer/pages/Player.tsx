@@ -24,6 +24,7 @@ export function PlayerPage() {
       providerId?: string
       allStreams?: CachedStream[]
       resumeAtSeconds?: number
+      searchId?: string
     } | null
     const offlineId = new URLSearchParams(location.search).get('offline') || undefined
 
@@ -45,6 +46,7 @@ export function PlayerPage() {
       allStreams: state?.allStreams,
       resumeAtSeconds: state?.resumeAtSeconds,
       offlineId,
+      searchId: state?.searchId,
     })
   // location.key changes on every navigation, so re-entering /player always re-syncs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
