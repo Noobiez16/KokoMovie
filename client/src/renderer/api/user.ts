@@ -195,7 +195,7 @@ export const userApi = {
   ): Promise<{ success: true; data: { uploadUrl: string; cdnUrl: string; s3Key: string; expiresIn: number } }> => {
     throw new Error('Avatar upload is not available in the local build')
   },
-  confirmAvatar: async (_cdnUrl: string, _profileId?: string) => ({ success: true as const, data: { avatarUrl: '' } }),
+  confirmAvatar: async (avatarUrl: string, _profileId?: string) => ({ success: true as const, data: { avatarUrl } }),
   exportData: async () => {
     const [watchlist, history, preferences] = await Promise.all([
       api().watchlistList(),

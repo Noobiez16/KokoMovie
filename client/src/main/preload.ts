@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listDownloads: () => ipcRenderer.invoke('download:list'),
   getOfflineManifest: (id: string) => ipcRenderer.invoke('download:get-manifest', id),
   selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
+  openDownloadFolder: (id?: string) => ipcRenderer.invoke('download:open-folder', id),
   getDefaultDownloadsDir: () => ipcRenderer.invoke('download:get-default-dir'),
   onDownloadProgress: (
     callback: (progress: {
@@ -38,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       status?: string
       completedSegments?: number
       totalSegments?: number
+      downloadedBytes?: number
+      totalBytes?: number
       errorMessage?: string
     }) => void
   ) => {
@@ -49,6 +52,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         status?: string
         completedSegments?: number
         totalSegments?: number
+        downloadedBytes?: number
+        totalBytes?: number
         errorMessage?: string
       }
     ) => callback(progress)
@@ -73,6 +78,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAutoUpdateEnabled: () => ipcRenderer.invoke('app:get-auto-update'),
   setAutoUpdateEnabled: (enabled: boolean) => ipcRenderer.invoke('app:set-auto-update', enabled),
   checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
+  setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) =>
+    ipcRenderer.invoke('discord:set-activity', activity),
 
   // ─── Deep-link OAuth callback ─────────────────────────────────────────────
   onOAuthCallback: (callback: (url: string) => void) => {

@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.1.6-beta (Fully Local Architecture)  
-**Date:** June 2026  
+**Version:** 1.2.0 (Fully Local Architecture)
+**Date:** July 2026
 **Status:** Current
 
 ---
@@ -225,7 +225,8 @@ CREATE TABLE preferences (
 - **Context Isolation**: Enabled in all windows. Renderer processes communicate only through whitelisted IPC channels in the preload script.
 - **Keychain Storage**: API keys are saved in the OS keychain via `keytar` to prevent raw exposure on disk or in standard localStorage.
 - **Local SQLite DB**: The SQLite file lives in the system's protected user data folders.
-- **Offline AES-256-GCM**: Downloaded segments are encrypted on-the-fly using AES-256-GCM keys dynamically derived from a device hardware fingerprint, preventing unauthorized sharing or raw file access.
+- **Portable Offline MP4**: Provider segments are protected only while the download is in progress. After transfer, bundled FFmpeg remuxes video and audio without re-encoding into one standard MP4 in the selected Downloads folder; temporary encrypted segments are removed after successful finalization.
+- **Torrent Dub Downloads**: Movie and individual-episode download pickers expand compatible 1080p torrent releases into explicit English, Spanish, French, and Russian choices. `torrent:resolve` prebuffers the selected release and forces an FFmpeg remux whenever a language is requested—even for an MP4/WebM source—so the chosen dub becomes the first/default audio track before the regular downloader finalizes the file.
 
 ---
 

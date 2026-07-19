@@ -178,14 +178,22 @@ export function AppLayout({ children, transparentNav = false }: Props) {
                 className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-white/5 transition-all group"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white flex-shrink-0 shadow-md"
-                    style={{
-                      background: `linear-gradient(135deg, hsl(${activeProfile.name.charCodeAt(0) * 20}, 70%, 50%), hsl(${activeProfile.name.charCodeAt(0) * 20 + 40}, 70%, 40%))`
-                    }}
-                  >
-                    {activeProfile.name[0]?.toUpperCase()}
-                  </div>
+                  {activeProfile.avatarUrl ? (
+                    <img
+                      src={activeProfile.avatarUrl}
+                      alt={activeProfile.name}
+                      className="w-8 h-8 rounded-lg object-cover flex-shrink-0 shadow-md"
+                    />
+                  ) : (
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white flex-shrink-0 shadow-md"
+                      style={{
+                        background: `linear-gradient(135deg, hsl(${activeProfile.name.charCodeAt(0) * 20}, 70%, 50%), hsl(${activeProfile.name.charCodeAt(0) * 20 + 40}, 70%, 40%))`
+                      }}
+                    >
+                      {activeProfile.name[0]?.toUpperCase()}
+                    </div>
+                  )}
                   <div className="text-left min-w-0">
                     <p className="text-white text-xs font-semibold truncate leading-none">{activeProfile.name}</p>
                     <p className="text-[10px] text-purple-300/50 mt-1 leading-none">

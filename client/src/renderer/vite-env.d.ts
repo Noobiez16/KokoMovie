@@ -29,6 +29,7 @@ interface ElectronAPI {
   listDownloads: () => Promise<unknown[]>
   getOfflineManifest: (id: string) => Promise<{ manifestContent: string; drmKeyId: string | null } | null>
   selectDirectory: () => Promise<string | null>
+  openDownloadFolder: (id?: string) => Promise<{ ok: boolean; error?: string }>
   getDefaultDownloadsDir: () => Promise<string>
   onDownloadProgress: (
     callback: (progress: {
@@ -37,6 +38,8 @@ interface ElectronAPI {
       status?: 'pending' | 'downloading' | 'completed' | 'cancelled' | 'error'
       completedSegments?: number
       totalSegments?: number
+      downloadedBytes?: number
+      totalBytes?: number
       errorMessage?: string
     }) => void,
   ) => () => void
@@ -50,6 +53,7 @@ interface ElectronAPI {
   getAutoUpdateEnabled: () => Promise<boolean>
   setAutoUpdateEnabled: (enabled: boolean) => Promise<boolean>
   checkForUpdates: () => Promise<{ status: 'available' | 'not-available' | 'error' | 'dev'; version?: string; message?: string }>
+  setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) => Promise<{ ok: boolean; reason?: string }>
 
   // OAuth
   onOAuthCallback: (callback: (url: string) => void) => () => void

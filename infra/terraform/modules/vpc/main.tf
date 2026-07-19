@@ -115,30 +115,24 @@ resource "aws_route_table_association" "private" {
 # tfsec:ignore:aws-ec2-no-public-egress-sgr
 # snyk:ignore:SNYK-CC-TF-70
 # snyk:ignore:SNYK-CC-TF-72
-# snyk:ignore:SNYK-CC-TF-73
-# snyk:ignore:SNYK-CC-00170
-# snyk:ignore:SNYK-CC-00171
-# snyk:ignore:SNYK-CC-00176  -- ALB must accept inbound from internet (public load balancer by design)
 resource "aws_security_group" "alb" {
   name        = "streamflix-${var.environment}-alb"
-  description = "ALB: allow HTTPS inbound from internet (public-facing load balancer)"
+  description = "Internal ALB: allow web traffic only from within the VPC"
   vpc_id      = aws_vpc.main.id
 
-  # Intentionally open to 0.0.0.0/0 — this is the public entry point for the hosted backend.
-  # Restricting to specific CIDRs is not feasible for a consumer-facing service.
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTPS inbound from internet (public-facing ALB)"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Allow HTTPS from within the VPC"
   }
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP redirect to HTTPS (public-facing ALB)"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Allow HTTP redirect traffic from within the VPC"
   }
   egress {
     from_port   = 0

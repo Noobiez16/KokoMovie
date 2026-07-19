@@ -20,6 +20,13 @@ const STATUS_COLOR: Record<string, string> = {
   error: 'text-red-400',
 }
 
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return "0.00 MB"
+  const unit = bytes >= 1024 ** 3 ? "GB" : "MB"
+  const divisor = unit === "GB" ? 1024 ** 3 : 1024 ** 2
+  return `${(bytes / divisor).toFixed(2)} ${unit}`
+}
+
 function daysUntil(iso: string): number {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / (86400 * 1000))
 }
@@ -33,12 +40,14 @@ export function DownloadsPage() {
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   useEffect(() => {
-    downloadsApi.list().then((list) => {
+    const refresh = () => downloadsApi.list().then((list) => {
       setItems(list)
       setLoading(false)
     })
 
-    const unsub = window.electronAPI?.onDownloadProgress(({ id, percent, status, completedSegments, totalSegments }) => {
+    void refresh()
+    const poll = window.setInterval(() => void refresh(), 1000)
+    const unsub = window.electronAPI?.onDownloadProgress(({ id, percent, status, completedSegments, totalSegments, downloadedBytes, totalBytes }) => {
       setItems((prev) => {
         if (status === 'cancelled') {
           return prev.filter((item) => item.id !== id)
@@ -51,13 +60,18 @@ export function DownloadsPage() {
                 status: status || (percent >= 100 ? 'completed' : 'downloading'),
                 completed_segments: completedSegments ?? item.completed_segments,
                 total_segments: totalSegments ?? item.total_segments,
+                downloaded_bytes: downloadedBytes ?? item.downloaded_bytes,
+                total_bytes: totalBytes ?? item.total_bytes,
               }
             : item,
         )
       })
     })
 
-    return () => unsub?.()
+    return () => {
+      window.clearInterval(poll)
+      unsub?.()
+    }
   }, [])
 
   async function handleDelete(id: string) {
@@ -86,7 +100,10 @@ export function DownloadsPage() {
   return (
     <AppLayout>
       <div className="p-8">
-        <h1 className="text-2xl font-bold text-white mb-6">Downloads</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-white">Downloads</h1>
+          <button onClick={() => downloadsApi.openFolder()} className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors">Open Downloads Folder</button>
+        </div>
 
         {loading && (
           <div className="flex items-center justify-center py-16">
@@ -110,6 +127,7 @@ export function DownloadsPage() {
                 <DownloadCard
                   key={item.id}
                   item={item}
+                  onOpenFolder={() => downloadsApi.openFolder(item.id)}
                   onCancel={() => handleCancel(item.id)}
                 />
               ))}
@@ -125,6 +143,7 @@ export function DownloadsPage() {
                 <DownloadCard
                   key={item.id}
                   item={item}
+                  onOpenFolder={() => downloadsApi.openFolder(item.id)}
                   onPlay={() => handlePlay(item)}
                   onDelete={() => handleDelete(item.id)}
                 />
@@ -141,6 +160,7 @@ export function DownloadsPage() {
                 <DownloadCard
                   key={item.id}
                   item={item}
+                  onOpenFolder={() => downloadsApi.openFolder(item.id)}
                   onDelete={() => handleDelete(item.id)}
                 />
               ))}
@@ -157,11 +177,13 @@ function DownloadCard({
   onPlay,
   onCancel,
   onDelete,
+  onOpenFolder,
 }: {
   item: DownloadItem
   onPlay?: () => void
   onCancel?: () => void
   onDelete?: () => void
+  onOpenFolder?: () => void
 }) {
   const days = daysUntil(item.expires_at)
 
@@ -190,6 +212,7 @@ function DownloadCard({
                   <span>{item.completed_segments}/{item.total_segments}</span>
                 )}
               </div>
+              <p className="text-[10px] text-white/45 mb-1 tabular-nums">{formatBytes(item.downloaded_bytes)} / {item.total_bytes > 0 ? formatBytes(item.total_bytes) : "Calculating…"}</p>
               <div className="h-1 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300"
@@ -216,6 +239,11 @@ function DownloadCard({
                 <path d="M8 5v14l11-7z" />
               </svg>
               Play
+            </button>
+          )}
+          {onOpenFolder && (
+            <button onClick={onOpenFolder} className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95">
+              Folder
             </button>
           )}
           {(item.status === 'pending' || item.status === 'downloading') && onCancel && (

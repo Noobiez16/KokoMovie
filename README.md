@@ -6,7 +6,7 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.1.6--beta-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#-download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#-automatic-updates)
 
@@ -44,7 +44,7 @@ working stream for you automatically — no juggling websites, pop-ups, or sign-
 - ▶️ **One-click play** — KokoMovie finds a working stream and starts playing
 - 📺 **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - 💾 **On-device storage** — watchlists, history, and preferences are stored locally on your machine
-- ⬇️ **Watch offline** — download titles (securely encrypted) for when you're without internet
+- ⬇️ **Watch offline** — save portable 1080p MP4 files, including language-selected torrent dubs, for when you are without internet
 - 🔄 **Always up to date** — the app updates itself in the background
 
 ---

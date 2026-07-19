@@ -6,6 +6,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.0] — 2026-07-18 — Stable Fully Local Release
+
+### Added
+- **Discord Rich Presence**: The Electron main process now connects to Discord desktop through RPC and publishes the active movie or TV episode, using KokoMovie's registered Discord application ID. Presence clears when playback stops and degrades silently when Discord is unavailable.
+- **Default Subtitle Language**: The saved Preferences language code (`en`, `es`, `fr`, ISO 639-2, or BCP-47 variants) now prioritizes the matching internal HLS or external subtitle track when playback begins.
+- **Cancellable Automatic Source Recovery**: When an initial stream fails while background providers are still finishing, the player shows “Finding another working source…” instead of a terminal Stream Error. The user can cancel at any time and choose a provider manually.
+- **Download Provider Selection**: Movie, full-series, and individual-episode downloads now open a source chooser with **Best Stream · 1080p Auto** plus every enabled provider for explicit manual selection. Best Stream reuses the validated quality-aware provider race and the downloader selects the highest 1080p HLS variant available.
+- **Language-Specific Torrent Downloads**: Movie and individual-episode download choosers discover qualified 1080p torrent releases and expose a separate English, Spanish, French, or Russian action for every declared dub. The selected audio language is remuxed as the portable MP4’s primary/default track and appended to its filename (for example, `[ES]`).
+
+### Changed
+- **Stable Release**: KokoMovie leaves beta at version **1.2.0**.
+- **More Reliable Best-Stream Selection**: Every acceptable candidate now receives a short comparison window; the first nominal 1080p response no longer wins immediately. HLS media variants are probed and short restriction/placeholder playlists are rejected before playback.
+- **Private Legacy ALB**: The unused Terraform ALB is internal, placed in private subnets, and permits inbound HTTP/HTTPS only from the VPC CIDR.
+
+### Fixed
+- **Reliable Priority-Language 1080p Torrents**: Torrent discovery exposes compatible 1080p releases with priority tracks ordered English → Spanish → French → Russian and at least five reported seeders. Release-specific trackers are preserved, discovery is cached to prevent 429 bursts, and redundant tracker announcements are capped. Before switching, WebTorrent downloads a contiguous 12 MiB startup buffer with sequential piece priority; swarms that cannot sustain it within 35 seconds are rejected instead of entering one-second rebuffer loops. Metadata, peer, and renderer deadlines remain bounded.
+- **Portable 1080p Offline MP4 Downloads**: Successful downloads finalize into one standard, seekable MP4; temporary caches are deleted only after validation and offline playback uses local byte ranges.
+- **Rate-Limited and Transient Downloads**: HLS and direct downloads pace requests per CDN, honor Retry-After, and recover from transient HTTP failures with bounded backoff.
+- **Best Stream Download HTTP 400**: Downloads retain the validated local-proxy transport and its provider headers, session context, signed parameters, and relative URI resolution.
+- **Stalled 0% Placeholder Downloads**: Best Stream rejects undersized direct-video responses and download progress reconciles from local state.
+- **Cloudflare Restriction Placeholder Playback**: Short Cloudflare restriction videos are rejected during provider probing or detected by runtime duration checks, then replaced automatically with another collected source.
+- **Transient Stream Error During Automatic Recovery**: The terminal error no longer flashes while KokoMovie is already waiting for or switching to a viable source.
+- **Preset Avatar Consistency**: Preset avatars persist locally and render in both Preferences and the sidebar profile badge instead of reverting to the initials gradient.
+- **Interrupted Direct Downloads**: Aborted HTTP responses now fail cleanly instead of leaving direct downloads hanging indefinitely.
+- **Visible Download Progress and Folder Access**: Download rows now persist and emit transferred and total byte counts, the Downloads page displays MB/GB progress immediately after queueing, and global/per-item Folder actions open the default KokoMovie downloads directory or the user-selected custom directory.
+- **Back Navigation Restarted Closed Playback**: Closing fullscreen playback now returns through the existing navigation history entry instead of pushing another detail route, so pressing Back returns to Home, Movies, Series, or Downloads rather than revisiting the stale player route and restarting the movie.
+
+---
+
 ## [1.1.6-beta] — 2026-06-08 — Functional Audio Dub Switching, Faster Stream Finding & Multi-Audio Providers
 
 ### Added

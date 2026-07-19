@@ -66,6 +66,7 @@ const FLAG_LANG: Record<string, string> = {
 }
 const KEYWORD_LANG: Array<[RegExp, string]> = [
   [/\b(latino|latin|latam|lat|castellano|cast|espa[nñ]ol|spanish|esp)\b/i, 'es'],
+  [/\b(english|eng)\b/i, 'en'],
   [/\b(truefrench|french|vostfr|vff|vf2?|vfi|vfq)\b/i, 'fr'],
   [/\b(italian|ita)\b/i, 'it'],
   [/\b(german|deutsch|ger)\b/i, 'de'],
@@ -94,6 +95,9 @@ function parseSeeders(title: string): number {
   return m ? parseInt(m[1]!, 10) : 0
 }
 function isLikelyHevc(text: string): boolean { return /\b(x265|h\.?265|hevc)\b/i.test(text) }
+function isUnsupportedTorrentVideo(text: string): boolean { return isLikelyHevc(text) || /\b(av1|3d|cam|telesync|hdts)\b/i.test(text) }
+const PRIORITY_TORRENT_LANGS = ['en', 'es', 'fr', 'ru'] as const
+function priorityLangs(langs: string[]): string[] { return PRIORITY_TORRENT_LANGS.filter((lang) => langs.includes(lang)) }
 
 // ISO 639-1 (2-letter, how the UI tracks languages) → ISO 639-2 tags (how MKV audio streams are
 // labelled). Both 639-2/B (e.g. "fre", "ger") and /T ("fra", "deu") variants are listed because
@@ -118,73 +122,80 @@ function audioMapArgs(audioLang: string): string[] {
   return args
 }
 
-interface Candidate { infoHash: string; fileIdx: number; title: string; quality: string; seeders: number; langs: string[] }
-
+interface Candidate { infoHash: string; fileIdx: number; title: string; quality: string; seeders: number; langs: string[]; trackers: string[] }
+const torrentioCache = new Map<string, { expires: number; candidates: Candidate[] }>()
 async function queryTorrentio(req: StreamRequest): Promise<Candidate[]> {
   const imdb = req.imdbId
-  if (!imdb || !/^tt\d+/.test(imdb)) { log(`no IMDB id (${imdb ?? 'none'}); Torrentio needs one — skipping`); return [] }
+  if (!imdb || !/^tt[0-9]+/.test(imdb)) { log('Torrentio requires an IMDB id; skipping'); return [] }
   const path = req.type === 'tv' && req.season != null && req.episode != null
-    ? `/stream/series/${imdb}:${req.season}:${req.episode}.json`
-    : `/stream/movie/${imdb}.json`
+    ? '/stream/series/' + imdb + ':' + req.season + ':' + req.episode + '.json'
+    : '/stream/movie/' + imdb + '.json'
+  const cached = torrentioCache.get(path)
+  if (cached && cached.expires > Date.now()) return cached.candidates
   try {
-    const res = await fetch(`${TORRENTIO}${path}`, { signal: AbortSignal.timeout(12_000) })
-    if (!res.ok) { log(`Torrentio HTTP ${res.status}`); return [] }
-    const data = await res.json() as { streams?: Array<{ infoHash?: string; fileIdx?: number; title?: string; name?: string }> }
-    return (data.streams ?? [])
-      .filter((s) => !!s.infoHash)
-      .map((s) => {
-        const title = `${s.name ?? ''}\n${s.title ?? ''}`
-        return {
-          infoHash: s.infoHash!.toLowerCase(),
-          fileIdx: typeof s.fileIdx === 'number' ? s.fileIdx : 0,
-          title,
-          quality: parseQuality(title),
-          seeders: parseSeeders(title),
-          langs: parseLangs(title),
-        }
-      })
+    const res = await fetch(TORRENTIO + path, { signal: AbortSignal.timeout(12_000) })
+    if (!res.ok) {
+      log('Torrentio HTTP ' + res.status)
+      return cached?.candidates ?? []
+    }
+    const data = await res.json() as { streams?: Array<{ infoHash?: string; fileIdx?: number; title?: string; name?: string; sources?: string[] }> }
+    const candidates = (data.streams ?? []).filter((s) => !!s.infoHash).map((s) => {
+      const title = (s.name ?? '') + String.fromCharCode(10) + (s.title ?? '')
+      const trackers = (s.sources ?? [])
+        .filter((source) => source.startsWith('tracker:'))
+        .map((source) => source.slice('tracker:'.length))
+        .filter((tracker) => !tracker.includes('retracker.local'))
+      return {
+        infoHash: s.infoHash!.toLowerCase(), fileIdx: typeof s.fileIdx === 'number' ? s.fileIdx : 0,
+        title, quality: parseQuality(title), seeders: parseSeeders(title), langs: parseLangs(title), trackers,
+      }
+    })
+    torrentioCache.set(path, { expires: Date.now() + 10 * 60 * 1000, candidates })
+    return candidates
   } catch (e) {
-    log(`Torrentio query failed: ${(e as Error).message}`)
-    return []
+    log('Torrentio query failed: ' + (e as Error).message)
+    return cached?.candidates ?? []
   }
 }
 
-function buildMagnet(infoHash: string): string {
-  const tr = TRACKERS.map((t) => `&tr=${encodeURIComponent(t)}`).join('')
-  return `magnet:?xt=urn:btih:${infoHash}${tr}`
+function buildMagnet(infoHash: string, releaseTrackers: string[]): string {
+  const trackers = [...new Set([...releaseTrackers.slice(0, 6), ...TRACKERS.slice(0, 3)])]
+  const tr = trackers.map((tracker) => String.fromCharCode(38) + 'tr=' + encodeURIComponent(tracker)).join('')
+  return 'magnet:?xt=urn:btih:' + infoHash + tr
 }
 
-// Discovery only: turn Torrentio releases into selectable sources. The stream URL is the MAGNET
-// (resolved to a localhost HTTP URL on demand when the user actually picks the source — see
-// resolveTorrent). Prioritises language-bearing releases, drops HEVC/sub-720p, caps the list.
+// Discovery only: expose filtered releases; the magnet resolves on explicit selection.
 async function getTorrentStreams(req: StreamRequest): Promise<ProviderResult[]> {
   const all = await queryTorrentio(req)
   if (all.length === 0) return []
   const candidates = all
-    .filter((s) => !isLikelyHevc(s.title) && s.quality !== '480p')
+    .map((s) => ({ ...s, langs: priorityLangs(s.langs) }))
+    .filter((s) => !isUnsupportedTorrentVideo(s.title) && s.quality === '1080p' && s.langs.length > 0 && s.seeders >= 5)
     .sort((a, b) => {
-      const al = a.langs.length > 0 ? 1 : 0
-      const bl = b.langs.length > 0 ? 1 : 0
-      if (al !== bl) return bl - al
+      if (a.langs.length !== b.langs.length) return b.langs.length - a.langs.length
+      const aRank = Math.min(...a.langs.map((lang) => PRIORITY_TORRENT_LANGS.indexOf(lang as typeof PRIORITY_TORRENT_LANGS[number])))
+      const bRank = Math.min(...b.langs.map((lang) => PRIORITY_TORRENT_LANGS.indexOf(lang as typeof PRIORITY_TORRENT_LANGS[number])))
+      if (aRank !== bRank) return aRank - bRank
       return b.seeders - a.seeders
     })
 
-  const seen = new Set<string>()
+  const seen = new Map<string, number>()
   const out: ProviderResult[] = []
   for (const c of candidates) {
     // Only surface releases that declare a language (the whole point is finding dubs); dedupe
     // by language-set + quality so the menu isn't flooded with near-identical entries.
     if (c.langs.length === 0) continue
     const key = c.langs.slice().sort().join(',') + '|' + c.quality
-    if (seen.has(key)) continue
-    seen.add(key)
-    const langLabel = c.langs.map((l) => l.toUpperCase()).join('/')
+    const seenCount = seen.get(key) ?? 0
+    if (seenCount >= 2) continue
+    seen.set(key, seenCount + 1)
+    const langLabel = c.langs.map((lang) => lang.toUpperCase()).join('/')
     out.push({
       providerId: `p2p-${c.infoHash.slice(0, 10)}`,
-      providerName: `Torrent · ${langLabel} ${c.quality}`,
-      streams: [{ url: buildMagnet(c.infoHash), quality: c.quality, audioLangs: c.langs }],
+      providerName: `Torrent · ${langLabel} ${c.quality} · ${c.seeders} reported seeders`,
+      streams: [{ url: buildMagnet(c.infoHash, c.trackers), quality: c.quality, audioLangs: c.langs }],
     })
-    if (out.length >= 8) break
+    if (out.length >= 6) break
   }
   log(`Torrentio: ${all.length} releases → ${out.length} dubbed candidates`)
   return out
@@ -479,7 +490,8 @@ async function ensureServer(): Promise<number> {
         const startSec = Math.max(0, parseFloat(url.searchParams.get('start') || '0') || 0)
         const totalDur = Math.max(0, parseFloat(url.searchParams.get('dur') || '0') || 0)
         const name: string = file.name ?? file.path ?? ''
-        if (PLAYABLE_EXT.test(name)) serveDirect(file, req, res)
+        // A requested dub must pass through ffmpeg even for MP4/WebM so the chosen language is first.
+        if (PLAYABLE_EXT.test(name) && !audioLang) serveDirect(file, req, res)
         else serveTranscoded(file, req, res, startSec, audioLang, totalDur).catch((e) => {
           log(`serveTranscoded failed: ${(e as Error).message}`)
           try { res.destroy() } catch { /* ignore */ }
@@ -509,6 +521,28 @@ function pickFile(files: any[], fileIdx: number): any | null {
   return videos[0]
 }
 
+async function waitForTorrentStart(file: any, torrent: any): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const target = Math.min(file.length ?? 12 * 1024 * 1024, 12 * 1024 * 1024)
+    let received = 0
+    let settled = false
+    const stream = file.createReadStream({ start: 0, end: Math.min((file.length ?? target) - 1, target - 1) })
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      clearTimeout(peerCheck)
+      try { stream.destroy() } catch {}
+      err ? reject(err) : resolve()
+    }
+    stream.on('data', (chunk: Buffer) => { received += chunk.length; if (received >= target) finish() })
+    stream.once('end', () => received > 0 ? finish() : finish(new Error('Torrent returned no playable data')))
+    stream.once('error', (err: Error) => finish(err))
+    const peerCheck = setTimeout(() => { if ((torrent.numPeers ?? 0) === 0) finish(new Error('No active peers for this 1080p release')) }, 10_000)
+    const timeout = setTimeout(() => finish(new Error('Torrent peers did not provide playable data in time')), 35_000)
+  })
+}
+
 // Resolve a magnet to a localhost, Chromium-playable HTTP URL. Adds the torrent (or reuses an
 // already-added one), waits for metadata, selects the largest video file for sequential
 // streaming, and returns its served URL (the server remuxes non-MP4 containers on the fly).
@@ -536,7 +570,7 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
       // completed pieces are written straight to the on-disk file. Without this, short playbacks keep
       // every piece in memory and the real file is never written → ffmpeg `-ss` seek fails with "No
       // such file or directory" (the on-disk file simply doesn't exist yet).
-      torrent = client.add(magnet, { path: downloadPath!, deselect: true, announce: TRACKERS, storeCacheSlots: 0 })
+      torrent = client.add(magnet, { path: downloadPath!, deselect: true, storeCacheSlots: 0, strategy: 'sequential' })
     } catch {
       // A concurrent add for the same hash can throw "duplicate torrent" — fetch it instead.
       torrent = (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet)
@@ -556,8 +590,8 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
     torrent.once('error', (err: Error) => finish(() => reject(err)))
     const peerCheck = setTimeout(() => {
       if (!torrent.ready && (torrent.numPeers ?? 0) === 0) finish(() => reject(new Error('No peers found')))
-    }, 12_000)
-    const hard = setTimeout(() => finish(() => reject(new Error('No peers found (timed out fetching torrent metadata)'))), 25_000)
+    }, 10_000)
+    const hard = setTimeout(() => finish(() => reject(new Error('No peers found (timed out fetching torrent metadata)'))), 20_000)
   })
 
   const file = pickFile(torrent.files ?? [], 0)
@@ -567,6 +601,12 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
   // Stream just this file (others stay deselected).
   try { torrent.files.forEach((f: any) => { if (f !== file) f.deselect?.() }) } catch { /* ignore */ }
   try { file.select?.() } catch { /* ignore */ }
+  try {
+    await waitForTorrentStart(file, torrent)
+  } catch (err) {
+    try { torrent.destroy() } catch {}
+    throw err
+  }
 
   const token = `${torrent.infoHash}-${torrent.files.indexOf(file)}`
   served.set(token, { file, audioLang })
@@ -576,7 +616,7 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
   // Use `localhost` (not 127.0.0.1) so the URL matches the renderer CSP's `media-src
   // http://localhost:*` allowance — CSP treats the two as different origins (DN-048).
   const url = `http://localhost:${port}/t/${token}.mp4`
-  const transcoded = !PLAYABLE_EXT.test(name)
+  const transcoded = !PLAYABLE_EXT.test(name) || !!audioLang
   log(`streaming "${name}" (${transcoded ? 'transcode' : 'direct'}) → ${url}`)
   // `transcoded` tells the renderer the stream is a progressive remux (unknown duration), so it
   // can show the TMDB runtime as the total instead of the buffered-end time growing in real time.

@@ -7,7 +7,7 @@ import { catalogApi, type Episode, type Season } from '../api/catalog'
 import { userApi } from '../api/user'
 import { recommendationApi } from '../api/recommendation'
 import { downloadsApi } from '../api/downloads'
-import { providersApi } from '../api/providers'
+import { providersApi, torrentApi } from '../api/providers'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
@@ -22,6 +22,10 @@ function sanitizeUrl(url: string | null | undefined): string {
   }
   return ''
 }
+type DownloadTorrentOption = { id: string; name: string; magnet: string; language: string }
+
+const DOWNLOAD_LANGUAGE_NAMES: Record<string, string> = { en: 'English', es: 'Spanish', fr: 'French', ru: 'Russian' }
+
 
 export function ContentDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -178,6 +182,54 @@ export function ContentDetailPage() {
   const [activeEpisodeDropdownId, setActiveEpisodeDropdownId] = useState<string | null>(null)
   const [episodeDownloadingMap, setEpisodeDownloadingMap] = useState<Record<string, boolean>>({})
   const [episodeDownloadDoneMap, setEpisodeDownloadDoneMap] = useState<Record<string, boolean>>({})
+  const [downloadPicker, setDownloadPicker] = useState<{ kind: "movie" | "series" | "episode"; episode?: Episode; seasonNumber?: number } | null>(null)
+  const [downloadProviders, setDownloadProviders] = useState<Array<{ id: string; name: string; enabled: boolean }>>([])
+  const [downloadTorrents, setDownloadTorrents] = useState<DownloadTorrentOption[]>([])
+  const [downloadTorrentsLoading, setDownloadTorrentsLoading] = useState(false)
+
+  function selectedDownloadTitle(base: string, providerId: string): string {
+    const torrent = downloadTorrents.find((option) => option.id === providerId)
+    return torrent ? `${base} [${torrent.language.toUpperCase()}]` : base
+  }
+
+  async function openDownloadPicker(target: { kind: "movie" | "series" | "episode"; episode?: Episode; seasonNumber?: number }) {
+    setDownloadPicker(target)
+    setDownloadTorrents([])
+    setDownloadTorrentsLoading(target.kind !== "series")
+    try { setDownloadProviders((await providersApi.list()).filter((provider) => provider.enabled)) } catch { setDownloadProviders([]) }
+
+    const c = data?.data
+    if (!c || target.kind === "series") return
+    const req: StreamRequest = {
+      imdbId: c.imdbId ?? undefined,
+      tmdbId: c.tmdbId ?? undefined,
+      type: c.type === "series" ? "tv" : "movie",
+      title: c.title,
+    }
+    if (target.episode) {
+      req.season = target.seasonNumber
+      req.episode = target.episode.episodeNumber
+    }
+    try {
+      const releases = await torrentApi.getStreams(req)
+      const options = releases.flatMap((release) => {
+        const stream = release.streams[0]
+        if (!stream?.url.startsWith("magnet:")) return []
+        return (stream.audioLangs ?? []).filter((lang) => DOWNLOAD_LANGUAGE_NAMES[lang]).map((language) => ({
+          id: `torrent:${release.providerId}:${language}`,
+          name: `${DOWNLOAD_LANGUAGE_NAMES[language]} · ${release.providerName}`,
+          magnet: stream.url,
+          language,
+        }))
+      })
+      setDownloadTorrents(options)
+    } catch {
+      setDownloadTorrents([])
+    } finally {
+      setDownloadTorrentsLoading(false)
+    }
+  }
+
 
   // Default selected season to Season 1 if available, otherwise 0
   useEffect(() => {
@@ -243,9 +295,9 @@ export function ContentDetailPage() {
     c: any,
     s3HlsKey?: string | null,
     episode?: Episode,
-    seasonNumber?: number
+    seasonNumber?: number,
+    providerId: string = 'best'
   ): Promise<{ url: string; headers?: Record<string, string> } | null> {
-    if (s3HlsKey) return { url: s3HlsKey }
 
     setAutoStreamState({
       loading: true,
@@ -284,8 +336,20 @@ export function ContentDetailPage() {
     }
 
     try {
+      const torrent = downloadTorrents.find((option) => option.id === providerId)
+      if (torrent) {
+        const resolved = await Promise.race([
+          torrentApi.resolve(torrent.magnet, torrent.language),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out connecting to torrent peers")), 65000)),
+        ])
+        if (cancelled) return null
+        if (resolved.error || !resolved.url) throw new Error(resolved.error || "Torrent did not return a playable stream")
+        setAutoStreamState({ loading: false })
+        return { url: resolved.url }
+      }
+
       const result = await Promise.race([
-        providersApi.getFirstStream(req),
+        providerId === 'best' ? providersApi.getFirstStream(req) : providersApi.getStream(providerId, req),
         new Promise<null>((_, reject) =>
           setTimeout(() => reject(new Error('Timed out searching for a stream')), 50000)
         ),
@@ -321,17 +385,17 @@ export function ContentDetailPage() {
     }
   }
 
-  async function handleDownload() {
+  async function handleDownload(providerId: string = 'best') {
     const c = data?.data
     if (!c || downloading || downloadDone) return
     setDownloading(true)
     try {
-      const result = await getOrScrapeManifestUrl(c, c.s3HlsKey)
+      const result = await getOrScrapeManifestUrl(c, c.s3HlsKey, undefined, undefined, providerId)
       if (!result) return
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       await downloadsApi.start({
         contentId: c.id,
-        title: c.title,
+        title: selectedDownloadTitle(c.title, providerId),
         contentType: c.type,
         thumbnailUrl: c.s3Thumbnail ?? undefined,
         durationMins: c.durationMins ?? undefined,
@@ -340,12 +404,13 @@ export function ContentDetailPage() {
         headers: result.headers,
       })
       setDownloadDone(true)
+      navigate("/downloads")
     } finally {
       setDownloading(false)
     }
   }
 
-  async function handleSeriesDownload() {
+  async function handleSeriesDownload(providerId: string = 'best') {
     const c = data?.data
     if (!c || c.type !== 'series') return
 
@@ -365,7 +430,7 @@ export function ContentDetailPage() {
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       for (const { ep, seasonNum } of downloadableEpisodes) {
         if (!updatedDoneMap[ep.id]) {
-          const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNum)
+          const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNum, providerId)
           if (!result) {
             allSucceeded = false
             break
@@ -392,26 +457,27 @@ export function ContentDetailPage() {
       }
       if (allSucceeded) {
         setDownloadDone(true)
+        navigate("/downloads")
       }
     } finally {
       setDownloading(false)
     }
   }
 
-  async function handleEpisodeDownload(ep: Episode, seasonNumber?: number) {
+  async function handleEpisodeDownload(ep: Episode, seasonNumber?: number, providerId: string = 'best') {
     const c = data?.data
     if (!c) return
     const epId = ep.id
 
     setEpisodeDownloadingMap((prev) => ({ ...prev, [epId]: true }))
     try {
-      const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNumber)
+      const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNumber, providerId)
       if (!result) return
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       await downloadsApi.start({
         contentId: c.id,
         episodeId: epId,
-        title: `${c.title} - S${seasonNumber ?? 1}E${ep.episodeNumber} - ${ep.title}`,
+        title: selectedDownloadTitle(`${c.title} - S${seasonNumber ?? 1}E${ep.episodeNumber} - ${ep.title}`, providerId),
         contentType: 'series',
         thumbnailUrl: ep.s3ThumbnailKey || c.s3Thumbnail || undefined,
         durationMins: ep.durationMins || undefined,
@@ -420,6 +486,7 @@ export function ContentDetailPage() {
         headers: result.headers,
       })
       setEpisodeDownloadDoneMap((prev) => ({ ...prev, [epId]: true }))
+      navigate("/downloads")
     } catch (err) {
       console.error('Episode download failed:', err)
     } finally {
@@ -713,7 +780,7 @@ export function ContentDetailPage() {
                         <button
                           onClick={() => {
                             setShowActionsDropdown(false)
-                            handleDownload()
+                            openDownloadPicker({ kind: "movie" })
                           }}
                           disabled={downloading || downloadDone}
                           className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
@@ -725,7 +792,7 @@ export function ContentDetailPage() {
                         <button
                           onClick={() => {
                             setShowActionsDropdown(false)
-                            handleSeriesDownload()
+                            openDownloadPicker({ kind: "series" })
                           }}
                           disabled={downloading || downloadDone}
                           className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
@@ -840,7 +907,7 @@ export function ContentDetailPage() {
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setActiveEpisodeDropdownId(null)
-                                    handleEpisodeDownload(ep, season?.seasonNumber)
+                                    openDownloadPicker({ kind: "episode", episode: ep, seasonNumber: season?.seasonNumber })
                                   }}
                                   disabled={episodeDownloadingMap[ep.id] || episodeDownloadDoneMap[ep.id]}
                                   className="w-full text-left px-3 py-2 text-xs font-semibold text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
@@ -865,6 +932,55 @@ export function ContentDetailPage() {
       {/* More Like This */}
       {similarItems.length > 0 && (
         <ContentRow title="More Like This" items={similarItems} />
+      )}
+
+      {downloadPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#120d24] p-5 shadow-2xl">
+            <h2 className="text-white text-lg font-semibold mb-1">Choose Download Source</h2>
+            <p className="text-white/45 text-xs mb-4">Best Stream automatically selects the highest validated 1080p source available.</p>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {[{ id: "best", name: "Best Stream · 1080p Auto", enabled: true }, ...downloadProviders].map((provider) => (
+                <button
+                  key={provider.id}
+                  onClick={() => {
+                    const target = downloadPicker
+                    setDownloadPicker(null)
+                    if (target.kind === "movie") handleDownload(provider.id)
+                    else if (target.kind === "series") handleSeriesDownload(provider.id)
+                    else if (target.episode) handleEpisodeDownload(target.episode, target.seasonNumber, provider.id)
+                  }}
+                  className="w-full flex items-center justify-between rounded-xl bg-white/5 hover:bg-violet-600/25 border border-white/5 px-4 py-3 text-left transition-colors"
+                >
+                  <span className="text-white/85 text-sm font-medium">{provider.name}</span>
+                  <span className="text-violet-300 text-xs">Download</span>
+                </button>
+              ))}
+              {downloadTorrentsLoading && (
+                <div className="px-4 py-3 text-xs text-white/45">Finding 1080p torrent languages…</div>
+              )}
+              {downloadTorrents.length > 0 && (
+                <div className="px-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">Torrent · choose audio language</div>
+              )}
+              {downloadTorrents.map((torrent) => (
+                <button
+                  key={torrent.id}
+                  onClick={() => {
+                    const target = downloadPicker
+                    setDownloadPicker(null)
+                    if (target.kind === "movie") handleDownload(torrent.id)
+                    else if (target.episode) handleEpisodeDownload(target.episode, target.seasonNumber, torrent.id)
+                  }}
+                  className="w-full flex items-center justify-between rounded-xl bg-emerald-500/5 hover:bg-emerald-500/15 border border-emerald-400/10 px-4 py-3 text-left transition-colors"
+                >
+                  <span className="text-white/85 text-sm font-medium pr-3">{torrent.name}</span>
+                  <span className="text-emerald-300 text-xs flex-shrink-0">Download</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setDownloadPicker(null)} className="mt-4 w-full rounded-xl border border-white/10 py-2 text-xs font-semibold text-white/55 hover:text-white hover:bg-white/5 transition-colors">Cancel</button>
+          </div>
+        </div>
       )}
 
       {/* Auto Stream Loading & Error Overlay */}

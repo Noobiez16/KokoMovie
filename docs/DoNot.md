@@ -811,3 +811,52 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 - Omit `tmdbApiKey` from query keys used for fetching or optimistically mutating Continue Watching data.
 - Forget to include the relevant query parameters (such as `tmdbApiKey`) in the callback dependency arrays.
 
+
+## DN-050: Offline downloads must pace CDN requests and retry only transient HTTP failures
+
+**Area:** `client/src/main/ipc/download.ts`
+
+**Symptom:** A long HLS download succeeds initially, then fails partway through with HTTP 429; temporary 408/425/5xx responses can also terminate an otherwise valid download.
+
+**Root cause:** Hundreds of sequential media-segment requests can still exceed a CDN's rate window, especially when multiple downloads target the same host. Fixed one/two-second retries ignore the server's `Retry-After` instruction and synchronize clients into another burst.
+
+**Fix:** Pace requests through a shared per-host slot, parse delta-seconds and HTTP-date `Retry-After` values, apply a shared cooldown with exponential backoff and jitter, and give 429 a larger bounded retry budget. Retry 408, 425, 429, 500, 502, 503, and 504 plus transport errors; treat other 4xx responses as permanent. Consume rejected response bodies before reusing keep-alive sockets. Apply the policy to HLS resources and direct video files.
+
+**Do not:** Retry every status indiscriminately, ignore `Retry-After`, launch simultaneous retries against one CDN, or leave non-2xx bodies unread on pooled connections.
+
+
+## DN-051: A completed download is one portable MP4, not an internal HLS segment cache
+
+**Area:** `client/src/main/ipc/download.ts`, `client/src/main/index.ts`, `PlayerHost.tsx`
+
+**Symptom:** A download reports 100%, but its folder contains hundreds of `seg_N.enc` files and clicking Play produces a stream error or attempts online playback.
+
+**Root cause:** Completion previously meant that the internal encrypted HLS cache was finished. That cache was device-bound, its blob manifest could not reliably resolve every auxiliary HLS resource, and it was not a portable video file.
+
+**Fix:** Keep encrypted chunks only as an in-progress staging format. At 99%, stream-decrypt them into bundled FFmpeg and remux with stream copy and fast-start metadata into one named MP4 in the selected Downloads directory. Update the database to point at that file, serve it through the offline protocol with HTTP byte ranges, and remove the staging directory only after FFmpeg exits successfully. Automatically migrate legacy completed segment caches at startup.
+
+**Do not:** Mark a segment cache completed, expose UUID staging directories as the user's final download, re-run provider discovery for offline playback, re-encode when compatible H.264/AAC streams can be copied, or delete staging data before MP4 finalization succeeds.
+
+## DN-052: Torrent sources must prove 1080p compatibility and swarm readiness before playback
+
+**Area:** `client/src/main/ipc/torrent.ts`, `client/src/renderer/components/player/VideoPlayer.tsx`
+
+**Symptom:** The Source menu is flooded with duplicate 720p/auto torrents; selecting some entries returns “No peers found” or leaves “Switching…” active indefinitely. Multi-language labels also include low-priority tracks ahead of English, Spanish, French, and Russian.
+
+**Root cause:** Torrentio discovery metadata was treated as sufficient availability proof. The old filter admitted sub-1080p and zero-seeder releases, deduplicated too aggressively by language set, and returned a localhost URL immediately after metadata even when the swarm had not delivered any media bytes.
+
+**Fix:** Retain only exact 1080p, non-HEVC/AV1, non-CAM releases with at least five **reported seeders** and a priority language. Preserve up to six release-specific tracker URLs from Torrentio and merge only three stable fallbacks instead of announcing indiscriminately. Cache discovery per movie/episode for ten minutes and reuse cached results during HTTP 429 responses. Treat the displayed count as metadata, never as live proof: after explicit selection, require metadata, a connected peer, and 12 MiB of contiguous initial video data before returning a playback URL.
+
+**Do not:** Show unknown/720p releases as 1080p, advertise dead swarms, return a playback URL before initial bytes arrive, allow HEVC/AV1 into Chromium’s H.264 path, or leave torrent IPC calls without a UI deadline.
+
+## DN-053: Torrent downloads must remux the explicitly selected dub
+
+**Area:** `client/src/renderer/pages/ContentDetail.tsx`, `client/src/main/ipc/torrent.ts`, `client/src/main/ipc/download.ts`
+
+**Symptom:** A multi-audio torrent downloads successfully, but the portable MP4 plays a different language from the one selected in the download chooser. Direct MP4/WebM torrent files are especially vulnerable because direct serving preserves the source track order and default disposition.
+
+**Root cause:** Passing `audioLang` only affected the non-MP4 streaming path. A playable torrent container bypassed FFmpeg, so the downloader later received the original multi-track file and its generic finalizer selected the first source audio rather than the requested dub.
+
+**Fix:** Expand each qualified 1080p release into explicit English, Spanish, French, and Russian download choices. Resolve the chosen magnet with its language code and force the torrent through the language-aware FFmpeg remux whenever a dub is requested, including MP4/WebM inputs. The downstream portable-MP4 finalizer then receives the chosen dub as audio track zero/default; add the language code to the saved title so multiple dubs remain distinguishable.
+
+**Do not:** Treat a release language badge as a filename-only choice, bypass the remux for a language-selected MP4/WebM torrent, reuse one episode magnet for a full-series bulk download, or claim a language the release metadata does not declare.

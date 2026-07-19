@@ -9,6 +9,7 @@ import { registerApiProxy } from './ipc/api-proxy'
 import { registerLibraryIpc } from './ipc/library'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
 import { registerTorrentIpc } from './ipc/torrent'
+import { destroyDiscordPresence, registerDiscordPresence } from './discord-presence'
 
 // Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
 // the pipe has been closed (e.g. when the parent process exits or during rapid
@@ -259,11 +260,14 @@ app.whenReady().then(async () => {
   initStreamHeaderInjector()
   registerProvidersIpc()
   registerTorrentIpc()
+  registerDiscordPresence()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('before-quit', destroyDiscordPresence)
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

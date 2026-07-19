@@ -23,6 +23,7 @@ interface Props {
   allStreams?: CachedStream[]
   profileId: string
   resumeAtSeconds?: number
+  defaultSubtitleLanguage?: string | null
   onClose: () => void
   onNextEpisode?: (ep: Episode) => void
   nextEpisode?: Episode | null
@@ -160,7 +161,7 @@ function getCleanAudioName(name: string, lang: string): string {
 // Preferred audio-dub order when a stream carries multiple language tracks. The first
 // available language here is auto-selected on load, and the Audio menu is ordered to match.
 // The five priority dubs lead — English, Spanish, French, Italian, Russian — then common extras.
-const PREFERRED_AUDIO_LANGS = ['en', 'es', 'fr', 'it', 'ru', 'pt', 'de', 'ja', 'ko', 'hi', 'zh', 'ar']
+const PREFERRED_AUDIO_LANGS = ['en', 'es', 'fr', 'ru', 'it', 'pt', 'de', 'ja', 'ko', 'hi', 'zh', 'ar']
 
 // Rank a language code by preference (lower = more preferred). Unknown languages sort last
 // but keep their relative order, so an unexpected dub still appears — just below the known ones.
@@ -263,7 +264,7 @@ SubtitleTracks.displayName = 'SubtitleTracks'
 
 export function VideoPlayer({
   content, episode, session, streamHeaders, initialProviderId, allStreams = [], profileId, resumeAtSeconds: initialResumeAt,
-  onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
+  defaultSubtitleLanguage, onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -279,6 +280,7 @@ export function VideoPlayer({
   const [sources, setSources] = useState<Array<{ id: string; name: string; enabled: boolean }>>([])
   const [switchingSource, setSwitchingSource] = useState(false)
   const [switchingError, setSwitchingError] = useState<string | null>(null)
+  const [awaitingFallback, setAwaitingFallback] = useState(false)
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
@@ -328,6 +330,23 @@ export function VideoPlayer({
     ]
   })()
   const [currentSubtitle, setCurrentSubtitle] = useState(-1)
+  const subtitlePreferenceKeyRef = useRef('')
+
+  useEffect(() => {
+    const preferredLang = normalizeLang(defaultSubtitleLanguage ?? '')
+    const preferenceKey = [content.id, episode?.id ?? '', activeStreamUrl, preferredLang].join(':')
+    if (!preferredLang || subtitlePreferenceKeyRef.current === preferenceKey) return
+    const preferred = subtitleTracks.find((track) => normalizeLang(track.lang) === preferredLang)
+    if (!preferred) return
+    subtitlePreferenceKeyRef.current = preferenceKey
+    setCurrentSubtitle(preferred.id)
+    const hls = hlsRef.current
+    if (hls) {
+      const internal = preferred.id >= 0 && preferred.id < 1000
+      hls.subtitleDisplay = internal
+      hls.subtitleTrack = internal ? preferred.id : -1
+    }
+  }, [defaultSubtitleLanguage, content.id, episode?.id, activeStreamUrl, internalSubs, externalSubs])
   // Subtitle size is a global preference — remember the user's S/M/L choice across
   // titles and sessions via localStorage.
   const [subtitleSize, setSubtitleSize] = useState<'small' | 'medium' | 'large'>(() => {
@@ -458,7 +477,9 @@ export function VideoPlayer({
   const cancelSourceSwitch = useCallback(() => {
     switchGenRef.current += 1
     setSwitchingSource(false)
+    setAwaitingFallback(false)
     setSwitchingError(null)
+    setHlsError('Automatic source switching was cancelled. Choose a source manually.')
   }, [])
 
   const handleSourceChange = async (providerId: string, isAuto = false) => {
@@ -492,12 +513,16 @@ export function VideoPlayer({
         // single language, use that. A multi-audio release with no explicit pick → '' (ffmpeg
         // default). Without this the remux can play the wrong dub (e.g. FR when ES was picked).
         const wantLang = currentAudioLangRef.current
-          || ((stream.audioLangs?.length ?? 0) === 1 ? normalizeLang(stream.audioLangs![0]!) : '')
-        const res = await torrentApi.resolve(playUrl, wantLang)
+          || ((stream.audioLangs?.length ?? 0) > 0 ? normalizeLang(stream.audioLangs![0]!) : '')
+        const res = await Promise.race([
+          torrentApi.resolve(playUrl, wantLang),
+          new Promise<{ error: string }>((resolve) => setTimeout(() => resolve({ error: 'Torrent readiness timed out; choose another 1080p source.' }), 65_000)),
+        ])
         if (gen !== switchGenRef.current) return
         if (!res?.url) {
           setSwitchingError(res?.error ? `Torrent: ${res.error}` : 'Could not start this torrent. Try another source.')
           setSwitchingSource(false)
+          setAwaitingFallback(false)
           return
         }
         const baseUrl = res.url.split('?')[0]!
@@ -523,6 +548,7 @@ export function VideoPlayer({
       setActiveHeaders(stream.headers)
       setActiveSourceId(providerId)
       setSwitchingSource(false)
+    setAwaitingFallback(false)
       return
     }
 
@@ -531,6 +557,7 @@ export function VideoPlayer({
     if (!req) {
       setSwitchingError('Content is missing metadata IDs to request stream')
       setSwitchingSource(false)
+    setAwaitingFallback(false)
       return
     }
 
@@ -548,6 +575,7 @@ export function VideoPlayer({
       if (!result) {
         setSwitchingError('Timed out — server took too long to respond. Try another source.')
         setSwitchingSource(false)
+    setAwaitingFallback(false)
         return
       }
 
@@ -570,6 +598,7 @@ export function VideoPlayer({
     } finally {
       if (gen === switchGenRef.current) {
         setSwitchingSource(false)
+    setAwaitingFallback(false)
       }
     }
   }
@@ -604,10 +633,36 @@ export function VideoPlayer({
     } else {
       console.warn(`[auto-fallback] ${reason} — no untried sources left`)
       setInitialLoading(false)
-      setHlsError('This title wouldn’t play on any available source. Please try again later or pick another source.')
+      setHlsError(null)
+      setAwaitingFallback(true)
     }
   }
   autoFallbackRef.current = autoFallback
+
+  // The initial winner can fail before the background provider race finishes collecting
+  // alternatives. When late sources arrive, recover automatically instead of leaving the
+  // terminal Stream Error visible and forcing the user to choose the same source manually.
+  useEffect(() => {
+    if (!awaitingFallback || switchingSource) return
+    const hasUntriedEmbed = allStreams.some((source) =>
+      source.providerId !== activeSourceId && !source.providerId.startsWith('p2p-')
+        && !triedSourcesRef.current.has(source.providerId) && source.streams.length > 0,
+    )
+    if (hasUntriedEmbed) {
+      setAwaitingFallback(false)
+      setInitialLoading(true)
+      autoFallbackRef.current('late working source collected')
+    }
+  }, [allStreams, awaitingFallback, switchingSource, activeSourceId])
+
+  useEffect(() => {
+    if (!awaitingFallback) return
+    const timeout = setTimeout(() => {
+      setAwaitingFallback(false)
+      setHlsError('This title wouldn’t play on any available source. Please try again later or choose a source manually.')
+    }, 8000)
+    return () => clearTimeout(timeout)
+  }, [awaitingFallback])
 
   // Watchdog: give up on a source only when it's genuinely dead — never when it's just slow.
   useEffect(() => {
@@ -1129,7 +1184,16 @@ export function VideoPlayer({
       }
     }
     const onDurationChange = () => setDuration(isNaN(video.duration) ? 0 : video.duration)
-    const onLoadedMetadata = () => setDuration(isNaN(video.duration) ? 0 : video.duration)
+    const onLoadedMetadata = () => {
+      const actualDuration = isNaN(video.duration) ? 0 : video.duration
+      setDuration(actualDuration)
+      const looksLikeRestrictionPlaceholder = !torrentStreamRef.current && knownRuntimeSecs >= 20 * 60
+        && actualDuration > 0 && actualDuration < 3 * 60
+      if (looksLikeRestrictionPlaceholder) {
+        video.pause()
+        autoFallbackRef.current('restricted or placeholder video detected')
+      }
+    }
     const onVolumeChange = () => { setIsMuted(video.muted); setVolume(video.volume) }
 
     video.addEventListener('play', onPlay)
@@ -1369,6 +1433,7 @@ export function VideoPlayer({
           if (i < candidates.length - 1) continue
           setSwitchingError(res?.error ? `Torrent: ${res.error}` : `No working ${langLabel} source found.`)
           setSwitchingSource(false)
+    setAwaitingFallback(false)
           return
         }
         const baseUrl = res.url.split('?')[0]!
@@ -1389,6 +1454,7 @@ export function VideoPlayer({
       setActiveSourceId(cand.providerId)
       setSwitchingError(null)
       setSwitchingSource(false)
+    setAwaitingFallback(false)
       return
     }
   }
@@ -1606,10 +1672,10 @@ export function VideoPlayer({
       )}
 
       {/* Switch Source Loading Overlay */}
-      {switchingSource && (
+      {(switchingSource || awaitingFallback) && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-40 flex flex-col items-center justify-center pointer-events-auto">
           <div className="w-10 h-10 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin mb-4" />
-          <p className="text-white text-sm font-semibold mb-5">Switching server source...</p>
+          <p className="text-white text-sm font-semibold mb-5">{awaitingFallback ? 'Finding another working source…' : 'Switching server source…'}</p>
           <button
             onClick={cancelSourceSwitch}
             className="px-5 py-2 text-xs font-semibold text-white/80 bg-white/10 border border-white/20 rounded-lg hover:bg-white/20 hover:text-white transition-all duration-200"

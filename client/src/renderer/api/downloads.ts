@@ -11,6 +11,9 @@ export interface DownloadItem {
   download_speed_kbps: number
   total_segments: number
   completed_segments: number
+  downloaded_bytes: number
+  total_bytes: number
+  local_dir?: string
   manifest_path: string | null
   downloaded_at: string | null
   expires_at: string
@@ -42,6 +45,8 @@ export const downloadsApi = {
 
   list: () =>
     window.electronAPI!.listDownloads() as Promise<DownloadItem[]>,
+
+  openFolder: (id?: string) => window.electronAPI!.openDownloadFolder(id),
 
   getManifest: (id: string) =>
     window.electronAPI!.getOfflineManifest(id) as Promise<{ manifestContent: string; drmKeyId: string | null } | null>,

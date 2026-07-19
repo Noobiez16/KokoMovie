@@ -1018,10 +1018,27 @@ function parseAudioLangs(masterText: string): string[] {
   return langs
 }
 
+function isLikelyFullLengthPlaylist(text: string): boolean {
+  if (!text.includes("#EXT-X-ENDLIST")) return true
+  const duration = [...text.matchAll(/#EXTINF:([0-9.]+)/gi)]
+    .reduce((total, match) => total + Number(match[1] ?? 0), 0)
+  return duration === 0 || duration >= 180
+}
+
 async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[] }> {
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
-    if (isDirect) return { resolution: 1080, audioLangs: [] } // direct files are assumed to be high resolution
+    if (isDirect) {
+      try {
+        const head = await fetchNode(url, { method: 'HEAD', headers })
+        const size = Number(head.headers['content-length'] ?? 0)
+        if (size > 0 && size < 5 * 1024 * 1024) {
+          logExtraction('Rejected undersized direct-video placeholder: ' + size + ' bytes')
+          return { resolution: 0, audioLangs: [] }
+        }
+      } catch { /* some providers reject HEAD; runtime validation remains active */ }
+      return { resolution: 1080, audioLangs: [] }
+    }
 
     const proxyUrl = toProxyUrl(url)
     const response = await fetchNode(proxyUrl, {
@@ -1048,12 +1065,31 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
     const audioLangs = parseAudioLangs(text)
 
     if (text.includes('#EXT-X-MEDIA-SEQUENCE') || text.includes('#EXTINF')) {
-      return { resolution: 1080, audioLangs } // It's a media playlist (direct quality), assume 1080p
+      if (!isLikelyFullLengthPlaylist(text)) {
+        logExtraction('Rejected short HLS placeholder playlist')
+        return { resolution: 0, audioLangs }
+      }
+      return { resolution: 1080, audioLangs }
     }
 
     const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
     if (matches.length === 0) {
       return { resolution: 720, audioLangs } // default guess
+    }
+
+    const masterLines = text.split(/\r?\n/)
+    const firstVariantIndex = masterLines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF"))
+    const firstVariant = firstVariantIndex >= 0 ? masterLines[firstVariantIndex + 1]?.trim() : ""
+    if (firstVariant && !firstVariant.startsWith("#")) {
+      try {
+        const variantUrl = new URL(firstVariant, proxyUrl).toString()
+        const variantResponse = await fetchNode(variantUrl, { headers: { "User-Agent": "Mozilla/5.0" } })
+        const variantText = variantResponse.buffer.toString("utf8")
+        if (variantText.includes("#EXTINF") && !isLikelyFullLengthPlaylist(variantText)) {
+          logExtraction("Rejected short HLS placeholder master")
+          return { resolution: 0, audioLangs }
+        }
+      } catch { /* the player retry/fallback path remains authoritative */ }
     }
 
     const standardHeights = matches.map((m) => {
@@ -1353,11 +1389,7 @@ export function registerProvidersIpc(): void {
             }
 
             if (!callerResolved) {
-              if (resolution >= 1080) {
-                // Best possible quality — hand it over immediately, no waiting.
-                logExtraction(`PERFECT STREAM (${resolution}p) found by ${provider.name}. Resolving immediately.`)
-                resolveCaller()
-              } else if (resolution >= ACCEPTABLE_RES) {
+              if (resolution >= ACCEPTABLE_RES) {
                 // Good enough (≥720p). Give a 1080p a brief chance to finish, then resolve.
                 if (!qualityWaitTimer) {
                   logExtraction(`Acceptable ${resolution}p stream in hand — ${QUALITY_WAIT_MS}ms quality-wait for a 1080p…`)

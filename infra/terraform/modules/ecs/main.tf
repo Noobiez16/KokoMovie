@@ -67,17 +67,12 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 
 # ─── ALB ─────────────────────────────────────────────────────────────────────
 
-# tfsec:ignore:aws-elb-alb-not-public
-# snyk:ignore:SNYK-CC-TF-124
-# snyk:ignore:SNYK-CC-TF-125
-# snyk:ignore:SNYK-CC-00231
-# snyk:ignore:SNYK-CC-00232  -- ALB is intentionally internet-facing (public API gateway)
 resource "aws_lb" "main" {
   name               = "streamflix-${var.environment}"
-  internal           = false
+  internal           = true
   load_balancer_type = "application"
   security_groups    = [var.alb_security_group_id]
-  subnets            = var.public_subnet_ids
+  subnets            = var.private_subnet_ids
 
   enable_deletion_protection = var.environment == "production"
   drop_invalid_header_fields = true

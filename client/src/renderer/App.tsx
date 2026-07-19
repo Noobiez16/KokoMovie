@@ -37,7 +37,8 @@ export function App() {
   // identity so components that key off the active profile keep working.
   useEffect(() => {
     setAccount({ id: LOCAL_PROFILE_ID, email: 'local', plan: 'basic', mfaEnabled: false })
-    setActiveProfile(LOCAL_PROFILE)
+    const savedProfile = useAuthStore.getState().activeProfile
+    if (!savedProfile || savedProfile.id !== LOCAL_PROFILE_ID) setActiveProfile(LOCAL_PROFILE)
   }, [setAccount, setActiveProfile])
 
   // Hydrate the saved TMDB key (stored per-account in the OS keychain).

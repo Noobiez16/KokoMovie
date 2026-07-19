@@ -8,6 +8,7 @@ import { providersApi, torrentApi } from '../../api/providers'
 import { useAuthStore } from '../../store/auth'
 import { usePlayerStore, type CachedStream } from '../../store/player'
 import { LOCAL_PROFILE_ID } from '../../lib/local-identity'
+import { userApi } from '../../api/user'
 
 // Lazy-load the heavy player (pulls in hls.js, ~570 kB). PlayerHost is always mounted at
 // the app root, but the actual VideoPlayer chunk is only fetched the first time something
@@ -64,6 +65,11 @@ export function PlayerHost() {
   })
 
   const content = contentData?.data
+  const { data: preferencesData } = useQuery({
+    queryKey: ['preferences', profileId],
+    queryFn: () => userApi.getPreferences(profileId),
+    staleTime: 5 * 60 * 1000,
+  })
   const sortedContent = useMemo(() => {
     if (!content) return null
     const sortedSeasons = [...content.seasons]
@@ -80,6 +86,17 @@ export function PlayerHost() {
     }
     return null
   }, [sortedContent, episodeId])
+
+  useEffect(() => {
+    if (!sortedContent || !request) return
+    let episodeLabel: string | undefined
+    if (currentEpisode) {
+      const season = sortedContent.seasons.find((s) => s.episodes.some((ep) => ep.id === currentEpisode.id))
+      episodeLabel = 'S' + (season?.seasonNumber ?? 1) + 'E' + currentEpisode.episodeNumber
+    }
+    window.electronAPI?.setDiscordActivity({ title: sortedContent.title, episode: episodeLabel, startedAt: Date.now() }).catch(() => {})
+    return () => { window.electronAPI?.setDiscordActivity(null).catch(() => {}) }
+  }, [sortedContent?.id, currentEpisode?.id, request?.contentId])
 
   const nextEpisode: Episode | null = useMemo(() => {
     if (!sortedContent || !currentEpisode) return null
@@ -244,14 +261,13 @@ export function PlayerHost() {
   }, [sortedContent, patchRequest])
 
   const handleClose = useCallback(() => {
-    const cid = contentId
     const wasFull = mode === 'full'
     stop()
-    // From fullscreen, drop back to the title's detail page. From PiP, just dismiss and
-    // leave the user wherever they were browsing.
-    if (wasFull) navigate(cid ? `/content/${cid}` : '/browse')
-  }, [mode, contentId, stop, navigate])
-
+    // Return through the existing history entry instead of pushing another detail route.
+    // Otherwise the abandoned /player route sits behind the detail page and Back restarts it.
+    // Closing PiP still dismisses playback in place without changing the current page.
+    if (wasFull) navigate(-1)
+  }, [mode, stop, navigate])
   // Minimise: keep playing, drop into PiP, and hand the main outlet back to the user
   // (Home is a sensible landing spot to start browsing from).
   const handlePip = useCallback(() => {
@@ -385,6 +401,7 @@ export function PlayerHost() {
             allStreams={request.allStreams ?? []}
             profileId={profileId}
             resumeAtSeconds={request.resumeAtSeconds}
+            defaultSubtitleLanguage={preferencesData?.data.subtitleDefault}
             onClose={handleClose}
             onPip={handlePip}
             onNextEpisode={handleNextEpisode}

@@ -1,4 +1,6 @@
-import { ipcMain, BrowserWindow, app, dialog } from 'electron'
+import { ipcMain, BrowserWindow, app, dialog, shell } from 'electron'
+import ffmpegPath from 'ffmpeg-static'
+import { spawn } from 'child_process'
 import {
   createCipheriv,
   createDecipheriv,
@@ -6,7 +8,7 @@ import {
   randomBytes,
   createHash,
 } from 'crypto'
-import { createWriteStream, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'fs'
+import { createWriteStream, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync, statSync, openSync, readSync, closeSync } from 'fs'
 import { join, dirname } from 'path'
 import https from 'https'
 import http from 'http'
@@ -71,21 +73,54 @@ const httpsAgent = new https.Agent({
 })
 
 const activeRequests = new Map<string, http.ClientRequest[]>()
+const hostNextRequestAt = new Map<string, number>()
+
+class HttpStatusError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly retryAfterMs: number | null,
+  ) {
+    super(`Request failed with status code ${statusCode}`)
+    this.name = 'HttpStatusError'
+  }
+}
+
+function parseRetryAfter(value: string | string[] | undefined): number | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (!raw) return null
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+  const date = Date.parse(raw)
+  return Number.isNaN(date) ? null : Math.max(0, date - Date.now())
+}
+
+async function waitForHostSlot(url: string, id?: string): Promise<void> {
+  let host = ''
+  try { host = new URL(url).host } catch { return }
+  const now = Date.now()
+  const waitMs = Math.max(0, (hostNextRequestAt.get(host) ?? now) - now)
+  hostNextRequestAt.set(host, now + waitMs + 175)
+  let remaining = waitMs
+  while (remaining > 0) {
+    if (id && cancelSignals.get(id)) throw new Error('cancelled')
+    const slice = Math.min(remaining, 500)
+    await new Promise((resolve) => setTimeout(resolve, slice))
+    remaining -= slice
+  }
+}
+
+function extendHostCooldown(url: string, delayMs: number): void {
+  try {
+    const host = new URL(url).host
+    hostNextRequestAt.set(host, Math.max(hostNextRequestAt.get(host) ?? 0, Date.now() + delayMs))
+  } catch { /* invalid URLs fail in the request itself */ }
+}
 
 function normalizeUrl(url: string): string {
-  if (url.startsWith('http://localhost:') || url.startsWith('http://127.0.0.1:')) {
-    const idx = url.indexOf('/proxy/')
-    if (idx !== -1) {
-      const rest = url.slice(idx + '/proxy/'.length)
-      if (rest.startsWith('http/') || rest.startsWith('https/')) {
-        const firstSlash = rest.indexOf('/')
-        const proto = rest.slice(0, firstSlash)
-        const actualRest = rest.slice(firstSlash + 1)
-        return `${proto}://${actualRest}`
-      }
-      return 'https://' + rest
-    }
-  }
+  // Preserve KokoMovie proxy URLs. Provider probing validated this exact transport, and
+  // proxy-rewritten HLS child URIs retain the required session headers/query tokens.
+  // Unwrapping the URL here made downloads bypass the working playback path and caused
+  // immediate CDN 400 responses even though the same stream played successfully.
   return url
 }
 
@@ -178,7 +213,9 @@ function fetchBuffer(
 
       if (statusCode < 200 || statusCode >= 300) {
         cleanUpReq()
-        reject(new Error(`Request failed with status code ${statusCode}`))
+        const retryAfterMs = parseRetryAfter(res.headers['retry-after'])
+        res.resume()
+        reject(new HttpStatusError(statusCode, retryAfterMs))
         return
       }
 
@@ -270,20 +307,26 @@ async function fetchBufferWithRetry(
     attempt++
     try {
       if (id && cancelSignals.get(id)) throw new Error('cancelled')
+      await waitForHostSlot(url, id)
       return await fetchBuffer(url, id, customHeaders, onProgress)
     } catch (err) {
-      if (err instanceof Error && err.message === 'cancelled') {
-        throw err
+      if (err instanceof Error && err.message === 'cancelled') throw err
+      if (id && cancelSignals.get(id)) throw new Error('cancelled')
+
+      const status = err instanceof HttpStatusError ? err.statusCode : null
+      const transientStatus = status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+      const allowedAttempts = status === 429 ? Math.max(maxAttempts, 8) : transientStatus || status === null ? Math.max(maxAttempts, 5) : 1
+      if (attempt >= allowedAttempts) throw err
+
+      const exponential = initialDelayMs * Math.pow(2, attempt - 1)
+      const serverDelay = err instanceof HttpStatusError ? err.retryAfterMs ?? 0 : 0
+      const jitter = Math.floor(Math.random() * Math.min(1000, exponential * 0.25))
+      const delay = Math.min(60000, Math.max(exponential, serverDelay) + jitter)
+      if (status === 429 || status === 503) extendHostCooldown(url, delay)
+      console.log('[downloader] Attempt ' + attempt + ' failed. Retrying in ' + delay + 'ms. Error: ' + (err instanceof Error ? err.message : String(err)))
+      if (status !== 429 && status !== 503) {
+        await new Promise((resolve) => setTimeout(resolve, delay))
       }
-      if (id && cancelSignals.get(id)) {
-        throw new Error('cancelled')
-      }
-      if (attempt >= maxAttempts) {
-        throw err
-      }
-      const delay = initialDelayMs * Math.pow(2, attempt - 1)
-      console.log(`[downloader] Attempt ${attempt} failed for ${url}. Retrying in ${delay}ms... Error: ${err instanceof Error ? err.message : err}`)
-      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
 }
@@ -405,9 +448,11 @@ async function downloadDirectVideo(
   let currentUrl = normalizedUrl
   let redirectsCount = 0
   let responseStream: http.IncomingMessage | null = null
+  let transientAttempts = 0
 
   while (redirectsCount <= 5) {
     if (cancelSignals.get(id)) throw new Error('cancelled')
+    await waitForHostSlot(currentUrl, id)
 
     let host = ''
     try {
@@ -476,7 +521,16 @@ async function downloadDirectVideo(
 
     if (statusCode < 200 || statusCode >= 300) {
       res.resume()
-      throw new Error(`Request failed with status code ${statusCode}`)
+      const err = new HttpStatusError(statusCode, parseRetryAfter(res.headers['retry-after']))
+      const transient = statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode === 500 || statusCode === 502 || statusCode === 503 || statusCode === 504
+      transientAttempts++
+      const allowedAttempts = statusCode === 429 ? 8 : transient ? 5 : 1
+      if (transientAttempts >= allowedAttempts) throw err
+      const exponential = 1000 * Math.pow(2, transientAttempts - 1)
+      const jitter = Math.floor(Math.random() * Math.min(1000, exponential * 0.25))
+      const delay = Math.min(60000, Math.max(exponential, err.retryAfterMs ?? 0) + jitter)
+      extendHostCooldown(currentUrl, delay)
+      continue
     }
 
     responseStream = res
@@ -492,6 +546,8 @@ async function downloadDirectVideo(
 
   let received = 0
   let completed = 0
+      let downloadedBytes = 0
+      let estimatedTotalBytes = 0
   const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunk size
 
   let chunkBuffer = Buffer.alloc(CHUNK_SIZE)
@@ -554,14 +610,16 @@ async function downloadDirectVideo(
       }
       if (overallPct > 100) overallPct = 100
 
-      db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ? WHERE id = ?`).run(overallPct, speedKbps, id)
-      notifyProgress(id, overallPct, 'downloading', completed, 0)
+      db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?`).run(overallPct, speedKbps, received, total, id)
+      notifyProgress(id, overallPct, 'downloading', completed, 0, received, total)
     }
 
     const onEnd = () => {
       cleanup()
       resolve()
     }
+
+    const onAborted = () => { cleanup(); reject(new Error('Download response was interrupted before completion')) }
 
     const onError = (err: Error) => {
       cleanup()
@@ -572,6 +630,7 @@ async function downloadDirectVideo(
       inputStream.removeListener('data', onData)
       inputStream.removeListener('end', onEnd)
       inputStream.removeListener('error', onError)
+      responseStream?.removeListener('aborted', onAborted)
       if (cancelSignals.get(id)) {
         try { responseStream?.destroy() } catch {}
         try { decompressor?.destroy() } catch {}
@@ -581,6 +640,7 @@ async function downloadDirectVideo(
     inputStream.on('data', onData)
     inputStream.on('end', onEnd)
     inputStream.on('error', onError)
+    responseStream.on('aborted', onAborted)
   })
 
   // Write the last chunk if any
@@ -592,40 +652,89 @@ async function downloadDirectVideo(
     completed++
   }
 
-  // Determine standard file extension based on content-type or original URL
-  let ext = 'mp4'
-  if (contentType.includes('webm')) ext = 'webm'
-  else if (contentType.includes('x-matroska') || contentType.includes('mkv')) ext = 'mkv'
-  else {
-    try {
-      const pathname = new URL(normalizedUrl).pathname.toLowerCase()
-      if (pathname.endsWith('.webm')) ext = 'webm'
-      else if (pathname.endsWith('.mkv')) ext = 'mkv'
-    } catch {}
+  // Some providers return a tiny MP4 error/placeholder with a successful HTTP status.
+  // Never mark that response as a completed feature-length download.
+  if ((row.duration_mins ?? 0) >= 20 && received < 5 * 1024 * 1024) {
+    throw new Error('Provider returned an undersized placeholder (' + received + ' bytes), not the requested video')
   }
 
-  // Write metadata JSON
-  const metadataPath = join(localDir, 'metadata.json')
-  const metadata = {
-    type: 'direct',
-    totalSize: received,
-    chunkSize: CHUNK_SIZE,
-    chunkCount: completed,
-    contentType,
-    filename: `video.${ext}`
-  }
-  writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
-
-  // Write local manifest with direct: prefix
-  const manifestPath = join(localDir, 'manifest.m3u8')
-  writeFileSync(manifestPath, `direct:offline://${id}/video.${ext}`)
-
+  db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
+  notifyProgress(id, 99, 'downloading', completed, completed, received, received)
+  const portable = await finalizeDirectMp4(row, key, completed)
+  rmSync(localDir, { recursive: true, force: true })
   db.prepare(`
-    UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?
+    UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ?
     WHERE id = ?
-  `).run(new Date().toISOString(), manifestPath, id)
+  `).run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, id)
+  notifyProgress(id, 100, 'completed', completed, completed, portable.size, portable.size)
+}
 
-  notifyProgress(id, 100, 'completed', completed, completed)
+const FFMPEG_BIN = ffmpegPath ? ffmpegPath.replace('app.asar', 'app.asar.unpacked') : null
+
+function portableVideoPath(row: DownloadRow): string {
+  const safeTitle = row.title.replace(/[\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim() || "KokoMovie Download"
+  const baseDir = dirname(row.local_dir)
+  const preferred = join(baseDir, safeTitle + '.mp4')
+  return existsSync(preferred) ? join(baseDir, safeTitle + ' - ' + row.id.slice(0, 8) + '.mp4') : preferred
+}
+
+async function finalizeDirectMp4(row: DownloadRow, key: Buffer, chunkCount: number): Promise<{ path: string; size: number }> {
+  if (!FFMPEG_BIN) throw new Error('The bundled FFmpeg executable is unavailable')
+  const outputPath = portableVideoPath(row)
+  const partialPath = outputPath + '.partial'
+  const ff = spawn(FFMPEG_BIN, ['-y', '-loglevel', 'error', '-i', 'pipe:0', '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', partialPath], { stdio: ['pipe', 'ignore', 'pipe'] })
+  let stderr = ''
+  ff.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8000) })
+  const exited = new Promise<void>((resolve, reject) => {
+    ff.once('error', reject)
+    ff.once('close', (code) => code === 0 ? resolve() : reject(new Error('MP4 finalization failed: ' + (stderr.trim() || 'FFmpeg exited with code ' + code))))
+  })
+  try {
+    for (let i = 0; i < chunkCount; i++) {
+      const plain = decryptSegment(readFileSync(join(row.local_dir, 'seg_' + i + '.enc')), key)
+      if (!ff.stdin.write(plain)) await new Promise<void>((resolve) => ff.stdin.once('drain', resolve))
+    }
+    ff.stdin.end()
+    await exited
+    renameSync(partialPath, outputPath)
+    return { path: outputPath, size: statSync(outputPath).size }
+  } catch (err) {
+    try { ff.kill('SIGKILL') } catch {}
+    try { rmSync(partialPath, { force: true }) } catch {}
+    throw err
+  }
+}
+
+async function finalizeHlsMp4(row: DownloadRow, key: Buffer, segmentCount: number): Promise<{ path: string; size: number }> {
+  if (!FFMPEG_BIN) throw new Error('The bundled FFmpeg executable is unavailable')
+  const outputPath = portableVideoPath(row)
+  const partialPath = outputPath + '.partial'
+  const ff = spawn(FFMPEG_BIN, [
+    '-y', '-loglevel', 'error', '-f', 'mpegts', '-i', 'pipe:0',
+    '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart',
+    '-f', 'mp4', partialPath,
+  ], { stdio: ['pipe', 'ignore', 'pipe'] })
+  let stderr = ''
+  ff.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8000) })
+  const exited = new Promise<void>((resolve, reject) => {
+    ff.once('error', reject)
+    ff.once('close', (code) => code === 0 ? resolve() : reject(new Error('MP4 finalization failed: ' + (stderr.trim() || 'FFmpeg exited with code ' + code))))
+  })
+  try {
+    for (let i = 0; i < segmentCount; i++) {
+      const encrypted = readFileSync(join(row.local_dir, 'seg_' + i + '.enc'))
+      const plain = decryptSegment(encrypted, key)
+      if (!ff.stdin.write(plain)) await new Promise<void>((resolve) => ff.stdin.once('drain', resolve))
+    }
+    ff.stdin.end()
+    await exited
+    renameSync(partialPath, outputPath)
+    return { path: outputPath, size: statSync(outputPath).size }
+  } catch (err) {
+    try { ff.kill('SIGKILL') } catch {}
+    try { rmSync(partialPath, { force: true }) } catch {}
+    throw err
+  }
 }
 
 // ─── Core download logic ──────────────────────────────────────────────────────
@@ -667,6 +776,8 @@ async function downloadContent(id: string): Promise<void> {
       db.prepare(`UPDATE downloads SET total_segments = ? WHERE id = ?`).run(variantSegments.length, id)
 
       let completed = 0
+      let downloadedBytes = 0
+      let estimatedTotalBytes = 0
       for (const segUrl of variantSegments) {
         if (cancelSignals.get(id)) throw new Error('cancelled')
 
@@ -682,45 +793,42 @@ async function downloadContent(id: string): Promise<void> {
           if (total > 0) {
             overallPct = Math.round(((completed + (recv / total)) / variantSegments.length) * 100)
           }
-          db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ? WHERE id = ?`).run(overallPct, speedKbps, id)
-          notifyProgress(id, overallPct, 'downloading', completed, variantSegments.length)
+          if (total > 0) {
+            estimatedTotalBytes = Math.max(estimatedTotalBytes, Math.round(((downloadedBytes + total) / (completed + 1)) * variantSegments.length))
+          }
+          db.prepare(`UPDATE downloads SET progress_percent = ?, download_speed_kbps = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?`).run(overallPct, speedKbps, downloadedBytes + recv, estimatedTotalBytes, id)
+          notifyProgress(id, overallPct, 'downloading', completed, variantSegments.length, downloadedBytes + recv, estimatedTotalBytes)
         })
 
         const encrypted = encryptSegment(plain, key)
         writeFileSync(segPath, encrypted)
+        downloadedBytes += plain.length
         completed++
 
         const finalPct = Math.round((completed / variantSegments.length) * 100)
         db.prepare(`UPDATE downloads SET completed_segments = ?, progress_percent = ? WHERE id = ?`).run(completed, finalPct, id)
-        notifyProgress(id, finalPct, 'downloading', completed, variantSegments.length)
+        notifyProgress(id, finalPct, 'downloading', completed, variantSegments.length, downloadedBytes, estimatedTotalBytes)
       }
 
-      // Write local manifest with offline:// segment paths
-      const offlinePlaylist = rawPlaylist.replace(
-        /^(?!#)(.+)$/gm,
-        (line: string) => {
-          const trimmed = line.trim()
-          if (!trimmed) return ''
-          const idx = variantSegments.findIndex((s) => s.endsWith(trimmed) || trimmed.endsWith(s.split('/').pop()!))
-          const segIndex = idx >= 0 ? idx : completed - 1
-          return `offline://${id}/seg_${segIndex}.enc`
-        },
-      )
-      const manifestPath = join(localDir, 'manifest.m3u8')
-      writeFileSync(manifestPath, offlinePlaylist)
+      // Remux the locally cached transport stream into one portable MP4. This copies
+      // video/audio without re-encoding, then removes the internal segment cache.
+      db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
+      notifyProgress(id, 99, 'downloading', completed, variantSegments.length, downloadedBytes, downloadedBytes)
+      const portable = await finalizeHlsMp4(row, key, completed)
+      rmSync(localDir, { recursive: true, force: true })
 
       db.prepare(`
-        UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?
+        UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ?
         WHERE id = ?
-      `).run(new Date().toISOString(), manifestPath, id)
+      `).run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, id)
 
-      notifyProgress(id, 100, 'completed', completed, variantSegments.length)
+      notifyProgress(id, 100, 'completed', completed, variantSegments.length, portable.size, portable.size)
     } else {
       // No HLS segments found (dev/mock scenario) — mark complete with empty manifest
       const manifestPath = join(localDir, 'manifest.m3u8')
       writeFileSync(manifestPath, master.rawPlaylist)
-      db.prepare(`UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ? WHERE id = ?`)
-        .run(new Date().toISOString(), manifestPath, id)
+      db.prepare(`UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?`)
+        .run(new Date().toISOString(), manifestPath, 0, 0, id)
 
       notifyProgress(id, 100, 'completed', 0, 0)
     }
@@ -756,7 +864,9 @@ function notifyProgress(
   percent: number,
   status?: string,
   completedSegments?: number,
-  totalSegments?: number
+  totalSegments?: number,
+  downloadedBytes?: number,
+  totalBytes?: number
 ): void {
   BrowserWindow.getAllWindows()[0]?.webContents.send('download:progress', {
     id,
@@ -764,6 +874,8 @@ function notifyProgress(
     status,
     completedSegments,
     totalSegments,
+    downloadedBytes,
+    totalBytes,
   })
 }
 
@@ -777,6 +889,25 @@ export function registerDownloadIpc(): void {
 
   // Trigger processQueue() once on startup to resume download queue
   processQueue()
+  // Upgrade legacy completed segment caches into the portable MP4 format in place.
+  const legacyRows = db.prepare("SELECT * FROM downloads WHERE status = 'completed' AND manifest_path LIKE '%.m3u8'").all() as DownloadRow[]
+  void (async () => {
+    for (const row of legacyRows) {
+      try {
+        db.prepare("UPDATE downloads SET status = 'downloading', progress_percent = 99, error_message = NULL WHERE id = ?").run(row.id)
+        notifyProgress(row.id, 99, 'downloading', row.completed_segments, row.total_segments, row.downloaded_bytes, row.total_bytes)
+        const portable = await finalizeHlsMp4(row, deriveSegmentKey(row.drm_key_id), row.completed_segments)
+        rmSync(row.local_dir, { recursive: true, force: true })
+        db.prepare("UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?")
+          .run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, row.id)
+        notifyProgress(row.id, 100, 'completed', row.completed_segments, row.total_segments, portable.size, portable.size)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        db.prepare("UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?").run(message, row.id)
+        notifyProgress(row.id, 0, 'error')
+      }
+    }
+  })()
 
   ipcMain.handle('download:start', async (
     _event,
@@ -848,6 +979,9 @@ export function registerDownloadIpc(): void {
   ipcMain.handle('download:get-manifest', (_event, id: string) => {
     const row = db.prepare('SELECT manifest_path, drm_key_id FROM downloads WHERE id = ? AND status = ?').get(id, 'completed') as { manifest_path: string; drm_key_id: string | null } | undefined
     if (!row?.manifest_path || !existsSync(row.manifest_path)) return null
+    if (row.manifest_path.toLowerCase().endsWith('.mp4')) {
+      return { manifestContent: 'direct:offline://' + id + '/video.mp4', drmKeyId: null }
+    }
     return { manifestContent: readFileSync(row.manifest_path, 'utf-8'), drmKeyId: row.drm_key_id }
   })
 
@@ -870,6 +1004,14 @@ export function registerDownloadIpc(): void {
     return result.filePaths[0] ?? null
   })
 
+  ipcMain.handle('download:open-folder', async (_event, id?: string) => {
+    const row = id ? db.prepare('SELECT local_dir FROM downloads WHERE id = ?').get(id) as { local_dir: string } | undefined : undefined
+    const target = row?.local_dir ? dirname(row.local_dir) : join(app.getPath('userData'), 'downloads')
+    mkdirSync(target, { recursive: true })
+    const error = await shell.openPath(target)
+    return { ok: !error, error: error || undefined }
+  })
+
   ipcMain.handle('download:get-default-dir', () => {
     return join(app.getPath('userData'), 'downloads')
   })
@@ -882,13 +1024,10 @@ export function decryptLocalSegment(downloadId: string, segmentFilename: string)
     const db = getDb()
     const row = db.prepare('SELECT local_dir, drm_key_id FROM downloads WHERE id = ?').get(downloadId) as { local_dir: string; drm_key_id: string | null } | undefined
     if (!row) return null
-
     const segPath = join(row.local_dir, segmentFilename)
     if (!existsSync(segPath)) return null
-
     const key = deriveSegmentKey(row.drm_key_id)
-    const encrypted = readFileSync(segPath)
-    return decryptSegment(encrypted, key)
+    return decryptSegment(readFileSync(segPath), key)
   } catch {
     return null
   }
@@ -898,6 +1037,38 @@ export interface DirectVideoRangeResult {
   status: number
   headers: Record<string, string>
   data: Buffer | null
+}
+
+function readPortableVideoRange(filePath: string, rangeHeader: string | null): DirectVideoRangeResult {
+  const totalSize = statSync(filePath).size
+  let start = 0
+  let end = totalSize - 1
+  let isRange = true
+  if (rangeHeader) {
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
+    if (match) {
+      const startText = match[1] ?? ''
+      const endText = match[2] ?? ''
+      if (!startText && endText) {
+        start = Math.max(0, totalSize - Number(endText))
+      } else {
+        if (startText) start = Number(startText)
+        if (endText) end = Number(endText)
+      }
+    }
+  }
+  if (start >= totalSize) return { status: 416, headers: { 'Content-Range': 'bytes */' + totalSize }, data: null }
+  end = Math.min(end, totalSize - 1, start + 4 * 1024 * 1024 - 1)
+  const length = end - start + 1
+  const data = Buffer.allocUnsafe(length)
+  const fd = openSync(filePath, 'r')
+  try { readSync(fd, data, 0, length, start) } finally { closeSync(fd) }
+  const headers: Record<string, string> = {
+    'Content-Type': 'video/mp4', 'Content-Length': String(length), 'Accept-Ranges': 'bytes',
+    'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+  }
+  if (isRange) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + totalSize
+  return { status: isRange ? 206 : 200, headers, data }
 }
 
 export function decryptLocalDirectVideoRange(
@@ -911,6 +1082,9 @@ export function decryptLocalDirectVideoRange(
       return { status: 404, headers: {}, data: null }
     }
 
+    if (row.local_dir.toLowerCase().endsWith('.mp4') && existsSync(row.local_dir)) {
+      return readPortableVideoRange(row.local_dir, rangeHeader)
+    }
     const metadataPath = join(row.local_dir, 'metadata.json')
     if (!existsSync(metadataPath)) {
       return { status: 404, headers: {}, data: null }

@@ -32,6 +32,8 @@ function migrate(db: Database.Database): void {
       download_speed_kbps INTEGER DEFAULT 0,
       total_segments  INTEGER DEFAULT 0,
       completed_segments INTEGER DEFAULT 0,
+      downloaded_bytes INTEGER DEFAULT 0,
+      total_bytes      INTEGER DEFAULT 0,
       local_dir       TEXT NOT NULL,
       manifest_path   TEXT,
       downloaded_at   TEXT,
@@ -76,6 +78,11 @@ function migrate(db: Database.Database): void {
   // Check if headers column exists in downloads table (for backward compatibility)
   const tableInfo = db.prepare("PRAGMA table_info(downloads)").all() as Array<{ name: string }>
   const hasHeaders = tableInfo.some((col) => col.name === 'headers')
+  const hasDownloadedBytes = tableInfo.some((col) => col.name === 'downloaded_bytes')
+  if (!hasDownloadedBytes) db.exec(`ALTER TABLE downloads ADD COLUMN downloaded_bytes INTEGER DEFAULT 0;`)
+  const hasTotalBytes = tableInfo.some((col) => col.name === 'total_bytes')
+  if (!hasTotalBytes) db.exec(`ALTER TABLE downloads ADD COLUMN total_bytes INTEGER DEFAULT 0;`)
+
   if (!hasHeaders) {
     db.exec(`ALTER TABLE downloads ADD COLUMN headers TEXT;`)
   }
@@ -96,6 +103,8 @@ export interface DownloadRow {
   download_speed_kbps: number
   total_segments: number
   completed_segments: number
+  downloaded_bytes: number
+  total_bytes: number
   local_dir: string
   manifest_path: string | null
   downloaded_at: string | null
