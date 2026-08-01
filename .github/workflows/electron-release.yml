@@ -1,15 +1,24 @@
 name: Electron Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
 
 jobs:
-  # ─── Linux: AppImage + .deb → client/release/linux/ ─────────────────────────
+  # ─── Linux: native x64 + ARM64 AppImage/.deb builds ─────────────────────────────────────────────────
   build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
+    name: Build Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
@@ -22,24 +31,50 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify native runner architecture
+        shell: bash
+        run: |
+          test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+          uname -m
+
       - name: Build renderer + main process
         run: npm run build --workspace=client
 
       - name: Rebuild native modules
-        run: npm run rebuild:native --workspace=client
+        run: npm run rebuild:native --workspace=client -- --arch=${{ matrix.arch }}
+
+      - name: Verify native binaries
+        shell: bash
+        run: |
+          file node_modules/better-sqlite3/build/Release/better_sqlite3.node
+          file node_modules/keytar/build/Release/keytar.node
+          file "$(node -p "require('ffmpeg-static')")"
 
       - name: Package Linux (.AppImage + .deb)
-        run: npx electron-builder --config electron-builder.linux.yml --publish never
+        run: npx electron-builder --config electron-builder.linux.yml --linux --${{ matrix.arch }} --publish never
         working-directory: client
+
+      - name: Verify packaged native architecture
+        shell: bash
+        run: |
+          expected="x86-64"
+          app_dir="client/release/linux/linux-unpacked"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            expected="ARM aarch64"
+            app_dir="client/release/linux/linux-arm64-unpacked"
+          fi
+          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee packaged-native.txt
+          test "$(wc -l < packaged-native.txt)" -ge 3
+          test "$(grep -c "$expected" packaged-native.txt)" = "$(wc -l < packaged-native.txt)"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-release
+          name: linux-release-${{ matrix.arch }}
           path: |
             client/release/linux/*.AppImage
             client/release/linux/*.deb
-            client/release/linux/latest-linux.yml
+            client/release/linux/latest-linux*.yml
             client/release/linux/*.blockmap
           retention-days: 1
 
@@ -65,6 +100,28 @@ jobs:
       - name: Rebuild native modules
         run: npm run rebuild:native --workspace=client
 
+      - name: Verify Windows native binaries
+        shell: pwsh
+        run: |
+          $nativeFiles = @(
+            "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+            "node_modules/keytar/build/Release/keytar.node",
+            (node -p "require('ffmpeg-static')")
+          )
+          foreach ($nativeFile in $nativeFiles) {
+            if (-not (Test-Path $nativeFile)) { throw "Missing native binary: $nativeFile" }
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $nativeFile))
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+              throw "Not a Windows PE binary: $nativeFile"
+            }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne 0x8664) {
+              throw ("Expected Windows x64 PE binary, found machine 0x{0:X4}: {1}" -f $machine, $nativeFile)
+            }
+            Write-Host "Verified Windows x64: $nativeFile"
+          }
+
       - name: Package Windows (.exe)
         run: npx electron-builder --config electron-builder.win.yml --publish never
         working-directory: client
@@ -81,6 +138,7 @@ jobs:
 
   # ─── Release: collect artifacts → single GitHub Release ─────────────────────
   create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Publish GitHub Release
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
@@ -93,8 +151,9 @@ jobs:
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
-          name: linux-release
+          pattern: linux-release-*
           path: artifacts/linux
+          merge-multiple: true
 
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
@@ -111,7 +170,7 @@ jobs:
           files: |
             artifacts/linux/*.AppImage
             artifacts/linux/*.deb
-            artifacts/linux/latest-linux.yml
+            artifacts/linux/latest-linux*.yml
             artifacts/linux/*.blockmap
             artifacts/windows/*.exe
             artifacts/windows/latest.yml

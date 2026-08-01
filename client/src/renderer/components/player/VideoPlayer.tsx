@@ -271,6 +271,7 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const controlsPinnedRef = useRef(false)
 
   const [activeStreamUrl, setActiveStreamUrl] = useState(session.manifestUrl)
   const [activeHeaders, setActiveHeaders] = useState<Record<string, string> | undefined>(streamHeaders)
@@ -315,19 +316,36 @@ export function VideoPlayer({
   const externalSubsRef = useRef<Array<{ id: number; name: string; lang: string; url: string }>>([])
   externalSubsRef.current = externalSubs
 
-  // Deduplicate: INTERNAL HLS subs take priority over external opensubtitles for the same language.
-  // Internal subs are timed against the actual stream's video timeline (same way Netflix/HBO
-  // ship subtitles — encoded alongside the master video, baked into the HLS manifest), so they
-  // stay lip-synced. External SRTs from opensubtitles were timed against an arbitrary release
-  // and almost always drift.
-  // Uses normalizeLang so that e.g. internal 'spa' matches external 'es' correctly.
+  // Internal HLS subtitles take priority because they are timed to the active stream.
+  // Keep external variants only for languages not present internally, then sort the final list
+  // deterministically so every variant of a language stays together. The saved preferred
+  // language leads the list; remaining languages are alphabetical, with internal tracks first.
   const subtitleTracks = (() => {
-    const intLangs = new Set(internalSubs.map((s) => normalizeLang(s.lang)))
-    const dedupedExternal = externalSubs.filter((s) => !intLangs.has(normalizeLang(s.lang)))
-    return [
+    const preferredLang = normalizeLang(defaultSubtitleLanguage ?? "")
+    const internalLangs = new Set(internalSubs.map((track) => normalizeLang(track.lang)))
+    const combined = [
       ...internalSubs,
-      ...dedupedExternal.map((s) => ({ id: s.id, name: s.name, lang: s.lang })),
+      ...externalSubs
+        .filter((track) => !internalLangs.has(normalizeLang(track.lang)))
+        .map((track) => ({ id: track.id, name: track.name, lang: track.lang })),
     ]
+
+    return combined.sort((a, b) => {
+      const aLang = normalizeLang(a.lang)
+      const bLang = normalizeLang(b.lang)
+      if (preferredLang) {
+        const preferredOrder = Number(bLang === preferredLang) - Number(aLang === preferredLang)
+        if (preferredOrder !== 0) return preferredOrder
+      }
+      const aLabel = LANGUAGE_MAP[aLang] ?? a.name
+      const bLabel = LANGUAGE_MAP[bLang] ?? b.name
+      const languageOrder = aLabel.localeCompare(bLabel, undefined, { sensitivity: "base" })
+      if (languageOrder !== 0) return languageOrder
+      const sourceOrder = Number(a.id >= 1000) - Number(b.id >= 1000)
+      if (sourceOrder !== 0) return sourceOrder
+      const nameOrder = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+      return nameOrder !== 0 ? nameOrder : a.id - b.id
+    })
   })()
   const [currentSubtitle, setCurrentSubtitle] = useState(-1)
   const subtitlePreferenceKeyRef = useRef('')
@@ -516,7 +534,9 @@ export function VideoPlayer({
           || ((stream.audioLangs?.length ?? 0) > 0 ? normalizeLang(stream.audioLangs![0]!) : '')
         const res = await Promise.race([
           torrentApi.resolve(playUrl, wantLang),
-          new Promise<{ error: string }>((resolve) => setTimeout(() => resolve({ error: 'Torrent readiness timed out; choose another 1080p source.' }), 65_000)),
+          new Promise<Awaited<ReturnType<typeof torrentApi.resolve>>>((resolve) =>
+            setTimeout(() => resolve({ error: 'Torrent readiness timed out; choose another 1080p source.' }), 65_000),
+          ),
         ])
         if (gen !== switchGenRef.current) return
         if (!res?.url) {
@@ -1284,8 +1304,20 @@ export function VideoPlayer({
   const resetControlsTimeout = useCallback(() => {
     setShowControls(true)
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current)
+    if (controlsPinnedRef.current) return
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000)
   }, [])
+
+  const pinControls = useCallback(() => {
+    controlsPinnedRef.current = true
+    setShowControls(true)
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current)
+  }, [])
+
+  const resumeControlsAutoHide = useCallback(() => {
+    controlsPinnedRef.current = false
+    resetControlsTimeout()
+  }, [resetControlsTimeout])
 
   useEffect(() => {
     resetControlsTimeout()
@@ -1768,6 +1800,8 @@ export function VideoPlayer({
           onNextEpisode={(ep) => { setShowNextEpisode(false); onNextEpisode?.(ep) }}
           onPip={onPip}
           openSettingsSignal={openSettingsSignal}
+          onInteractionStart={pinControls}
+          onInteractionEnd={resumeControlsAutoHide}
         />
       </div>
       )}

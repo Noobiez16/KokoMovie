@@ -77,6 +77,10 @@ interface Props {
   /** Bumped by the parent to force the settings panel open (home view). Used by the Stream-Error
    *  "Choose another source" flow so the user lands back in the player with the menu open. */
   openSettingsSignal?: number
+  /** Keep the player chrome visible while its controls or settings are being used. */
+  onInteractionStart?: () => void
+  /** Resume normal auto-hide after the pointer leaves the controls region. */
+  onInteractionEnd?: () => void
 }
 
 function formatTime(secs: number): string {
@@ -104,6 +108,7 @@ export function PlayerControls({
   audioTracks = AUDIO_TRACKS_PLACEHOLDER, currentAudioTrack = -1, onAudioTrackChange,
   crossSourceAudio = [], onCrossSourceAudio,
   onPip, openSettingsSignal = 0,
+  onInteractionStart, onInteractionEnd,
 }: Props) {
   // One gear button opens a single settings panel. It uses a drill-down layout
   // (home list → category) like mainstream players, instead of dumping every option
@@ -228,7 +233,12 @@ export function PlayerControls({
       )}
 
       {/* Bottom controls */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-3 pt-8">
+      <div
+        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-3 pt-8"
+        onMouseEnter={onInteractionStart}
+        onMouseLeave={onInteractionEnd}
+        onWheel={onInteractionStart}
+      >
         {/* Seek bar */}
         <div
           className="relative h-1 rounded-full bg-white/20 cursor-pointer mb-3 group/seek hover:h-1.5 transition-all"
@@ -322,9 +332,14 @@ export function PlayerControls({
               {showSettings && (
                 <>
                   {/* Click-away backdrop */}
-                  <div className="fixed inset-0 z-40" onClick={closeSettings} />
+                  <div className="fixed inset-0 z-40" onMouseEnter={onInteractionEnd} onClick={closeSettings} />
 
-                  <div className="absolute bottom-12 right-0 z-50 w-[260px] max-h-[62vh] overflow-y-auto bg-black/95 backdrop-blur-md rounded-xl border border-white/15 shadow-2xl py-1.5 px-1 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                  <div
+                    className="absolute bottom-12 right-0 z-50 w-[260px] max-h-[62vh] overflow-y-auto overscroll-contain touch-pan-y bg-black/95 backdrop-blur-md rounded-xl border border-white/15 shadow-2xl py-1.5 px-1 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent"
+                    onMouseEnter={onInteractionStart}
+                    onWheel={(event) => event.stopPropagation()}
+                    style={{ scrollbarGutter: "stable" }}
+                  >
 
                     {/* ── Home: category list ──────────────────────────────────── */}
                     {menuView === 'home' && (

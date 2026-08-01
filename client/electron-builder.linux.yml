@@ -26,11 +26,10 @@ asarUnpack:
 compression: maximum
 
 linux:
+  artifactName: "${productName}-${version}-linux-${arch}.${ext}"
   target:
     - target: AppImage
-      arch: [x64]
     - target: deb
-      arch: [x64]
   icon: build/icons
   category: AudioVideo
   synopsis: Stream your favourite movies and TV shows

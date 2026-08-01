@@ -71,11 +71,10 @@ dmg:
 
 # ─── Linux ────────────────────────────────────────────────────────────────────
 linux:
+  artifactName: "${productName}-${version}-linux-${arch}.${ext}"
   target:
     - target: AppImage
-      arch: [x64, arm64]
     - target: deb
-      arch: [x64]
     - target: snap
       arch: [x64]
   icon: build/icons

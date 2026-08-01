@@ -486,6 +486,16 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 
 ---
 
+## DN-054: Never publish Linux ARM64 from an x64 native-module tree
+
+**Decision:** Release Linux x64 and ARM64 from separate native runners. Do not reuse `node_modules` between architectures, and do not treat a successful Electron Builder cross-package as proof that embedded `.node` or FFmpeg binaries match the target CPU.
+
+**Why:** KokoMovie ships `better-sqlite3`, `keytar`, and `ffmpeg-static`. These artifacts are architecture-specific. The provider proxy and torrent server themselves use architecture-neutral Node socket APIs, but they cannot start reliably if the packaged native dependencies target another CPU. QEMU/binfmt may be used for local investigation; the release pipeline must install, rebuild, validate, and package on the matching native architecture.
+
+**Required release checks:** compare `process.arch` to the matrix target, inspect both `.node` files and FFmpeg with `file`, preserve architecture in artifact names, and keep x64 and ARM64 workflow artifacts isolated until the publishing job.
+
+---
+
 ## DN-032: Cross-compiling the Windows `.exe` on Linux ships Linux `.node` binaries silently
 
 **Date:** 2026-05-22

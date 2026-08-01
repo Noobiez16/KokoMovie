@@ -1,6 +1,6 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.2.0 (Fully Local Architecture)
+**Version:** 1.4.0 (Fully Local, Multi-Architecture Linux)
 **Date:** July 2026
 **Status:** Current
 
@@ -233,6 +233,18 @@ CREATE TABLE preferences (
 ## 9. Infrastructure
 
 No hosting infrastructure or local Docker orchestration is required. The application only requires the local desktop runtime.
+
+### Linux CPU architectures
+
+Linux packages are produced independently for x64 (`x86_64`) and ARM64 (`aarch64`). Release CI
+runs each build on a native GitHub-hosted runner so Electron, `better-sqlite3`, `keytar`, and the
+bundled FFmpeg binary all match the package architecture. The local HTTP proxy and torrent server
+bind only to the loopback interface and use Node's architecture-independent socket APIs, so their
+IPC and URL contracts are identical on both architectures.
+
+QEMU/binfmt emulation is supported as a development fallback for ARM64 packaging, but emulated
+artifacts are not used for releases because native add-ons are safest when installed and rebuilt
+on the target CPU architecture.
 
 ---
 

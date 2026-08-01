@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] — Unreleased — Linux ARM64 / aarch64
+
+### Added
+- **Native Help Center and Feedback Lifecycle**: The Help menu now includes an offline Documentation view backed by the project changelog and a secure GitHub Issues feedback composer. Each submitted request carries a private-to-device tracking identifier; when its issue is closed with a `[DONE]` maintainer explanation and changelog version, the originating installation displays an in-app completion notification.
+- **Native Linux ARM64 Releases**: AppImage and Debian packages are now defined for ARM64/aarch64 alongside the existing x64 builds.
+- **Architecture-Isolated Release Automation**: GitHub Actions builds Linux x64 and ARM64 in parallel on matching native runners, verifies the runner and native dependency architectures, and merges both artifact sets into one release. Manual workflow runs can validate both packages without publishing; only `v*` tags create a GitHub Release.
+- **Windows Native Binary Release Gate**: Windows automation now validates the PE architecture of SQLite, keychain, and FFmpeg binaries before producing the NSIS installer.
+- **Explicit Linux Build Commands**: Added host-architecture, x64, and ARM64 packaging scripts for reproducible local and CI builds.
+
+### Changed
+- **Architecture-Safe Native Toolchain**: `better-sqlite3` and `keytar` are rebuilt for the selected Electron architecture, while the architecture-matched `ffmpeg-static` binary is validated before packaging.
+- **Unambiguous Linux Artifacts**: Linux filenames include the CPU architecture, preventing x64 and ARM64 AppImages or Debian packages from overwriting or being mistaken for one another.
+- **Version Definitions**: Application and package metadata now track the active v1.4.0 development line.
+
+### Fixed
+- **Expired Direct Streams Winning Provider Races**: Direct MP4/WebM/MKV candidates now receive a bounded 1 KiB ranged-GET probe using playback-equivalent sanitized headers. Non-2xx responses, HTML/forbidden payloads, empty bodies, and undersized placeholders are rejected before selection and excluded from automatic fallback, preventing stale VidLink signed URLs from surfacing as localhost proxy 428 errors.
+- **Generated Release TypeScript Diagnostics**: VS Code now excludes nested `node_modules` inside Electron release staging trees, preventing dependency `tsconfig.json` files with stripped source inputs from appearing as KokoMovie project errors.
+- **Playback Settings Scroll Continuity**: The settings panel now contains wheel and touch scrolling within its own stable scroll area, preventing subtitle lists from intermittently handing scrolling back to the player.
+- **Grouped Subtitle Language Ordering**: Subtitle tracks are now sorted deterministically by normalized language, source type, and name, keeping tracks for the same language together while preserving the preferred language at the top.
+- **Interaction-Aware Player Chrome**: Playback controls remain visible while the pointer is hovering or scrolling within the control and settings region, then resume their normal inactivity fade after the pointer returns to the main video area.
+- **Torrent Resolver Result Typing**: The torrent readiness timeout now shares the resolver's declared result shape, fixing TypeScript access errors for `url` and `transcoded` in `VideoPlayer`.
+
+---
+
 ## [1.2.0] — 2026-07-18 — Stable Fully Local Release
 
 ### Added

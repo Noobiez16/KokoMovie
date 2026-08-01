@@ -64,6 +64,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── App ──────────────────────────────────────────────────────────────────
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   getPlatform: () => ipcRenderer.invoke('app:platform'),
+  onHelpAction: (callback: (action: 'documentation' | 'feedback') => void) => {
+    const handler = (_: Electron.IpcRendererEvent, action: 'documentation' | 'feedback') => callback(action)
+    ipcRenderer.on('help:action', handler)
+    return () => ipcRenderer.removeListener('help:action', handler)
+  },
   onUpdateAvailable: (callback: (version?: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, version?: string) => callback(version)
     ipcRenderer.on('update:available', handler)

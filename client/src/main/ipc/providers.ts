@@ -1025,18 +1025,86 @@ function isLikelyFullLengthPlaylist(text: string): boolean {
   return duration === 0 || duration >= 180
 }
 
+function probeDirectVideo(url: string, headers: Record<string, string>): Promise<{ status: number; headers: Record<string, string>; firstBytes: Buffer }> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (value: { status: number; headers: Record<string, string>; firstBytes: Buffer }) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+
+    try {
+      const parsed = new URL(url)
+      const isHttps = parsed.protocol === "https:"
+      const requestHeaders: Record<string, string> = {}
+      for (const [key, value] of Object.entries(headers)) {
+        const lower = key.toLowerCase()
+        if (lower === "host" || lower === "cookie" || lower === "connection" || lower === "accept-encoding" || lower.startsWith("sec-")) continue
+        requestHeaders[key] = value
+      }
+      requestHeaders["Range"] = "bytes=0-1023"
+      requestHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+      const requestOptions: nodeHttp.RequestOptions = {
+        method: "GET",
+        headers: requestHeaders,
+        timeout: 15000,
+        agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
+        lookup: resilientLookup as nodeHttp.RequestOptions["lookup"],
+      }
+      const onResponse = (response: nodeHttp.IncomingMessage) => {
+        const responseHeaders: Record<string, string> = {}
+        for (const [key, value] of Object.entries(response.headers)) {
+          if (value != null) responseHeaders[key] = Array.isArray(value) ? value.join(", ") : String(value)
+        }
+        const status = response.statusCode ?? 0
+        response.once("data", (chunk: Buffer) => {
+          finish({ status, headers: responseHeaders, firstBytes: Buffer.from(chunk.subarray(0, 128)) })
+          response.destroy()
+        })
+        response.once("end", () => finish({ status, headers: responseHeaders, firstBytes: Buffer.alloc(0) }))
+        response.once("error", (error) => { if (!settled) reject(error) })
+      }
+      const request = isHttps
+        ? nodeHttps.request(url, requestOptions as nodeHttps.RequestOptions, onResponse)
+        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, requestOptions, onResponse)
+      request.once("timeout", () => request.destroy(new Error("Direct-video probe timeout")))
+      request.once("error", (error: Error) => { if (!settled) reject(error) })
+      request.end()
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
 async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[] }> {
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
     if (isDirect) {
       try {
-        const head = await fetchNode(url, { method: 'HEAD', headers })
-        const size = Number(head.headers['content-length'] ?? 0)
-        if (size > 0 && size < 5 * 1024 * 1024) {
-          logExtraction('Rejected undersized direct-video placeholder: ' + size + ' bytes')
+        const probe = await probeDirectVideo(url, headers)
+        if (probe.status !== 200 && probe.status !== 206) {
+          logExtraction("Rejected direct video with HTTP " + probe.status + ": " + url.slice(0, 140))
           return { resolution: 0, audioLangs: [] }
         }
-      } catch { /* some providers reject HEAD; runtime validation remains active */ }
+        const contentType = (probe.headers["content-type"] ?? "").toLowerCase()
+        const prefix = probe.firstBytes.toString("utf8").trimStart().toLowerCase()
+        if (probe.firstBytes.length === 0 || contentType.includes("text/html") || prefix.includes("forbidden") || prefix.startsWith("<!doctype") || prefix.startsWith("<html")) {
+          logExtraction("Rejected direct-video error payload (" + (contentType || "unknown type") + ")")
+          return { resolution: 0, audioLangs: [] }
+        }
+        const contentRange = probe.headers["content-range"] ?? ""
+        const totalMatch = contentRange.match(/\/(\d+)$/)
+        const totalSize = totalMatch ? Number(totalMatch[1]) : probe.status === 200 ? Number(probe.headers["content-length"] ?? 0) : 0
+        if (totalSize > 0 && totalSize < 5 * 1024 * 1024) {
+          logExtraction("Rejected undersized direct-video placeholder: " + totalSize + " bytes")
+          return { resolution: 0, audioLangs: [] }
+        }
+      } catch (error) {
+        logExtraction("Rejected unprobeable direct video: " + (error instanceof Error ? error.message : String(error)))
+        return { resolution: 0, audioLangs: [] }
+      }
       return { resolution: 1080, audioLangs: [] }
     }
 
@@ -1371,6 +1439,10 @@ export function registerProvidersIpc(): void {
             // Check resolution + alternate audio (dub) languages of the found stream
             const { resolution, audioLangs } = await getMaxResolution(result.url, result.headers)
             logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | Audio: [${audioLangs.join(',')}] | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
+            if (resolution <= 0) {
+              logExtraction(`REJECTED: ${provider.name} returned a non-playable stream`)
+              return
+            }
 
             const currentResult: ProviderResult = {
               providerId: provider.id,

@@ -6,7 +6,7 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.2.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#-download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#-automatic-updates)
 
@@ -26,6 +26,9 @@ Pick your system and click to grab the latest version from the
 [![Download for Linux (.deb)](https://img.shields.io/badge/Linux-Download%20.deb-8B5CF6?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
 &nbsp;
 [![Download for Linux (AppImage)](https://img.shields.io/badge/Linux-Download%20.AppImage-A78BFA?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
+
+Linux downloads are published separately for **x64/amd64** and **ARM64/aarch64**. Choose the
+artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` → `arm64`).
 
 </div>
 
@@ -93,6 +96,25 @@ the web — and plays it in its built-in player.
 
 **Will my data be uploaded anywhere?** No. Your watchlist, preferences, and viewing history are stored locally in an on-device SQLite database.
 
+### Documentation and feedback
+
+Open **Help → Documentation** to read the changelog inside KokoMovie, including while
+offline. Use **Help → Send Feedback…** to compose a bug report, feature request, or
+improvement. KokoMovie opens GitHub's authenticated issue page for final review and never
+stores a GitHub password or access token.
+
+Feedback carries an anonymous installation-local tracking ID. To notify its author after
+the work is released, a maintainer closes the GitHub issue and posts a final comment in
+this format:
+
+```text
+[DONE] Implemented in v1.4.0 (changelog v1.4.0): Brief user-facing explanation of what changed.
+```
+
+On a later launch or window focus, that installation displays the explanation, changelog
+version, and a link to the completed issue. Only the public issue and its public comments
+are checked; no watch history, API keys, or other local library data are transmitted.
+
 ---
 
 <details>
@@ -141,9 +163,13 @@ KokoMovie/
 ### Building installers
 
 ```bash
-# Linux (.AppImage + .deb)  →  client/release/linux/
+# Linux host architecture (.AppImage + .deb) → client/release/linux/
 sudo apt install build-essential python3 libsecret-1-dev
 cd client && npm run dist:linux
+
+# Explicit targets (use a native host of the same architecture)
+cd client && npm run dist:linux:x64
+cd client && npm run dist:linux:arm64
 
 # Windows (.exe)  →  client/release/windows/   (run on Windows)
 cd client && npm run dist:win
@@ -155,8 +181,8 @@ cd client && npm run dist:mac
 ### Releasing (auto-update pipeline)
 
 Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on any
-`v*` tag. The workflow builds Windows + Linux, then publishes the installers **plus the
-`latest.yml` / `latest-linux.yml` and `.blockmap` files** to a GitHub Release.
+`v*` tag. The same workflow can be dispatched manually to validate both Linux architectures without publishing a release. The workflow builds Windows plus native Linux x64 and ARM64 jobs, then publishes the installers **plus the
+`latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
 git tag v1.0.4-beta

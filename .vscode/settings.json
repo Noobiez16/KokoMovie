@@ -1,4 +1,7 @@
 {
+    "files.exclude": { "**/client/release/**/node_modules": true },
+    "files.watcherExclude": { "**/client/release/**/node_modules/**": true },
+    "search.exclude": { "**/client/release/**/node_modules": true },
     "snyk.advanced.organization": "c2245241-18df-496f-b8cb-82452046f0fe",
     "snyk.advanced.autoSelectOrganization": true
 }

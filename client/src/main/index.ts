@@ -10,6 +10,7 @@ import { registerLibraryIpc } from './ipc/library'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
 import { registerTorrentIpc } from './ipc/torrent'
 import { destroyDiscordPresence, registerDiscordPresence } from './discord-presence'
+import { installApplicationMenu } from './app-menu'
 
 // Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
 // the pipe has been closed (e.g. when the parent process exits or during rapid
@@ -251,6 +252,7 @@ app.whenReady().then(async () => {
 
   purgeExpiredDownloads()
   createWindow()
+  installApplicationMenu()
   setupUpdater()
   registerAuthIpc()
   registerDownloadIpc()

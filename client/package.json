@@ -1,7 +1,7 @@
 {
   "name": "kokomovie-client",
-  "version": "1.2.0",
-  "description": "KokoMovie desktop streaming client — Windows, macOS, Linux",
+  "version": "1.4.0",
+  "description": "KokoMovie desktop streaming client — Windows, macOS, Linux x64 and Linux ARM64",
   "author": {
     "name": "KokoMovie Inc.",
     "email": "support@kokomovie.com",
@@ -18,13 +18,15 @@
     "electron:dev": "concurrently -k \"vite\" \"tsc -p tsconfig.main.json -w\" \"nodemon --watch dist-electron --delay 3 --exec electron --no-sandbox .\"",
     "electron:build": "npm run build && electron-builder",
     "rebuild:native": "electron-rebuild --version 31.7.7 --only better-sqlite3,keytar",
-    "dist:linux": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.linux.yml",
+    "dist:linux": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.linux.yml --linux",
     "dist:win": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.win.yml",
     "dist:mac": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.mac.yml",
     "dist:all": "npm run dist:linux && npm run dist:win",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "dist:linux:x64": "npm run build && npm run rebuild:native -- --arch=x64 && electron-builder --config electron-builder.linux.yml --linux --x64",
+    "dist:linux:arm64": "npm run build && npm run rebuild:native -- --arch=arm64 && electron-builder --config electron-builder.linux.yml --linux --arm64"
   },
   "dependencies": {
     "@sentry/electron": "^5.0.0",

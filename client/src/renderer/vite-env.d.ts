@@ -47,6 +47,7 @@ interface ElectronAPI {
   // App
   getAppVersion: () => Promise<string>
   getPlatform: () => Promise<string>
+  onHelpAction: (callback: (action: 'documentation' | 'feedback') => void) => () => void
   onUpdateAvailable: (callback: (version?: string) => void) => () => void
   onUpdateDownloaded: (callback: (version?: string) => void) => () => void
   installUpdate: () => Promise<void>
