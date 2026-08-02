@@ -6,13 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.4.0] — Unreleased — Linux ARM64 / aarch64
+## [1.4.0] — 2026-08-01 — Linux ARM64 / aarch64
 
 ### Added
 - **Native Help Center and Feedback Lifecycle**: The Help menu now includes an offline Documentation view backed by the project changelog and a secure GitHub Issues feedback composer. Each submitted request carries a private-to-device tracking identifier; when its issue is closed with a `[DONE]` maintainer explanation and changelog version, the originating installation displays an in-app completion notification.
 - **Native Linux ARM64 Releases**: AppImage and Debian packages are now defined for ARM64/aarch64 alongside the existing x64 builds.
 - **Architecture-Isolated Release Automation**: GitHub Actions builds Linux x64 and ARM64 in parallel on matching native runners, verifies the runner and native dependency architectures, and merges both artifact sets into one release. Manual workflow runs can validate both packages without publishing; only `v*` tags create a GitHub Release.
 - **Windows Native Binary Release Gate**: Windows automation now validates the PE architecture of SQLite, keychain, and FFmpeg binaries before producing the NSIS installer.
+- **Reliable ARM64 Package Assembly**: GitHub's ARM64 runner now stages and verifies the complete Electron application—including the ARM Electron executable, ASAR, native modules, FFmpeg, and resources—as one immutable directory. The stable x64 packaging host only wraps that prepackaged application into AppImage and Debian formats, eliminating fragile per-file native overlays and architecture-limited ARM-host packaging helpers.
 - **Explicit Linux Build Commands**: Added host-architecture, x64, and ARM64 packaging scripts for reproducible local and CI builds.
 
 ### Changed

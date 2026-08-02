@@ -46,15 +46,50 @@ jobs:
       - name: Verify native binaries
         shell: bash
         run: |
-          file node_modules/better-sqlite3/build/Release/better_sqlite3.node
-          file node_modules/keytar/build/Release/keytar.node
-          file "$(node -p "require('ffmpeg-static')")"
+          expected="x86-64"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then expected="ARM aarch64"; fi
+          find node_modules -path '*/build/Release/*.node' -exec file {} \; | tee native-builds.txt
+          file "$(node -p "require('ffmpeg-static')")" | tee -a native-builds.txt
+          test "$(wc -l < native-builds.txt)" -ge 3
+          test "$(grep -c "$expected" native-builds.txt)" = "$(wc -l < native-builds.txt)"
+
+      # Stage the complete app on ARM so architecture selection, ASAR packing, native modules,
+      # Electron, and extra resources cross the job boundary as one immutable unit.
+      - name: Stage complete Linux ARM64 application
+        if: matrix.arch == 'arm64'
+        run: npx electron-builder --config electron-builder.linux.yml --linux dir --arm64 --publish never
+        working-directory: client
+
+      - name: Verify staged Linux ARM64 application
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          app_dir="client/release/linux/linux-arm64-unpacked"
+          file "$app_dir/kokomovie-client" | tee staged-native.txt
+          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee -a staged-native.txt
+          test "$(wc -l < staged-native.txt)" -ge 4
+          test "$(grep -c 'ARM aarch64' staged-native.txt)" = "$(wc -l < staged-native.txt)"
+
+      - name: Archive staged Linux ARM64 application
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: tar -C client/release/linux -czf linux-arm64-unpacked.tar.gz linux-arm64-unpacked
+
+      - name: Upload staged Linux ARM64 application
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-staged-arm64
+          path: linux-arm64-unpacked.tar.gz
+          retention-days: 1
 
       - name: Package Linux (.AppImage + .deb)
+        if: matrix.arch == 'x64'
         run: npx electron-builder --config electron-builder.linux.yml --linux --${{ matrix.arch }} --publish never
         working-directory: client
 
       - name: Verify packaged native architecture
+        if: matrix.arch == 'x64'
         shell: bash
         run: |
           expected="x86-64"
@@ -68,9 +103,68 @@ jobs:
           test "$(grep -c "$expected" packaged-native.txt)" = "$(wc -l < packaged-native.txt)"
 
       - name: Upload Linux artifacts
+        if: matrix.arch == 'x64'
         uses: actions/upload-artifact@v4
         with:
           name: linux-release-${{ matrix.arch }}
+          path: |
+            client/release/linux/*.AppImage
+            client/release/linux/*.deb
+            client/release/linux/latest-linux*.yml
+            client/release/linux/*.blockmap
+          retention-days: 1
+
+  package-linux-arm64:
+    name: Package Linux (arm64)
+    needs: build-linux
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer + main process
+        run: npm run build --workspace=client
+
+      - name: Download staged Linux ARM64 application
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-staged-arm64
+
+      - name: Restore and verify staged Linux ARM64 application
+        shell: bash
+        run: |
+          mkdir -p client/release/linux
+          tar -C client/release/linux -xzf linux-arm64-unpacked.tar.gz
+          app_dir="client/release/linux/linux-arm64-unpacked"
+          file "$app_dir/kokomovie-client" | tee staged-native.txt
+          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee -a staged-native.txt
+          test "$(wc -l < staged-native.txt)" -ge 4
+          test "$(grep -c 'ARM aarch64' staged-native.txt)" = "$(wc -l < staged-native.txt)"
+
+      - name: Package Linux ARM64 (.AppImage + .deb)
+        run: npx electron-builder --config electron-builder.linux.yml --prepackaged release/linux/linux-arm64-unpacked --linux AppImage deb --arm64 --publish never
+        working-directory: client
+
+      - name: Verify packaged native architecture
+        shell: bash
+        run: |
+          app_dir="client/release/linux/linux-arm64-unpacked"
+          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee packaged-native.txt
+          test "$(wc -l < packaged-native.txt)" -ge 3
+          test "$(grep -c 'ARM aarch64' packaged-native.txt)" = "$(wc -l < packaged-native.txt)"
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-arm64
           path: |
             client/release/linux/*.AppImage
             client/release/linux/*.deb
@@ -140,7 +234,7 @@ jobs:
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
     name: Publish GitHub Release
-    needs: [build-linux, build-windows]
+    needs: [build-linux, package-linux-arm64, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -124,7 +124,7 @@ export function HelpCenter() {
       {view && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) setView(null) }}>
         <section className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/15 bg-[#100d1c] shadow-2xl">
           <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-            <div><p className="text-lg font-bold text-white">{view === 'documentation' ? 'Documentation & Changelog' : 'Send Feedback'}</p><p className="text-xs text-white/45">{view === 'documentation' ? 'What changed in every KokoMovie release' : 'Submit securely through GitHub Issues'}</p></div>
+            <div><p className="text-lg font-bold text-white">{view === 'documentation' ? 'Changelog' : 'Send Feedback'}</p><p className="text-xs text-white/45">{view === 'documentation' ? 'What changed in every KokoMovie release' : 'Submit securely through GitHub Issues'}</p></div>
             <button onClick={() => setView(null)} className="rounded-lg p-2 text-white/50 hover:bg-white/10 hover:text-white" aria-label="Close">✕</button>
           </header>
           {view === 'documentation' ? <div className="overflow-y-auto px-7 pb-8">{renderedChangelog}</div> :
