@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.4.1] — 2026-08-01 — Release Distribution Reliability
+
+### Changed
+- **Updater-Visible Patch Release**: Advanced the desktop application from v1.4.0 to v1.4.1 so existing v1.4.0 installations can detect and install the corrected release through the built-in updater.
+- **Consistent Version Metadata**: Aligned the root project, Electron client, shared package, legacy service workspaces, lockfile records, README badge, and architecture documentation on v1.4.1.
+- **Focused Help Center Terminology**: Renamed the in-app “Documentation & Changelog” heading to “Changelog” so the title accurately reflects the content shown.
+
+### Fixed
+- **Reliable Linux ARM64 Packaging**: The native ARM64 runner now stages and verifies the complete Electron application—including the ARM executable, ASAR, native modules, FFmpeg, and resources—before the stable packaging host wraps it into AppImage and Debian artifacts. This prevents host-architecture binaries from leaking into ARM64 releases and avoids architecture-limited packaging failures.
+- **Release Workflow Handoff**: Linux ARM64 artifacts now move between build and packaging jobs as one verified application bundle, and release publication waits for both Linux architectures and Windows to finish successfully.
+
+---
 
 ## [1.4.0] — 2026-08-01 — Linux ARM64 / aarch64
 
@@ -13,7 +25,6 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Native Linux ARM64 Releases**: AppImage and Debian packages are now defined for ARM64/aarch64 alongside the existing x64 builds.
 - **Architecture-Isolated Release Automation**: GitHub Actions builds Linux x64 and ARM64 in parallel on matching native runners, verifies the runner and native dependency architectures, and merges both artifact sets into one release. Manual workflow runs can validate both packages without publishing; only `v*` tags create a GitHub Release.
 - **Windows Native Binary Release Gate**: Windows automation now validates the PE architecture of SQLite, keychain, and FFmpeg binaries before producing the NSIS installer.
-- **Reliable ARM64 Package Assembly**: GitHub's ARM64 runner now stages and verifies the complete Electron application—including the ARM Electron executable, ASAR, native modules, FFmpeg, and resources—as one immutable directory. The stable x64 packaging host only wraps that prepackaged application into AppImage and Debian formats, eliminating fragile per-file native overlays and architecture-limited ARM-host packaging helpers.
 - **Explicit Linux Build Commands**: Added host-architecture, x64, and ARM64 packaging scripts for reproducible local and CI builds.
 
 ### Changed
