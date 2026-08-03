@@ -16,12 +16,14 @@
     "lint": "eslint . --ext .ts,.tsx",
     "dist:linux": "npm run dist:linux --workspace=client",
     "dist:win": "npm run dist:win --workspace=client",
-    "dist:mac": "npm run dist:mac --workspace=client"
+    "dist:mac": "npm run dist:mac --workspace=client",
+    "typecheck": "tsc -p client/tsconfig.json --noEmit && npm run build:main --workspace=client"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "npm": "^10.8.1",
     "typescript": "^5.5.4"
   },

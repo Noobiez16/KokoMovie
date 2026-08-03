@@ -60,7 +60,7 @@ There is no durable TMDB metadata/artwork cache yet. A watchlist or Continue Wat
 
 ## Testing reality
 
-The client defines Vitest with passWithNoTests and Playwright, but no client test/spec files were found. The removed legacy tree contained the only test-named scripts. Therefore the effective automated regression coverage is zero. The full npm run build is the current automated gate.
+Vitest and Playwright are configured. Phase 3 established a non-empty deterministic unit suite plus explicit lint and renderer/main typecheck gates. Broader IPC, SQLite, download, provider-failure, and packaged-app coverage remains required.
 
 ## Ranked risks
 

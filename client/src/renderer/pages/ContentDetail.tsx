@@ -293,7 +293,6 @@ export function ContentDetailPage() {
 
   async function getOrScrapeManifestUrl(
     c: any,
-    s3HlsKey?: string | null,
     episode?: Episode,
     seasonNumber?: number,
     providerId: string = 'best'
@@ -390,7 +389,7 @@ export function ContentDetailPage() {
     if (!c || downloading || downloadDone) return
     setDownloading(true)
     try {
-      const result = await getOrScrapeManifestUrl(c, c.s3HlsKey, undefined, undefined, providerId)
+      const result = await getOrScrapeManifestUrl(c, undefined, undefined, providerId)
       if (!result) return
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       await downloadsApi.start({
@@ -430,7 +429,7 @@ export function ContentDetailPage() {
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       for (const { ep, seasonNum } of downloadableEpisodes) {
         if (!updatedDoneMap[ep.id]) {
-          const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNum, providerId)
+          const result = await getOrScrapeManifestUrl(c, ep, seasonNum, providerId)
           if (!result) {
             allSucceeded = false
             break
@@ -471,7 +470,7 @@ export function ContentDetailPage() {
 
     setEpisodeDownloadingMap((prev) => ({ ...prev, [epId]: true }))
     try {
-      const result = await getOrScrapeManifestUrl(c, ep.s3HlsKey, ep, seasonNumber, providerId)
+      const result = await getOrScrapeManifestUrl(c, ep, seasonNumber, providerId)
       if (!result) return
       const customDownloadPath = localStorage.getItem('custom_download_path') || undefined
       await downloadsApi.start({
