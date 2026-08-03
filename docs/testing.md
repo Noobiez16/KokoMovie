@@ -1,18 +1,18 @@
 # Testing and Regression Baseline
 
 **Date:** 2026-08-03
-**Automated baseline:** npm run build passed on the v1.5.1 development baseline.
+**Automated baseline:** lint, strict renderer/main typecheck, 11 Vitest tests, and the production build are active gates on the v1.5.1 development line.
 
 ## Existing commands
 
 - npm run dev:client: Vite, main-process TypeScript watch, and Electron.
 - npm run build: all workspace builds; currently the reliable gate.
 - npm test: workspace tests if present.
-- client npm test: Vitest with passWithNoTests.
+- client npm test: Vitest; empty suites now fail.
 - client npm run test:e2e: Playwright.
 - npm run lint: root ESLint command; must be audited before treating as a gate.
 
-No client test/spec files were found during Phase 1. Vitest can therefore succeed without tests.
+Phase 3 added deterministic TMDB, identity, and provider-contract tests. IPC, SQLite, download, extractor, and packaged-app suites remain planned.
 
 ## Mandatory manual regression matrix
 

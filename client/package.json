@@ -23,7 +23,7 @@
     "dist:mac": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.mac.yml",
     "dist:all": "npm run dist:linux && npm run dist:win",
     "preview": "vite preview",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:e2e": "playwright test",
     "dist:linux:x64": "npm run build && npm run rebuild:native -- --arch=x64 && electron-builder --config electron-builder.linux.yml --linux --x64",
     "dist:linux:arm64": "npm run build && npm run rebuild:native -- --arch=arm64 && electron-builder --config electron-builder.linux.yml --linux --arm64",
