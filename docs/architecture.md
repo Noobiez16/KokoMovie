@@ -13,11 +13,10 @@
 3. [System Architecture](#3-system-architecture)
 4. [Client Architecture — Electron + React](#4-client-architecture--electron--react)
 5. [Providers Framework](#5-providers-framework)
-6. [DEPRECATED Backend Microservices](#6-deprecated-backend-microservices)
-7. [Data Architecture — Local SQLite](#7-data-architecture--local-sqlite)
-8. [Security Architecture](#8-security-architecture)
-9. [Infrastructure](#9-infrastructure)
-10. [IPC Bridge & API Contracts](#10-ipc-bridge--api-contracts)
+6. [Data Architecture — Local SQLite](#6-data-architecture--local-sqlite)
+7. [Security Architecture](#7-security-architecture)
+8. [Infrastructure](#8-infrastructure)
+9. [IPC Bridge & API Contracts](#9-ipc-bridge--api-contracts)
 
 ---
 
@@ -150,15 +149,7 @@ The client races multiple streaming providers in parallel. Refer to the provider
 
 ---
 
-## 6. [DEPRECATED] Backend Microservices
-
-All services in the `services/` directory (Auth, User, Catalog, Playback, Recommendation) and their associated Docker container setup (`docker-compose.yml`) are **deprecated and completely unused**. 
-
-All database operations and business logic are now integrated directly inside the main and renderer processes of the Electron application.
-
----
-
-## 7. Data Architecture — Local SQLite
+## 6. Data Architecture — Local SQLite
 
 Watchlist, playback tracking, preferences, and download queues are managed in a local SQLite database named `kokomovie.db` located inside the Electron app's `userData` directory.
 
@@ -220,7 +211,7 @@ CREATE TABLE preferences (
 
 ---
 
-## 8. Security Architecture
+## 7. Security Architecture
 
 - **Context Isolation**: Enabled in all windows. Renderer processes communicate only through whitelisted IPC channels in the preload script.
 - **Keychain Storage**: API keys are saved in the OS keychain via `keytar` to prevent raw exposure on disk or in standard localStorage.
@@ -230,7 +221,7 @@ CREATE TABLE preferences (
 
 ---
 
-## 9. Infrastructure
+## 8. Infrastructure
 
 No hosting infrastructure or local Docker orchestration is required. The application only requires the local desktop runtime.
 
@@ -248,7 +239,7 @@ on the target CPU architecture.
 
 ---
 
-## 10. IPC Bridge & API Contracts
+## 9. IPC Bridge & API Contracts
 
 All transactions between the UI and backend logic are defined by the IPC contracts exposed in `client/src/main/preload.ts` under the global `window.electronAPI` bridge:
 

@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **Phased Product Roadmap**: Reconciled the implementation plan with the shipped fully local v1.4.1 application and established regression-gated work for repository cleanup, testing, security, offline resilience, provider evolution, downloads, library portability, accessibility, diagnostics, and release engineering.
+- **Client-Only Repository**: Archived and removed the unused microservices, Terraform, Docker, load tests, backend deployment workflow, seed data, and stale shared workspace; the root development and build commands now target only the Electron client.
+- **Runtime Configuration**: Reduced the environment template to optional Electron diagnostics and Discord overrides; TMDB credentials remain user-entered and keychain-backed.
 
 ---
 
