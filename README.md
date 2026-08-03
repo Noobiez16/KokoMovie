@@ -122,7 +122,6 @@ are checked; no watch history, API keys, or other local library data are transmi
 
 KokoMovie is a fully local Electron + React desktop application. All state (watchlists, settings, playback positions) is managed on-device via SQLite. Metadata is fetched directly from TMDB; streams are located by loading third-party embed pages in a sandboxed hidden window and intercepting the video URL.
 
-> ⚠️ **Legacy code**: The `services/` directory contains legacy microservices and backend infrastructure (Docker Compose, PostgreSQL, Redis, DynamoDB Local) from previous hosted versions. These are now completely unused and deprecated.
 
 ### Prerequisites
 
@@ -144,12 +143,10 @@ This starts the main compiler in watch mode and launches the Electron applicatio
 
 ```
 KokoMovie/
-├── client/                 # Electron app
-│   └── src/
-│       ├── main/           # Main process (Node.js): providers, stream-extractor, local SQLite DB, IPC
-│       └── renderer/       # React app (Vite): pages, components, local API connectors
-├── services/               # [DEPRECATED] Unused legacy microservices
-└── docker-compose.yml      # [DEPRECATED] Unused legacy Docker setup
+└── client/                 # Electron app
+    └── src/
+        ├── main/           # Main process (Node.js): providers, stream-extractor, local SQLite DB, IPC
+        └── renderer/       # React app (Vite): pages, components, local API connectors
 ```
 
 ### Development commands

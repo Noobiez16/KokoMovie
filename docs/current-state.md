@@ -6,7 +6,7 @@
 
 ## Runtime
 
-The only live product is the Electron client in client/. The renderer uses React, HashRouter, TanStack Query, Zustand, hls.js, and a whitelisted contextBridge API. The main process owns SQLite, keychain access, providers, stream/torrent proxying, downloads, updater integration, Discord RPC, and external-window policy. Legacy services and infrastructure remain in the repository but are not required by npm run dev:client.
+The only live product is the Electron client in client/. The renderer uses React, HashRouter, TanStack Query, Zustand, hls.js, and a whitelisted contextBridge API. The main process owns SQLite, keychain access, providers, stream/torrent proxying, downloads, updater integration, Discord RPC, and external-window policy. Legacy services and infrastructure were archived on archive/pre-phase-2-legacy and removed from the active repository. npm run dev starts only the Electron client.
 
 ## Local persistence
 
@@ -60,7 +60,7 @@ There is no durable TMDB metadata/artwork cache yet. A watchlist or Continue Wat
 
 ## Testing reality
 
-The client defines Vitest with passWithNoTests and Playwright, but no client test/spec files were found. The only matching test-named files are legacy service scripts. Therefore the effective automated regression coverage is zero. The full npm run build is the current automated gate.
+The client defines Vitest with passWithNoTests and Playwright, but no client test/spec files were found. The removed legacy tree contained the only test-named scripts. Therefore the effective automated regression coverage is zero. The full npm run build is the current automated gate.
 
 ## Ranked risks
 
@@ -73,7 +73,7 @@ The client defines Vitest with passWithNoTests and Playwright, but no client tes
 | 5 | Provider/CDN behavior is externally unstable | High | Source availability, anti-bot behavior, signed URLs, and formats change independently. |
 | 6 | Download/path handling spans remote data and user-selected filesystem locations | High | Traversal, overwrite, cleanup, and partial-file loss need explicit tests. |
 | 7 | No durable metadata/artwork cache | Medium | Local records render poorly or disappear offline. |
-| 8 | Legacy services remain wired into root scripts/workspaces | Medium | Developers can start obsolete infrastructure or build irrelevant code. |
+| 8 | Dependency audit reports high and critical findings | High | Phase 4 must classify production reachability and update safely without blanket breaking upgrades. |
 | 9 | Unsigned/unnotarized platform releases | Medium | Trust prompts and update authenticity vary by platform. |
 | 10 | Broad CSP and legacy auth/OAuth surface | Medium | Unneeded permissions/API surface weaken least privilege. |
 

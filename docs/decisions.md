@@ -37,3 +37,12 @@
 - **Decision:** Develop locally on 1.5.1 and create the tag only after every release gate and human runtime check passes.
 - **Alternatives:** Reuse v1.4.1; publish intermediate roadmap states.
 - **Consequences:** Existing installations can update when complete; no partial roadmap code is pushed or published.
+
+## ADR-004: Archive and remove the legacy backend tree
+
+- **Date:** 2026-08-03
+- **Status:** Accepted
+- **Context:** Services, Docker, Terraform, load tests, deployment workflow, seed data, and the shared workspace had no live Electron imports but complicated installs and audits.
+- **Decision:** Preserve commit c241a2d on archive/pre-phase-2-legacy, then remove the unused stack and target the client as the only npm workspace.
+- **Alternatives:** Leave deprecated code in place; split it into another repository immediately.
+- **Consequences:** Clean installs are smaller and cannot accidentally start obsolete infrastructure. Historical code remains recoverable from the local archive branch.

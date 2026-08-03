@@ -26,7 +26,8 @@
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
     "dist:linux:x64": "npm run build && npm run rebuild:native -- --arch=x64 && electron-builder --config electron-builder.linux.yml --linux --x64",
-    "dist:linux:arm64": "npm run build && npm run rebuild:native -- --arch=arm64 && electron-builder --config electron-builder.linux.yml --linux --arm64"
+    "dist:linux:arm64": "npm run build && npm run rebuild:native -- --arch=arm64 && electron-builder --config electron-builder.linux.yml --linux --arm64",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@sentry/electron": "^5.0.0",
@@ -46,7 +47,6 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
-    "@kokomovie/shared": "*",
     "@playwright/test": "^1.47.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
