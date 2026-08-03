@@ -1,122 +1,62 @@
-import { ipcMain, app } from 'electron'
+import { app, ipcMain } from 'electron'
 import keytar from 'keytar'
+import { existsSync, readFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
-import { writeFileSync, readFileSync, existsSync } from 'fs'
+import {
+  assertTrustedRenderer,
+  localAccountSchema,
+  tmdbCredentialSchema,
+} from './security'
 
 const SERVICE = 'kokomovie-pc'
-const ACCESS_TOKEN_ACCOUNT = 'access-token'
-const REFRESH_TOKEN_ACCOUNT = 'refresh-token'
 
-function getFallbackPath() {
+function legacyTokenPath(): string {
   return join(app.getPath('userData'), 'auth-tokens.json')
 }
 
-function getFallbackTokens(): Record<string, string> {
+async function migrateLegacyTmdbCredential(accountKey: string): Promise<string | null> {
+  const path = legacyTokenPath()
+  if (!existsSync(path)) return null
+
   try {
-    const path = getFallbackPath()
-    if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, 'utf8'))
-    }
-  } catch {}
-  return {}
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    const credential = tmdbCredentialSchema.safeParse(parsed[accountKey])
+    if (!credential.success) return null
+
+    await keytar.setPassword(SERVICE, accountKey, credential.data)
+    unlinkSync(path)
+    return credential.data
+  } catch {
+    return null
+  }
 }
 
-function setFallbackToken(key: string, val: string | null) {
-  try {
-    const path = getFallbackPath()
-    const tokens = getFallbackTokens()
-    if (val === null || val === '') {
-      delete tokens[key]
-    } else {
-      tokens[key] = val
-    }
-    writeFileSync(path, JSON.stringify(tokens, null, 2), 'utf8')
-  } catch {}
-}
-
-let tempRefreshToken: string | null = null
-
-export function registerAuthIpc() {
-  ipcMain.handle('keychain:get-token', async () => {
-    try {
-      const val = await keytar.getPassword(SERVICE, ACCESS_TOKEN_ACCOUNT)
-      if (val) return val
-    } catch {}
-    return getFallbackTokens()[ACCESS_TOKEN_ACCOUNT] || null
+export function registerAuthIpc(): void {
+  ipcMain.handle('keychain:get-tmdb-key', async (event, input: unknown) => {
+    assertTrustedRenderer(event)
+    const accountId = localAccountSchema.parse(input)
+    const accountKey = `tmdb-key-${accountId}`
+    const stored = await keytar.getPassword(SERVICE, accountKey)
+    return stored ?? migrateLegacyTmdbCredential(accountKey)
   })
 
-  ipcMain.handle('keychain:set-token', async (_event, token: string) => {
-    try {
-      await keytar.setPassword(SERVICE, ACCESS_TOKEN_ACCOUNT, token)
-    } catch {}
-    setFallbackToken(ACCESS_TOKEN_ACCOUNT, token)
-  })
+  ipcMain.handle('keychain:set-tmdb-key', async (event, accountInput: unknown, credentialInput: unknown) => {
+    assertTrustedRenderer(event)
+    const accountId = localAccountSchema.parse(accountInput)
+    const accountKey = `tmdb-key-${accountId}`
 
-  ipcMain.handle('keychain:clear-token', async () => {
-    try {
-      await keytar.deletePassword(SERVICE, ACCESS_TOKEN_ACCOUNT)
-    } catch {}
-    setFallbackToken(ACCESS_TOKEN_ACCOUNT, null)
-  })
-
-  ipcMain.handle('keychain:get-refresh-token', async () => {
-    if (tempRefreshToken) return tempRefreshToken
-    try {
-      const val = await keytar.getPassword(SERVICE, REFRESH_TOKEN_ACCOUNT)
-      if (val) return val
-    } catch {}
-    return getFallbackTokens()[REFRESH_TOKEN_ACCOUNT] || null
-  })
-
-  ipcMain.handle('keychain:set-refresh-token', async (_event, token: string, persist: boolean = true) => {
-    if (!persist) {
-      tempRefreshToken = token
-      // Remove from persistent storage
-      try {
-        await keytar.deletePassword(SERVICE, REFRESH_TOKEN_ACCOUNT)
-      } catch {}
-      setFallbackToken(REFRESH_TOKEN_ACCOUNT, null)
+    if (credentialInput === null || credentialInput === '') {
+      await keytar.deletePassword(SERVICE, accountKey)
       return
     }
 
-    tempRefreshToken = null
-    try {
-      if (token === null || token === '') {
-        await keytar.deletePassword(SERVICE, REFRESH_TOKEN_ACCOUNT)
-      } else {
-        await keytar.setPassword(SERVICE, REFRESH_TOKEN_ACCOUNT, token)
-      }
-    } catch {}
-    setFallbackToken(REFRESH_TOKEN_ACCOUNT, token)
+    const credential = tmdbCredentialSchema.parse(credentialInput)
+    await keytar.setPassword(SERVICE, accountKey, credential)
   })
 
-  // ─── TMDB API Key Secure Storage ───────────────────────────────────────────
-  ipcMain.handle('keychain:get-tmdb-key', async (_event, accountId: string) => {
-    const key = `tmdb-key-${accountId}`
-    try {
-      const val = await keytar.getPassword(SERVICE, key)
-      if (val) return val
-    } catch {}
-    return getFallbackTokens()[key] || null
-  })
-
-  ipcMain.handle('keychain:set-tmdb-key', async (_event, accountId: string, token: string) => {
-    const key = `tmdb-key-${accountId}`
-    try {
-      if (token === null || token === '') {
-        await keytar.deletePassword(SERVICE, key)
-      } else {
-        await keytar.setPassword(SERVICE, key, token)
-      }
-    } catch {}
-    setFallbackToken(key, token)
-  })
-
-  ipcMain.handle('keychain:clear-tmdb-key', async (_event, accountId: string) => {
-    const key = `tmdb-key-${accountId}`
-    try {
-      await keytar.deletePassword(SERVICE, key)
-    } catch {}
-    setFallbackToken(key, null)
+  ipcMain.handle('keychain:clear-tmdb-key', async (event, input: unknown) => {
+    assertTrustedRenderer(event)
+    const accountId = localAccountSchema.parse(input)
+    await keytar.deletePassword(SERVICE, `tmdb-key-${accountId}`)
   })
 }

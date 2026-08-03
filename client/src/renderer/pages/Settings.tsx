@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { userApi, type Preferences } from '../api/user'
 import { AppLayout } from '../components/layout/AppLayout'
+import tmdbLogo from '../assets/tmdb/tmdb-logo.svg'
 import { ToggleSwitch } from '../components/ui/ToggleSwitch'
 
 const LANGUAGES = [
@@ -810,6 +811,21 @@ export function SettingsPage() {
                       isOpen={tmdbInstructionsOpen}
                       onToggle={() => setTmdbInstructionsOpen(!tmdbInstructionsOpen)}
                     />
+
+                    <div className="flex items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                      <a
+                        href="https://www.themoviedb.org/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0"
+                        aria-label="Visit The Movie Database"
+                      >
+                        <img src={tmdbLogo} alt="The Movie Database" className="h-12 w-12" />
+                      </a>
+                      <p className="text-xs leading-relaxed text-white/45">
+                        This product uses the TMDB API but is not endorsed or certified by TMDB.
+                      </p>
+                    </div>
                   </div>
                 </SectionCard>
               )}

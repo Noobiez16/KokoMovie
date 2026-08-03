@@ -62,6 +62,7 @@ function createWindow() {
       // E1-S7: Security hardening — non-negotiable per architecture
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
@@ -70,6 +71,8 @@ function createWindow() {
       // Disable unnecessary features
       webgl: true,
       plugins: false,
+      webviewTag: false,
+      experimentalFeatures: false,
     },
   })
 
@@ -144,7 +147,7 @@ app.whenReady().then(async () => {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
               "style-src 'self' 'unsafe-inline' https:",
               "media-src 'self' blob: https: http: http://localhost:* offline:",
-              "connect-src 'self' https://api.kokomovie.com wss://api.kokomovie.com http://localhost:* ws://localhost:* https: offline:",
+              "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
               "img-src 'self' data: blob: https:",
               "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
               "font-src 'self' data: https:",
