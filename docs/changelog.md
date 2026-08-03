@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.5.1] — Unreleased — Local-First Roadmap
+
+### Changed
+- **Phased Product Roadmap**: Reconciled the implementation plan with the shipped fully local v1.4.1 application and established regression-gated work for repository cleanup, testing, security, offline resilience, provider evolution, downloads, library portability, accessibility, diagnostics, and release engineering.
+
+---
+
 ## [1.4.1] — 2026-08-01 — Release Distribution Reliability
 
 ### Changed

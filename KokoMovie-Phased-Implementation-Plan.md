@@ -1,6 +1,7 @@
 # KokoMovie — Phased Implementation Plan
 
 **Baseline:** v1.4.1 · **Reviewed:** 2026-08-03  
+**Target release:** v1.5.1 (tag only after all phases and release gates pass)
 **Stack:** Electron 31, React 19, Vite 5, TypeScript, SQLite, TanStack Query, Zustand, hls.js
 
 ## Product direction
@@ -63,6 +64,7 @@ downloads, updater, or packaging changes.
 
 7. RELEASE CORRECTLY
 Every published update needs a higher semantic version. Replacing same-version assets
+The roadmap release target is v1.5.1; do not create that tag before final approval.
 does not update installations already running that version.
 ~~~
 
