@@ -1,18 +1,35 @@
 import { ipcMain, net } from 'electron'
+import {
+  apiProxyRequestSchema,
+  assertTrustedRenderer,
+  validateApiProxyUrl,
+} from './security'
 
-export function registerApiProxy() {
-  ipcMain.handle('api:request', async (_event, opts: {
-    url: string
-    method: string
-    headers: Record<string, string>
-    body?: string
-  }) => {
-    const response = await net.fetch(opts.url, {
-      method: opts.method,
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+const REQUEST_TIMEOUT_MS = 20_000
+
+export function registerApiProxy(): void {
+  ipcMain.handle('api:request', async (event, input: unknown) => {
+    assertTrustedRenderer(event)
+    const opts = apiProxyRequestSchema.parse(input)
+    const url = validateApiProxyUrl(opts.url)
+
+    const response = await net.fetch(url.toString(), {
+      method: 'GET',
       headers: opts.headers,
-      body: opts.body,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
-    const body = await response.text()
-    return { ok: response.ok, status: response.status, body }
+
+    const declaredLength = Number(response.headers.get('content-length') ?? 0)
+    if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('API response is too large')
+
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_RESPONSE_BYTES) throw new Error('API response is too large')
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body: new TextDecoder().decode(bytes),
+    }
   })
 }

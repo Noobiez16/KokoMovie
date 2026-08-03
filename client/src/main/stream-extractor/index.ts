@@ -68,6 +68,8 @@ const BLOCKED_HOSTS = [
 // for the entire app session, causing legitimate providers to always time out.
 const hostResolutionCache = new Map<string, { ok: boolean; expiresAt: number }>()
 const HOST_RESOLUTION_TTL_MS = 3 * 60 * 1000
+const MAX_EXTRACTION_WINDOWS = 8
+const activeExtractionWindows = new Set<BrowserWindow>()
 
 function isStreamUrl(url: string): boolean {
   try {
@@ -195,6 +197,8 @@ export async function extractStream(
     const partition = `providers-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const providerSession = session.fromPartition(partition)
+    providerSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+    providerSession.on('will-download', (_event, item) => item.cancel())
 
     const win = new BrowserWindow({
       show: false,
@@ -206,7 +210,12 @@ export async function extractStream(
       webPreferences: {
         session: providerSession,
         nodeIntegration: false,
+        nodeIntegrationInSubFrames: false,
         contextIsolation: true,
+        sandbox: true,
+        webviewTag: false,
+        allowRunningInsecureContent: false,
+        experimentalFeatures: false,
         // E1-S7: webSecurity is disabled on this isolated off-screen scraper window
         // to permit CORS-disabled stream segment and manifest extraction from external CDNs.
         // This is mitigated by isolating the browser context inside a random ephemeral partition
@@ -216,6 +225,22 @@ export async function extractStream(
         images: false,
         backgroundThrottling: false,
       },
+    })
+
+    if (activeExtractionWindows.size >= MAX_EXTRACTION_WINDOWS) {
+      win.destroy()
+      resolve(null)
+      return
+    }
+    activeExtractionWindows.add(win)
+
+    win.webContents.on('will-navigate', (event, targetUrl) => {
+      try {
+        const protocol = new URL(targetUrl).protocol
+        if (protocol !== 'https:' && protocol !== 'http:') event.preventDefault()
+      } catch {
+        event.preventDefault()
+      }
     })
 
     win.webContents.setWindowOpenHandler((details) => {
@@ -255,6 +280,8 @@ export async function extractStream(
       try { providerSession.webRequest.onHeadersReceived(null as any) } catch { /* ignore */ }
       try { providerSession.webRequest.onBeforeRequest(null as any) } catch { /* ignore */ }
       try { win.destroy() } catch { /* already destroyed */ }
+      activeExtractionWindows.delete(win)
+      void providerSession.clearStorageData().catch(() => {})
       resolve(result)
     }
 

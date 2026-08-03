@@ -2,11 +2,6 @@
 
 interface ElectronAPI {
   // Auth / Keychain
-  getAuthToken: () => Promise<string | null>
-  setAuthToken: (token: string) => Promise<void>
-  clearAuthToken: () => Promise<void>
-  getRefreshToken: () => Promise<string | null>
-  setRefreshToken: (token: string, persist?: boolean) => Promise<void>
   getTmdbApiKey: (accountId: string) => Promise<string | null>
   setTmdbApiKey: (accountId: string, key: string) => Promise<void>
   clearTmdbApiKey: (accountId: string) => Promise<void>
@@ -57,10 +52,9 @@ interface ElectronAPI {
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) => Promise<{ ok: boolean; reason?: string }>
 
   // OAuth
-  onOAuthCallback: (callback: (url: string) => void) => () => void
 
   // API proxy
-  apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
+  apiRequest: (opts: { url: string; method: 'GET'; headers: Record<string, string> }) =>
     Promise<{ ok: boolean; status: number; body: string }>
 
   // Local library

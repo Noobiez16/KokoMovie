@@ -12,6 +12,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Client-Only Repository**: Archived and removed the unused microservices, Terraform, Docker, load tests, backend deployment workflow, seed data, and stale shared workspace; the root development and build commands now target only the Electron client.
 - **Runtime Configuration**: Reduced the environment template to optional Electron diagnostics and Discord overrides; TMDB credentials remain user-entered and keychain-backed.
 - **Executable Quality Gates**: Added ESLint 9 flat configuration, React Hooks analysis, strict renderer and main-process typecheck commands, and a non-empty Vitest suite covering deterministic TMDB identifiers, metadata helpers, local identity, and representative provider URL contracts.
+- **Security and Privacy Baseline**: Restricted the main-process API proxy to approved HTTPS TMDB and GitHub destinations, GET-only requests, approved headers, bounded responses, and trusted renderer senders; hardened primary and extraction windows, moved TMDB credential handling to validated keychain-only IPC with safe legacy migration, and added automated boundary checks.
+- **Attribution and Compliance Documentation**: Added the required TMDB logo and notice beside API Configuration plus security, privacy, legal, and third-party notice documents. Distribution licensing remains a release gate because the bundled static FFmpeg binary declares GPL-3.0-or-later.
+- **Extraction Isolation**: Denied provider permissions, popups, downloads, and unsafe navigation protocols; capped concurrent hidden extraction windows and clear ephemeral session storage after each bounded attempt.
 
 ---
 

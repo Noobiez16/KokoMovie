@@ -3,11 +3,6 @@ import { contextBridge, ipcRenderer } from 'electron'
 // E1-S2: Expose ONLY whitelisted APIs via contextBridge — no direct Node.js access
 contextBridge.exposeInMainWorld('electronAPI', {
   // ─── Auth / Keychain ──────────────────────────────────────────────────────
-  getAuthToken: () => ipcRenderer.invoke('keychain:get-token'),
-  setAuthToken: (token: string) => ipcRenderer.invoke('keychain:set-token', token),
-  clearAuthToken: () => ipcRenderer.invoke('keychain:clear-token'),
-  getRefreshToken: () => ipcRenderer.invoke('keychain:get-refresh-token'),
-  setRefreshToken: (token: string, persist?: boolean) => ipcRenderer.invoke('keychain:set-refresh-token', token, persist ?? true),
   getTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:get-tmdb-key', accountId),
   setTmdbApiKey: (accountId: string, key: string) => ipcRenderer.invoke('keychain:set-tmdb-key', accountId, key),
   clearTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:clear-tmdb-key', accountId),
@@ -86,14 +81,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) =>
     ipcRenderer.invoke('discord:set-activity', activity),
 
-  // ─── Deep-link OAuth callback ─────────────────────────────────────────────
-  onOAuthCallback: (callback: (url: string) => void) => {
-    ipcRenderer.on('oauth:callback', (_: Electron.IpcRendererEvent, url: string) => callback(url))
-    return () => ipcRenderer.removeAllListeners('oauth:callback')
-  },
 
   // ─── API proxy (bypasses file:// CORS restrictions) ─────────────────────
-  apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
+  apiRequest: (opts: { url: string; method: 'GET'; headers: Record<string, string> }) =>
     ipcRenderer.invoke('api:request', opts),
 
   // ─── Local library (watchlist, resume positions, preferences) ────────────
