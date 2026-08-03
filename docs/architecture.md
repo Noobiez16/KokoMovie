@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.4.1 (Fully Local, Multi-Architecture Linux)
-**Date:** August 2026
+**Version:** 1.5.1 development baseline (Fully Local, Multi-Architecture Linux)
+**Date:** 2026-08-03
 **Status:** Current
 
 ---
