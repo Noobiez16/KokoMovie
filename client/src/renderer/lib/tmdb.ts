@@ -101,20 +101,42 @@ export interface TmdbPage {
   total_pages: number
 }
 
+type TmdbResponseSource = 'network' | 'cache'
+const tmdbResponseSources = new WeakMap<object, { source: TmdbResponseSource; stale: boolean }>()
+
+function withTmdbSource<T>(value: T, source: TmdbResponseSource, stale: boolean): T {
+  if (value && typeof value === 'object') tmdbResponseSources.set(value as object, { source, stale })
+  return value
+}
+
+export function tmdbCatalogSource(...values: unknown[]): 'tmdb' | 'cache' {
+  return values.some((value) => value && typeof value === 'object' && tmdbResponseSources.get(value as object)?.source === 'cache' && tmdbResponseSources.get(value as object)?.stale === true)
+    ? 'cache'
+    : 'tmdb'
+}
+
+function tmdbImageUrl(path: string | null, size: 'w185' | 'w300' | 'w500' | 'w1280'): string | null {
+  if (!path) return null
+  if (/^(?:https?:|offline:|catalog-cache:)/.test(path)) return path
+  return typeof window !== 'undefined' && window.electronAPI
+    ? `catalog-cache://image/${size}${path}`
+    : `${TMDB_IMG}/${size}${path}`
+}
+
 export function posterUrl(path: string | null, size: 'w300' | 'w500' = 'w500'): string | null {
-  return path ? `${TMDB_IMG}/${size}${path}` : null
+  return tmdbImageUrl(path, size)
 }
 
 export function backdropUrl(path: string | null): string | null {
-  return path ? `${TMDB_IMG}/w1280${path}` : null
+  return tmdbImageUrl(path, 'w1280')
 }
 
 export function profileUrl(path: string | null): string | null {
-  return path ? `${TMDB_IMG}/w185${path}` : null
+  return tmdbImageUrl(path, 'w185')
 }
 
 export function stillUrl(path: string | null): string | null {
-  return path ? `${TMDB_IMG}/w300${path}` : null
+  return tmdbImageUrl(path, 'w300')
 }
 
 export function tmdbTitle(item: TmdbItem): string {
@@ -173,23 +195,22 @@ export function isV4Token(key: string): boolean {
   return key.startsWith('eyJ') || key.length > 40
 }
 
-async function tmdbFetch<T>(path: string, apiKey: string, params?: Record<string, string>): Promise<T> {
+async function tmdbFetch<T>(path: string, apiKey: string, params: Record<string, string> = {}): Promise<T> {
+  // Installed Electron builds keep credential-bearing requests and caching in main.
+  if (window.electronAPI?.tmdbRequest) {
+    const response = await window.electronAPI.tmdbRequest(path, params)
+    return withTmdbSource(JSON.parse(response.body) as T, response.source, response.stale)
+  }
+
+  // Browser-only development fallback: no local main process or durable cache.
   const url = new URL(`${BASE}${path}`)
   const v4 = isV4Token(apiKey)
   if (!v4) url.searchParams.set('api_key', apiKey)
-  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
+  Object.entries(params).forEach(([name, value]) => url.searchParams.set(name, value))
   const headers: Record<string, string> = v4 ? { Authorization: `Bearer ${apiKey}` } : {}
-
-  // Prefer the main-process proxy (avoids any renderer CSP/CORS edge cases);
-  // fall back to direct fetch (e.g. in a plain browser dev context).
-  if (window.electronAPI?.apiRequest) {
-    const res = await window.electronAPI.apiRequest({ url: url.toString(), method: 'GET', headers })
-    if (!res.ok) throw new Error(`TMDB ${path} → ${res.status}`)
-    return JSON.parse(res.body) as T
-  }
-  const res = await fetch(url.toString(), { headers })
-  if (!res.ok) throw new Error(`TMDB ${path} → ${res.status}`)
-  return res.json() as Promise<T>
+  const response = await fetch(url.toString(), { headers })
+  if (!response.ok) throw new Error(`TMDB ${path} -> ${response.status}`)
+  return withTmdbSource(await response.json() as T, 'network', false)
 }
 
 export function createTmdbClient(apiKey: string) {

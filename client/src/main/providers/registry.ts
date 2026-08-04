@@ -47,6 +47,10 @@ const ALL_PROVIDERS: Provider[] = [
   indraProvider,
 ]
 
+export function getBundledProviders(): readonly Provider[] {
+  return ALL_PROVIDERS
+}
+
 interface ProviderPrefs {
   [id: string]: { enabled: boolean }
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
 import { playbackApi } from '../api/playback'
@@ -10,6 +9,7 @@ import { HeroBanner } from '../components/catalog/HeroBanner'
 import { ContentRow } from '../components/catalog/ContentRow'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { CatalogFallbackBanner } from '../components/catalog/CatalogFallbackBanner'
+import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/CategoryPagination'
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 
 export function BrowsePage() {
@@ -18,7 +18,6 @@ export function BrowsePage() {
   const genre = searchParams.get('genre') || undefined
   const [page, setPage] = useState(1)
 
-  const { isAuthenticated, activeProfile } = useAuthStore()
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const tmdbKeyHydrated = useSettingsStore((s) => s.tmdbKeyHydrated)
 
@@ -26,11 +25,13 @@ export function BrowsePage() {
     setPage(1)
   }, [genre])
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
-  if (tmdbKeyHydrated && !tmdbApiKey) return <ApiKeyRequired />
+  const goToPage = (next: number) => {
+    setPage(next)
+    scrollCatalogToTop()
+  }
 
-  const profileId = activeProfile.id
+
+  const profileId = 'local'
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['home', profileId, tmdbApiKey],
@@ -41,7 +42,7 @@ export function BrowsePage() {
 
   const { data: genreData, isLoading: isGenreLoading, isError: isGenreError } = useQuery({
     queryKey: ['browse-genre', profileId, genre, page, tmdbApiKey],
-    queryFn: () => catalogApi.browse({ genre, limit: 40, page }, profileId),
+    queryFn: () => catalogApi.browse({ genre, limit: 80, page }, profileId),
     staleTime: 5 * 60 * 1000,
     enabled: !!genre,
   })
@@ -72,6 +73,8 @@ export function BrowsePage() {
       if (previous !== undefined) queryClient.setQueryData(key, previous)
     }
   }, [queryClient, profileId, tmdbApiKey])
+
+  if (tmdbKeyHydrated && !tmdbApiKey) return <ApiKeyRequired />
 
   if (genre) {
     if (isGenreLoading) {
@@ -119,34 +122,21 @@ export function BrowsePage() {
             </div>
 
             {totalPages > 1 && (
-              <div className="flex items-center gap-2 text-sm text-purple-300/50">
-                <button
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/10 hover:bg-purple-500/20 hover:border-purple-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-purple-300"
-                >
-                  ‹ Prev
-                </button>
-                <span className="font-medium">{page} / {totalPages}</span>
-                <button
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/10 hover:bg-purple-500/20 hover:border-purple-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-purple-300"
-                >
-                  Next ›
-                </button>
-              </div>
+              <span className="text-sm text-purple-300/50 font-medium">Page {page} / {totalPages}</span>
             )}
           </div>
 
           {items.length === 0 ? (
             <div className="text-purple-300/40 py-32 text-center text-sm">No items found in this category.</div>
           ) : (
-            <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-              {items.map((item) => (
-                <ContentCard key={item.id} content={item} size="md" />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                {items.map((item) => (
+                  <ContentCard key={item.id} content={item} size="md" />
+                ))}
+              </div>
+              <CategoryPagination page={page} totalPages={totalPages} onPageChange={goToPage} />
+            </>
           )}
         </div>
       </AppLayout>

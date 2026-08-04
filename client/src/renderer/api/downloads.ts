@@ -6,7 +6,8 @@ export interface DownloadItem {
   content_type: string
   thumbnail_url: string | null
   duration_mins: number | null
-  status: 'pending' | 'downloading' | 'completed' | 'cancelled' | 'error'
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'cancelled' | 'error'
+  can_pause?: boolean
   progress_percent: number
   download_speed_kbps: number
   total_segments: number
@@ -31,12 +32,15 @@ export interface StartDownloadOpts {
   drmKeyId?: string
   customDownloadPath?: string
   headers?: Record<string, string>
+  subtitles?: Array<{ lang: string; url: string }>
 }
 
 export const downloadsApi = {
   start: (opts: StartDownloadOpts) =>
     window.electronAPI!.downloadContent(opts) as Promise<{ id: string; expiresAt: string }>,
 
+  pause: (id: string) => window.electronAPI!.pauseDownload(id),
+  resume: (id: string) => window.electronAPI!.resumeDownload(id),
   cancel: (id: string) =>
     window.electronAPI!.cancelDownload(id) as Promise<boolean>,
 
@@ -49,5 +53,5 @@ export const downloadsApi = {
   openFolder: (id?: string) => window.electronAPI!.openDownloadFolder(id),
 
   getManifest: (id: string) =>
-    window.electronAPI!.getOfflineManifest(id) as Promise<{ manifestContent: string; drmKeyId: string | null } | null>,
+    window.electronAPI!.getOfflineManifest(id) as Promise<{ manifestContent: string; drmKeyId: string | null; subtitles: Array<{ id: number; name: string; lang: string; url: string }> } | null>,
 }

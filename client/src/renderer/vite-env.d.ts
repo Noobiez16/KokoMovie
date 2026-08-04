@@ -1,15 +1,35 @@
 /// <reference types="vite/client" />
 
+interface LibraryImportPreview {
+  watchlist: number
+  positions: number
+  artwork: number
+  watchlistConflicts: number
+  positionConflicts: number
+  exportedAt: string
+  appVersion: string
+}
+interface DiagnosticReport {
+  format: 'kokomovie-diagnostics'
+  schemaVersion: 1
+  generatedAt: string
+  application: { version: string; platform: string; arch: string; packaged: boolean }
+  storage: { watchlistItems: number; savedPositions: number; downloadStates: Record<string, number> }
+  events: Array<{ at: string; scope: string; event: string; detail?: string }>
+  privacy: { excludes: string[] }
+}
+
+
 interface ElectronAPI {
   // Auth / Keychain
-  getAuthToken: () => Promise<string | null>
-  setAuthToken: (token: string) => Promise<void>
-  clearAuthToken: () => Promise<void>
-  getRefreshToken: () => Promise<string | null>
-  setRefreshToken: (token: string, persist?: boolean) => Promise<void>
   getTmdbApiKey: (accountId: string) => Promise<string | null>
   setTmdbApiKey: (accountId: string, key: string) => Promise<void>
   clearTmdbApiKey: (accountId: string) => Promise<void>
+  validateTmdbApiKey: (key: string) => Promise<boolean>
+  tmdbRequest: (path: string, params?: Record<string, string>) => Promise<{ body: string; source: 'network' | 'cache'; stale: boolean; fetchedAt: string | null }>
+  searchDownloadedCatalog: (query: string) => Promise<Array<{ id: string; title: string; type: 'movie' | 'series'; releaseYear: number | null; rating: string | null; imdbScore: string | null; durationMins: number | null; s3Thumbnail: string | null; backdropUrl: string | null; imdbId: string | null; tmdbId: number | null; planMinimum: string }>>
+  getTmdbCacheStats: () => Promise<{ entries: number; bytes: number }>
+  clearTmdbCache: () => Promise<{ removed: number }>
 
   // Downloads
   downloadContent: (opts: {
@@ -23,11 +43,14 @@ interface ElectronAPI {
     drmKeyId?: string
     customDownloadPath?: string
     headers?: Record<string, string>
+    subtitles?: Array<{ lang: string; url: string }>
   }) => Promise<{ id: string; expiresAt: string }>
   cancelDownload: (id: string) => Promise<boolean>
+  pauseDownload: (id: string) => Promise<{ ok: boolean; reason?: string }>
+  resumeDownload: (id: string) => Promise<{ ok: boolean; reason?: string }>
   deleteDownload: (id: string) => Promise<boolean>
   listDownloads: () => Promise<unknown[]>
-  getOfflineManifest: (id: string) => Promise<{ manifestContent: string; drmKeyId: string | null } | null>
+  getOfflineManifest: (id: string) => Promise<{ manifestContent: string; drmKeyId: string | null; subtitles: Array<{ id: number; name: string; lang: string; url: string }> } | null>
   selectDirectory: () => Promise<string | null>
   openDownloadFolder: (id?: string) => Promise<{ ok: boolean; error?: string }>
   getDefaultDownloadsDir: () => Promise<string>
@@ -57,10 +80,9 @@ interface ElectronAPI {
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) => Promise<{ ok: boolean; reason?: string }>
 
   // OAuth
-  onOAuthCallback: (callback: (url: string) => void) => () => void
 
   // API proxy
-  apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
+  apiRequest: (opts: { url: string; method: 'GET'; headers: Record<string, string> }) =>
     Promise<{ ok: boolean; status: number; body: string }>
 
   // Local library
@@ -75,9 +97,14 @@ interface ElectronAPI {
   positionDeleteContent: (contentId: string) => Promise<{ ok: boolean }>
   prefsGet: () => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
   prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
+  exportLibraryFile: (input: { includeArtwork: boolean }) => Promise<{ cancelled: boolean; path?: string; counts?: { watchlist: number; positions: number; artwork: number } }>
+  selectLibraryImport: () => Promise<{ cancelled: boolean; token?: string; preview?: LibraryImportPreview }>
+  applyLibraryImport: (input: { token: string; mode: 'merge' | 'replace' }) => Promise<{ ok: boolean; mode: 'merge' | 'replace'; backupPath: string; watchlist: number; positions: number; artwork: number }>
+  previewDiagnostics: () => Promise<{ token: string; report: DiagnosticReport }>
+  saveDiagnostics: (input: { token: string }) => Promise<{ cancelled: boolean }>
 
   // Providers
-  listProviders: () => Promise<Array<{ id: string; name: string; enabled: boolean }>>
+  listProviders: () => Promise<Array<{ id: string; name: string; enabled: boolean; failures: number; circuitOpen: boolean }>>
   toggleProvider: (id: string, enabled: boolean) => Promise<{ ok: boolean }>
   getStream: (providerId: string, req: StreamRequest) => Promise<ProviderResult>
   getFirstStream: (req: StreamRequest, searchId?: string) => Promise<ProviderResult | null>

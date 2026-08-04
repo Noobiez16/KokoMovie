@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Navigate } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { userApi, type Preferences } from '../api/user'
+import { libraryPortabilityApi, type LibraryImportSelection } from '../api/library-portability'
+import { LOCAL_PROFILE } from '../lib/local-identity'
 import { AppLayout } from '../components/layout/AppLayout'
+import tmdbLogo from '../assets/tmdb/tmdb-logo.svg'
 import { ToggleSwitch } from '../components/ui/ToggleSwitch'
 
 const LANGUAGES = [
@@ -15,91 +16,6 @@ const LANGUAGES = [
 ]
 
 const RATINGS = ['G', 'PG', 'PG-13', 'R', 'TV-MA'] as const
-
-// ─── Preset Avatars ─────────────────────────────────────────────────────────
-
-const PRESET_AVATARS = [
-  {
-    id: 'palm',
-    name: 'Koko Palm',
-    gradient: 'from-orange-500 to-rose-500',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <path d="M50,90 L50,60" stroke="#fff" strokeWidth="6" strokeLinecap="round"/>
-        <path d="M50,60 Q20,50 15,35 Q35,45 50,60" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round"/>
-        <path d="M50,60 Q80,50 85,35 Q65,45 50,60" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round"/>
-        <path d="M50,60 C50,20 40,10 40,10 C60,20 50,60 50,60" fill="#fff"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23FF512F"/><stop offset="100%" stop-color="%23DD2476"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g1)"/><path d="M50,90 L50,60" stroke="%23fff" stroke-width="6" stroke-linecap="round"/><path d="M50,60 Q20,50 15,35 Q35,45 50,60" fill="none" stroke="%23fff" stroke-width="4" stroke-linecap="round"/><path d="M50,60 Q80,50 85,35 Q65,45 50,60" fill="none" stroke="%23fff" stroke-width="4" stroke-linecap="round"/><path d="M50,60 C50,20 40,10 40,10 C60,20 50,60 50,60" fill="%23fff"/></svg>'
-  },
-  {
-    id: 'cinema',
-    name: 'Retro Cinema',
-    gradient: 'from-teal-500 to-emerald-500',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <rect x="25" y="30" width="50" height="40" rx="5" fill="none" stroke="#fff" strokeWidth="5"/>
-        <polygon points="45,40 60,50 45,60" fill="#fff"/>
-        <circle cx="35" cy="18" r="4" fill="#fff"/>
-        <circle cx="65" cy="18" r="4" fill="#fff"/>
-        <path d="M35,22 L30,30 M65,22 L70,30" stroke="#fff" strokeWidth="3" strokeLinecap="round"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%2311998e"/><stop offset="100%" stop-color="%2338ef7d"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g2)"/><rect x="25" y="30" width="50" height="40" rx="5" fill="none" stroke="%23fff" stroke-width="5"/><polygon points="45,40 60,50 45,60" fill="%23fff"/><circle cx="35" cy="18" r="4" fill="%23fff"/><circle cx="65" cy="18" r="4" fill="%23fff"/><path d="M35,22 L30,30 M65,22 L70,30" stroke="%23fff" stroke-width="3" stroke-linecap="round"/></svg>'
-  },
-  {
-    id: 'space',
-    name: 'Voyager',
-    gradient: 'from-purple-600 via-rose-500 to-orange-500',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <circle cx="50" cy="50" r="18" fill="#fff"/>
-        <ellipse cx="50" cy="50" rx="35" ry="8" fill="none" stroke="#fff" strokeWidth="4" transform="rotate(-20 50 50)"/>
-        <circle cx="30" cy="25" r="2" fill="#fff"/>
-        <circle cx="70" cy="65" r="3" fill="#fff"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%238A2387"/><stop offset="50%" stop-color="%23E94057"/><stop offset="100%" stop-color="%23F27121"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g3)"/><circle cx="50" cy="50" r="18" fill="%23fff"/><ellipse cx="50" cy="50" rx="35" ry="8" fill="none" stroke="%23fff" stroke-width="4" transform="rotate(-20 50 50)"/><circle cx="30" cy="25" r="2" fill="%23fff"/><circle cx="70" cy="65" r="3" fill="%23fff"/></svg>'
-  },
-  {
-    id: 'star',
-    name: 'Spotlight',
-    gradient: 'from-amber-500 to-indigo-900',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <path d="M50,15 L59,36 L81,36 L64,49 L70,70 L50,58 L30,70 L36,49 L19,36 L41,36 Z" fill="#fff"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g4" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23F3904F"/><stop offset="100%" stop-color="%233B4371"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g4)"/><path d="M50,15 L59,36 L81,36 L64,49 L70,70 L50,58 L30,70 L36,49 L19,36 L41,36 Z" fill="%23fff"/></svg>'
-  },
-  {
-    id: 'wave',
-    name: 'Synthwave',
-    gradient: 'from-indigo-600 to-purple-400',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <path d="M15,50 Q30,35 45,50 T75,50" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round"/>
-        <path d="M25,60 Q40,45 55,60 T85,60" fill="none" stroke="#fff" strokeWidth="4" opacity="0.6" strokeLinecap="round"/>
-        <path d="M5,40 Q20,25 35,40 T65,40" fill="none" stroke="#fff" strokeWidth="4" opacity="0.4" strokeLinecap="round"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g5" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%234e54c8"/><stop offset="100%" stop-color="%238f94fb"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g5)"/><path d="M15,50 Q30,35 45,50 T75,50" fill="none" stroke="%23fff" stroke-width="4" stroke-linecap="round"/><path d="M25,60 Q40,45 55,60 T85,60" fill="none" stroke="%23fff" stroke-width="4" opacity="0.6" stroke-linecap="round"/><path d="M5,40 Q20,25 35,40 T65,40" fill="none" stroke="%23fff" stroke-width="4" opacity="0.4" stroke-linecap="round"/></svg>'
-  },
-  {
-    id: 'mountain',
-    name: 'Peak',
-    gradient: 'from-pink-500 to-cyan-500',
-    svg: (
-      <svg viewBox="0 0 100 100" className="w-10 h-10">
-        <circle cx="50" cy="40" r="15" fill="#fff" opacity="0.8"/>
-        <polygon points="15,80 50,35 85,80" fill="#fff" opacity="0.9"/>
-        <polygon points="35,80 60,50 85,80" fill="#fff" opacity="0.5"/>
-      </svg>
-    ),
-    dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g6" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23fc00ff"/><stop offset="100%" stop-color="%2300dbde"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(%23g6)"/><circle cx="50" cy="40" r="15" fill="%23fff" opacity="0.8"/><polygon points="15,80 50,35 85,80" fill="%23fff" opacity="0.9"/><polygon points="35,80 60,50 85,80" fill="%23fff" opacity="0.5"/></svg>'
-  }
-]
 
 // ─── Reusable Components ─────────────────────────────────────────────────────
 
@@ -248,12 +164,10 @@ function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
 // ─── Main Settings Page ──────────────────────────────────────────────────────
 
 export function SettingsPage() {
-  const { isAuthenticated, activeProfile, setActiveProfile } = useAuthStore()
+  const activeProfile = LOCAL_PROFILE
   const { tmdbApiKey, setTmdbApiKey, clearTmdbApiKey } = useSettingsStore()
   const qc = useQueryClient()
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [avatarUploading, setAvatarUploading] = useState(false)
   const [downloadPath, setDownloadPath] = useState('')
   const [defaultDownloadPath, setDefaultDownloadPath] = useState('')
   // Auto-update preference. Authoritative copy lives in the main process (so startup
@@ -269,7 +183,14 @@ export function SettingsPage() {
   const [tmdbKeyVisible, setTmdbKeyVisible] = useState(false)
   const [tmdbValidation, setTmdbValidation] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle')
   const [tmdbInstructionsOpen, setTmdbInstructionsOpen] = useState(false)
+  const [cacheStats, setCacheStats] = useState<{ entries: number; bytes: number } | null>(null)
+  const [clearingCache, setClearingCache] = useState(false)
+  const [includeExportArtwork, setIncludeExportArtwork] = useState(false)
+  const [portabilityBusy, setPortabilityBusy] = useState(false)
+  const [importSelection, setImportSelection] = useState<LibraryImportSelection | null>(null)
 
+  const [diagnosticPreview, setDiagnosticPreview] = useState<{ token: string; report: DiagnosticReport } | null>(null)
+  const [diagnosticBusy, setDiagnosticBusy] = useState(false)
   useEffect(() => {
     setTmdbKeyInput(tmdbApiKey)
     if (tmdbApiKey) setTmdbValidation('valid')
@@ -287,6 +208,7 @@ export function SettingsPage() {
         setAutoUpdateEnabled(enabled)
         localStorage.setItem('km_auto_update', String(enabled))
       }).catch(() => {})
+      window.electronAPI.getTmdbCacheStats?.().then(setCacheStats).catch(() => {})
     }
   }, [])
 
@@ -294,6 +216,20 @@ export function SettingsPage() {
     setSaveStatus('saved')
     setTimeout(() => setSaveStatus('idle'), 2500)
   }, [])
+
+  const handleClearCatalogCache = useCallback(async () => {
+    if (!window.electronAPI) return
+    setClearingCache(true)
+    try {
+      await window.electronAPI.clearTmdbCache()
+      setCacheStats({ entries: 0, bytes: 0 })
+      flashSaved()
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setClearingCache(false)
+    }
+  }, [flashSaved])
 
   // Persist the auto-update choice to the main process (which gates the real updater) and
   // mirror it locally. This is the handler the toggle calls with the next value.
@@ -345,20 +281,16 @@ export function SettingsPage() {
 
     setTmdbValidation('validating')
     try {
-      // TMDB keys come in two flavours: a v3 API key (sent as ?api_key=) or a
-      // v4 read access token (a JWT sent as a Bearer header). Validate whichever
-      // the user pasted so v4 tokens aren't wrongly rejected.
-      const isV4 = key.startsWith('eyJ') || key.length > 40
-      const res = isV4
-        ? await fetch('https://api.themoviedb.org/3/configuration', { headers: { Authorization: `Bearer ${key}` } })
-        : await fetch(`https://api.themoviedb.org/3/configuration?api_key=${encodeURIComponent(key)}`)
-      if (res.ok) {
-        setTmdbApiKey(key)
-        setTmdbValidation('valid')
-        flashSaved()
-      } else {
+      const valid = window.electronAPI
+        ? await window.electronAPI.validateTmdbApiKey(key)
+        : false
+      if (!valid) {
         setTmdbValidation('invalid')
+        return
       }
+      setTmdbApiKey(key)
+      setTmdbValidation('valid')
+      flashSaved()
     } catch {
       setTmdbValidation('invalid')
     }
@@ -371,8 +303,6 @@ export function SettingsPage() {
     flashSaved()
   }
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
 
   const profileId = activeProfile.id
 
@@ -400,60 +330,74 @@ export function SettingsPage() {
     onError: () => setSaveStatus('error'),
   })
 
-  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      alert('Please select a JPEG, PNG, or WebP image.')
-      return
-    }
-
-    setAvatarUploading(true)
-    try {
-      const { data: presignData } = await userApi.presignAvatar(file.type, file.name, profileId)
-      await fetch(presignData.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      })
-      const { data: confirmData } = await userApi.confirmAvatar(presignData.cdnUrl, profileId)
-      setActiveProfile({ ...activeProfile, avatarUrl: confirmData.avatarUrl } as typeof activeProfile)
-      qc.invalidateQueries({ queryKey: ['profiles'] })
-      flashSaved()
-    } catch {
-      alert('Avatar upload failed. Please try again.')
-    } finally {
-      setAvatarUploading(false)
-    }
-  }
-
-  async function handleSelectPresetAvatar(avatarDataUrl: string) {
-    setAvatarUploading(true)
-    try {
-      const { data: confirmData } = await userApi.confirmAvatar(avatarDataUrl, profileId)
-      setActiveProfile({ ...activeProfile, avatarUrl: confirmData.avatarUrl } as typeof activeProfile)
-      qc.invalidateQueries({ queryKey: ['profiles'] })
-      flashSaved()
-    } catch {
-      alert('Failed to update avatar. Please try again.')
-    } finally {
-      setAvatarUploading(false)
-    }
-  }
-
   async function handleExport() {
-    const data = await userApi.exportData()
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'kokomovie-data-export.json'
-    a.click()
-    URL.revokeObjectURL(url)
+    setPortabilityBusy(true)
+    try {
+      const result = await libraryPortabilityApi.exportFile(includeExportArtwork)
+      if (!result.cancelled) flashSaved()
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setPortabilityBusy(false)
+    }
   }
 
-  const initials = activeProfile.name.slice(0, 2).toUpperCase()
-  const hue = activeProfile.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+  async function handleSelectImport() {
+    setPortabilityBusy(true)
+    try {
+      const selection = await libraryPortabilityApi.selectImport()
+      setImportSelection(selection.cancelled ? null : selection)
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setPortabilityBusy(false)
+    }
+  }
+
+  async function handleApplyImport(mode: 'merge' | 'replace') {
+    if (!importSelection?.token) return
+    if (mode === 'replace' && !window.confirm('Replace the current watchlist and playback history with this import? A SQLite backup will be created first.')) return
+    setPortabilityBusy(true)
+    try {
+      await libraryPortabilityApi.applyImport(importSelection.token, mode)
+      setImportSelection(null)
+      await qc.invalidateQueries()
+      flashSaved()
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setPortabilityBusy(false)
+    }
+  }
+
+  async function handlePrepareDiagnostics() {
+    if (!window.electronAPI) return
+    setDiagnosticBusy(true)
+    try {
+      setDiagnosticPreview(await window.electronAPI.previewDiagnostics())
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setDiagnosticBusy(false)
+    }
+  }
+
+  async function handleSaveDiagnostics() {
+    if (!window.electronAPI || !diagnosticPreview) return
+    setDiagnosticBusy(true)
+    try {
+      const result = await window.electronAPI.saveDiagnostics({ token: diagnosticPreview.token })
+      if (!result.cancelled) {
+        setDiagnosticPreview(null)
+        flashSaved()
+      }
+    } catch {
+      setSaveStatus('error')
+    } finally {
+      setDiagnosticBusy(false)
+    }
+  }
+
 
   return (
     <AppLayout>
@@ -461,7 +405,7 @@ export function SettingsPage() {
         {/* Page Header */}
         <div className="mb-6 shrink-0">
           <h1 className="text-white text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-white/40 text-sm mt-1">Manage your profile, preferences, and API configuration.</p>
+          <p className="text-white/40 text-sm mt-1">Manage local preferences, privacy, downloads, and API configuration.</p>
         </div>
 
         {/* Tab Navigation */}
@@ -533,86 +477,6 @@ export function SettingsPage() {
               {/* ── Tab: Preferences ────────────────────────────────────────── */}
               {activeTab === 'preferences' && (
                 <>
-                  <SectionCard
-                    icon={(
-                      <svg className="w-5 h-5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                    )}
-                    title="Profile"
-                    description="Your avatar and profile identity"
-                  >
-                    <div className="space-y-5">
-                      <div className="flex items-center gap-5 pb-4 border-b border-white/[0.06]">
-                        <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                          {activeProfile.avatarUrl ? (
-                            <img
-                              src={activeProfile.avatarUrl}
-                              alt={activeProfile.name}
-                              className="w-16 h-16 rounded-2xl object-cover ring-2 ring-white/10"
-                            />
-                          ) : (
-                            <div
-                              className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-lg ring-2 ring-white/10"
-                              style={{ background: `hsl(${hue}, 55%, 40%)` }}
-                            >
-                              {initials}
-                            </div>
-                          )}
-                          <div className="absolute inset-0 rounded-2xl bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                            {avatarUploading ? (
-                              <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                            ) : (
-                              <span className="text-white text-[10px] font-semibold uppercase tracking-wider">Custom</span>
-                            )}
-                          </div>
-                        </div>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          className="hidden"
-                          onChange={handleAvatarChange}
-                        />
-                        <div>
-                          <p className="text-white font-semibold text-[15px]">{activeProfile.name}</p>
-                          <p className="text-white/35 text-xs mt-0.5">Select a preset below or upload a custom image.</p>
-                        </div>
-                      </div>
-
-                      {/* Preset avatar selector */}
-                      <div>
-                        <p className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-3">Choose a Preset Avatar</p>
-                        <div className="grid grid-cols-6 gap-3">
-                          {PRESET_AVATARS.map((avatar) => {
-                            const isSelected = activeProfile.avatarUrl === avatar.dataUrl
-                            return (
-                              <button
-                                key={avatar.id}
-                                onClick={() => handleSelectPresetAvatar(avatar.dataUrl)}
-                                disabled={avatarUploading}
-                                className={`aspect-square rounded-2xl p-1 bg-gradient-to-br ${avatar.gradient} relative group hover:scale-105 active:scale-95 transition-all duration-200 focus:outline-none ${
-                                  isSelected ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-[#0a0a0a]' : 'opacity-60 hover:opacity-100'
-                                }`}
-                                title={avatar.name}
-                              >
-                                <div className="w-full h-full rounded-xl overflow-hidden bg-black/15 flex items-center justify-center">
-                                  {avatar.svg}
-                                </div>
-                                {isSelected && (
-                                  <div className="absolute -top-1 -right-1 bg-violet-500 text-white rounded-full p-0.5 shadow-md">
-                                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                  </div>
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </SectionCard>
 
                   <SectionCard
                     icon={(
@@ -810,6 +674,21 @@ export function SettingsPage() {
                       isOpen={tmdbInstructionsOpen}
                       onToggle={() => setTmdbInstructionsOpen(!tmdbInstructionsOpen)}
                     />
+
+                    <div className="flex items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                      <a
+                        href="https://www.themoviedb.org/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0"
+                        aria-label="Visit The Movie Database"
+                      >
+                        <img src={tmdbLogo} alt="The Movie Database" className="h-12 w-12" />
+                      </a>
+                      <p className="text-xs leading-relaxed text-white/45">
+                        This product uses the TMDB API but is not endorsed or certified by TMDB.
+                      </p>
+                    </div>
                   </div>
                 </SectionCard>
               )}
@@ -874,17 +753,136 @@ export function SettingsPage() {
                   title="Privacy"
                   description="Data export and privacy controls"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-white text-sm">Export Your Data</p>
-                      <p className="text-white/35 text-xs mt-0.5">Download a copy of all your data (GDPR compliant)</p>
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-white text-sm">Portable Library</p>
+                          <p className="text-white/35 text-xs mt-0.5">
+                            Export or import watchlist, playback history, and preferences. API keys and media files are never included.
+                          </p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={handleSelectImport}
+                            disabled={portabilityBusy}
+                            className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                          >
+                            Import
+                          </button>
+                          <button
+                            onClick={handleExport}
+                            disabled={portabilityBusy}
+                            className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                          >
+                            Export
+                          </button>
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-white/50">
+                        <input
+                          type="checkbox"
+                          checked={includeExportArtwork}
+                          onChange={(event) => setIncludeExportArtwork(event.target.checked)}
+                          className="accent-violet-500"
+                        />
+                        Include bounded cached catalog artwork (larger file)
+                      </label>
+                      {importSelection?.preview && (
+                        <div className="rounded-lg border border-violet-400/20 bg-violet-500/5 p-3">
+                          <p className="text-white/80 text-xs font-semibold">Import preview</p>
+                          <p className="text-white/45 text-xs mt-1">
+                            {importSelection.preview.watchlist} watchlist � {importSelection.preview.positions} history � {importSelection.preview.artwork} artwork
+                          </p>
+                          <p className="text-white/35 text-[11px] mt-1">
+                            {importSelection.preview.watchlistConflicts + importSelection.preview.positionConflicts} existing records overlap. Merge keeps the newest timestamp; Replace clears current watchlist/history first. A SQLite backup is always created.
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => handleApplyImport('merge')}
+                              disabled={portabilityBusy}
+                              className="bg-violet-500/20 text-violet-200 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
+                            >
+                              Merge newest
+                            </button>
+                            <button
+                              onClick={() => handleApplyImport('replace')}
+                              disabled={portabilityBusy}
+                              className="bg-red-500/10 text-red-300 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
+                            >
+                              Replace library
+                            </button>
+                            <button
+                              onClick={() => setImportSelection(null)}
+                              disabled={portabilityBusy}
+                              className="text-white/40 px-2 py-1.5 text-xs"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={handleExport}
-                      className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 hover:text-white px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 active:scale-[0.97]"
-                    >
-                      Download
-                    </button>
+                    <div className="border-t border-white/[0.08] pt-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-white text-sm">Diagnostic Report</p>
+                          <p className="text-white/35 text-xs mt-0.5">
+                            Prepare a local, redacted report to review before saving. Nothing is sent automatically.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handlePrepareDiagnostics}
+                          disabled={diagnosticBusy}
+                          className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                        >
+                          {diagnosticBusy ? 'Preparing...' : 'Prepare Report'}
+                        </button>
+                      </div>
+                      {diagnosticPreview && (
+                        <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-3">
+                          <p className="text-white/80 text-xs font-semibold">Review before saving</p>
+                          <p className="text-white/35 text-[11px] mt-1">
+                            Excludes API keys, content details, history details, filesystem paths, provider URLs, headers, and tokens.
+                          </p>
+                          <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 text-[10px] text-white/55">
+                            {JSON.stringify(diagnosticPreview.report, null, 2)}
+                          </pre>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={handleSaveDiagnostics}
+                              disabled={diagnosticBusy}
+                              className="bg-emerald-500/20 text-emerald-200 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
+                            >
+                              Save reviewed report
+                            </button>
+                            <button
+                              onClick={() => setDiagnosticPreview(null)}
+                              disabled={diagnosticBusy}
+                              className="text-white/40 px-2 py-1.5 text-xs"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-white/[0.08] pt-4">
+                      <div>
+                        <p className="text-white text-sm">Catalog Cache</p>
+                        <p className="text-white/35 text-xs mt-0.5">
+                          {cacheStats ? `${cacheStats.entries} cached items - ${(cacheStats.bytes / 1024 / 1024).toFixed(1)} MB` : 'Loading cache usage...'}
+                        </p>
+                        <p className="text-white/25 text-[11px] mt-1">Clearing this never removes downloads, watchlist, or playback history.</p>
+                      </div>
+                      <button
+                        onClick={handleClearCatalogCache}
+                        disabled={clearingCache}
+                        className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 hover:text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-all"
+                      >
+                        {clearingCache ? 'Clearing...' : 'Clear Cache'}
+                      </button>
+                    </div>
                   </div>
                 </SectionCard>
               )}

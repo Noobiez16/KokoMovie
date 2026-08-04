@@ -73,6 +73,17 @@ function migrate(db: Database.Database): void {
       maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA'
     );
     INSERT OR IGNORE INTO preferences (id) VALUES (1);
+    CREATE TABLE IF NOT EXISTS tmdb_cache (
+      cache_key       TEXT PRIMARY KEY,
+      schema_version  INTEGER NOT NULL,
+      request_path    TEXT NOT NULL,
+      request_params  TEXT NOT NULL,
+      payload         TEXT NOT NULL,
+      fetched_at      TEXT NOT NULL,
+      expires_at      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS tmdb_cache_expiry_idx ON tmdb_cache (expires_at);
+
   `)
 
   // Check if headers column exists in downloads table (for backward compatibility)

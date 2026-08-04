@@ -15,20 +15,18 @@ client/release/*
 !client/release/README.md
 client/*.asar
 
+# Vendored LGPL FFmpeg executables — fetched and SHA-256 verified by scripts/fetch-ffmpeg.mjs
+client/vendor/ffmpeg/
+
 # Generated RSA keys
-services/auth/keys/
 
 # SQLite offline DB
 *.sqlite
 *.db
 
-# Terraform
-infra/.terraform/
-infra/*.tfstate
-infra/*.tfstate.backup
-infra/*.tfvars
-infra/.terraform.lock.hcl
 
 # Unnecessary Files
 AGENTS.md
-CONTEXT.md
+
+# Internal planning notes — kept locally, not published
+KokoMovie-Phased-Implementation-Plan.md

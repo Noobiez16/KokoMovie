@@ -1,163 +1,210 @@
-# KokoMovie PC — Security Audit
+# KokoMovie — Security Audit
 
-**Version:** 1.0.0  
-**Date:** May 2026  
-**Scope:** Electron client + all microservices (local deployment)  
-**Framework:** OWASP Top 10 (2021) + OWASP Electron Security Checklist
+**Version:** 1.5.1
+**Date:** 2026-08-03
+**Scope:** The Electron desktop client in `client/` — the only shipped component
+**Framework:** OWASP Top 10 (2021) + Electron security checklist
+**Runtime:** Electron 43.2.0 · Chromium 150 · Node.js 24.18.0
 
----
-
-## Summary
-
-| Category | Status | Notes |
-|---|---|---|
-| A01 Broken Access Control | PASS | JWT RS256 enforced on all authenticated endpoints; profile isolation via X-Profile-Id header verified server-side |
-| A02 Cryptographic Failures | PASS | AES-256-GCM offline segment encryption; RS4096 JWT signing; bcrypt password hashing |
-| A03 Injection | PASS | Parameterised queries (Drizzle/better-sqlite3); Zod input validation; no raw SQL string concatenation |
-| A04 Insecure Design | PASS | Threat model documented (STRIDE); device-bound offline keys |
-| A05 Security Misconfiguration | PASS | CSP enforced (including custom offline: scheme protection); security headers via @fastify/helmet; Electron hardened (see below) |
-| A06 Vulnerable Components | REVIEW | npm audit clean as of 2026-05-15; schedule monthly audit |
-| A07 Auth & Session Failures | PASS | Refresh token rotation; Redis denylist; TOTP MFA; OS keychain storage |
-| A08 Software/Data Integrity | PASS | Electron auto-updater uses HTTPS + code signing |
-| A09 Logging & Monitoring | PASS | Pino structured logs to console/stdout in Docker containers |
-| A10 SSRF | PASS | No outbound URL construction from user input; all external calls are to hardcoded service endpoints |
+> **Supersedes the pre-1.5.0 audit.** Every claim below was re-verified against current source.
+> The previous revision of this document described microservices, JWT/RS256 sessions, bcrypt,
+> Redis, PostgreSQL, DynamoDB, Docker networking, Terraform infrastructure, Widevine DRM, and
+> certificate pinning. **None of that exists.** It was archived on `archive/pre-phase-2-legacy`
+> and removed in Phase 2. There is no backend, no account, no server-side authorization, and no
+> telemetry to audit.
 
 ---
 
-## Electron Security Checklist
+## Threat model
 
-### Process Isolation
+KokoMovie is a single-user local desktop application. The assets worth protecting are the user's
+TMDB credential, their local library (watchlist, history, positions), their filesystem, and their
+machine's network position. The adversary is **hostile remote content**: provider embed pages,
+CDN responses, subtitle files, torrent peers, and TMDB/GitHub responses. There is no multi-tenant
+boundary, so classic access-control and session risks do not apply; injection, SSRF, hostile
+renderer content, and path handling do.
 
-| Check | Status | Implementation |
+| Category | Status | Basis |
 |---|---|---|
-| `contextIsolation: true` | ✓ PASS | `client/src/main/index.ts:29` |
-| `nodeIntegration: false` | ✓ PASS | `client/src/main/index.ts:28` |
-| `sandbox: true` | ✓ PASS | `client/src/main/index.ts:30` |
-| `webSecurity: true` | ✓ PASS | `client/src/main/index.ts:31` |
-| `allowRunningInsecureContent: false` | ✓ PASS | `client/src/main/index.ts:32` |
-| preload uses `contextBridge` only | ✓ PASS | `client/src/main/preload.ts` — no direct Node.js API exposure |
-| No `nativeWindowOpen: true` | ✓ PASS | Not set; new window handler blocks external URLs |
+| A01 Broken Access Control | N/A | Single local user; no server, no roles, no cross-tenant data |
+| A02 Cryptographic Failures | PASS | Downloaded segments AES-256-GCM; TMDB credential in the OS keychain (`keytar`), never on disk in plaintext |
+| A03 Injection | PASS | `better-sqlite3` prepared statements throughout; Zod schemas on IPC; FFmpeg spawned via `spawn()` with an argument array, never a shell |
+| A04 Insecure Design | REVIEW | Extraction windows run hostile pages with `webSecurity` disabled — accepted, compensated, documented below |
+| A05 Security Misconfiguration | REVIEW | Main window fully hardened; production CSP still carries `'unsafe-inline' 'unsafe-eval'` and broad `https:` fallbacks |
+| A06 Vulnerable Components | PASS | `npm run audit:production` gates every high/critical production advisory; one reviewed exception |
+| A07 Auth & Session Failures | N/A | No authentication exists |
+| A08 Software/Data Integrity | REVIEW | Updater is HTTPS with SHA-512 block-map verification; installers are unsigned |
+| A09 Logging & Monitoring | PASS | Rotating, size-bounded, redacted local diagnostics; nothing transmitted automatically |
+| A10 SSRF | PASS | API proxy allowlisted to TMDB/GitHub; stream proxy rejects private, loopback, link-local, and credentialed targets |
 
-### Content Security Policy
+---
+
+## Electron process isolation
+
+### Main window — `client/src/main/index.ts:57`
+
+| Control | Value | Line |
+|---|---|---|
+| `contextIsolation` | `true` | `index.ts:68` |
+| `nodeIntegration` | `false` | `index.ts:69` |
+| `nodeIntegrationInSubFrames` | `false` | `index.ts:70` |
+| `sandbox` | `true` | `index.ts:71` |
+| `webSecurity` | `true` | `index.ts:72` |
+| `allowRunningInsecureContent` | `false` | `index.ts:73` |
+| `webviewTag` | `false` | `index.ts:79` |
+| `experimentalFeatures` | `false` | `index.ts:80` |
+| `plugins` | `false` | `index.ts:78` |
+| Popups | denied via `setWindowOpenHandler` | `index.ts:112` |
+| Navigation | restricted via `will-navigate` | `index.ts:118` |
+
+The preload (`client/src/main/preload.ts`) exposes only named methods through `contextBridge`.
+Raw `ipcRenderer` is never exposed.
+
+### Extraction windows — `client/src/main/stream-extractor/index.ts:203`
+
+This is the application's highest-risk surface: it loads attacker-influenced provider pages in
+Electron-controlled Chromium.
+
+| Control | Value | Line |
+|---|---|---|
+| Session | fresh random ephemeral partition per attempt | `stream-extractor/index.ts:197` |
+| `contextIsolation` | `true` | `:214` |
+| `nodeIntegration` | `false` | `:212` |
+| `sandbox` | `true` | `:215` |
+| `webviewTag` | `false` | `:216` |
+| `allowRunningInsecureContent` | `false` | `:217` |
+| **`webSecurity`** | **`false`** unless `FORCE_WEB_SECURITY=true` | `:223` |
+| Permissions | all denied | `:200` |
+| Downloads | cancelled | `:201` |
+| Popups | denied | `:246` |
+| Navigation | non-`http(s)` protocols blocked | `:237` |
+| Concurrency | capped at `MAX_EXTRACTION_WINDOWS` | `:229` |
+| Lifetime | bounded by timeout + `AbortSignal` | `:236`, `:262` |
+| Teardown | listeners removed, window destroyed, `clearStorageData()` | `:277`–`:284` |
+
+**Accepted risk (unchanged, rank 1).** `webSecurity: false` is required because providers serve
+manifests and segments without CORS headers. The compensating controls are that the window has no
+Node access, no persistent session, no permissions, no popups, no downloads, no images, a bounded
+lifetime, and a wiped partition. It never touches the main window's session. Tightening this
+requires provider parity tests first.
+
+---
+
+## Content Security Policy — `client/src/main/index.ts:138`
+
+Production policy actually shipped:
 
 ```
 default-src 'self'
-script-src 'self'
-style-src 'self' 'unsafe-inline'
-media-src 'self' blob: offline: https: http:
-connect-src 'self' http://localhost:* ws://localhost:* https:
-img-src 'self' data: blob: https:
-frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
+script-src  'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com
+            https://s.ytimg.com https://static.doubleclick.net https://www.google.com
+style-src   'self' 'unsafe-inline' https:
+media-src   'self' blob: https: http: http://localhost:* offline:
+connect-src 'self' http://localhost:* ws://localhost:* https: offline:
+img-src     'self' data: blob: https: catalog-cache: offline:
+frame-src   'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:
+font-src    'self' data: https:
 ```
 
-**Status:** ✓ PASS — Production CSP in `index.ts`. `media-src` allows the custom `offline:` protocol scheme to play encrypted downloaded segments. `frame-src` allows YouTube for background hero trailers; streaming providers operate via Main process (hidden BrowserWindow), not inside the renderer frame.
+**Status: REVIEW, not PASS.** Three weaknesses are knowingly retained:
 
-### Certificate Pinning
+1. `script-src` allows `'unsafe-inline'` and `'unsafe-eval'`. Removing them requires reworking the
+   YouTube trailer iframe embed and verifying the Vite production bundle needs no `eval`.
+2. `media-src` allows plain `http:`, needed because some provider CDNs still serve segments over
+   HTTP. This permits cleartext media transport.
+3. `frame-src` ends in a bare `https:`, which is broader than the YouTube-only intent expressed by
+   the preceding entries.
 
-| Check | Status |
-|---|---|
-| Production API cert pinned | ✓ PASS — Enforced in prod profiles |
-| MITM resistance | ✓ PASS — Invalid cert rejects connection |
-
----
-
-## Authentication Audit
-
-| Control | Status | Detail |
-|---|---|---|
-| Password hashing | ✓ PASS | bcrypt cost factor 12 |
-| Timing-safe comparison | ✓ PASS | `bcrypt.compare` constant-time |
-| JWT algorithm pinned | ✓ PASS | `algorithms: ['RS256']` on all verifyToken calls |
-| Access token TTL | ✓ PASS | 15 minutes |
-| Refresh token rotation | ✓ PASS | Rotated on every `/auth/refresh` call |
-| Refresh token storage | ✓ PASS | SHA-256 hash only stored in PostgreSQL |
-| MFA brute force protection | ✓ PASS | 5 attempts / 5 min via Redis sliding window |
-| OAuth CSRF protection | ✓ PASS | `state` parameter validated on callback |
-| Token denylist | ✓ PASS | Redis with access token TTL as denylist expiry |
-| Device session revocation | ✓ PASS | `DELETE /auth/devices/:id` revokes refresh tokens |
+The `catalog-cache:` and `offline:` schemes are registered as privileged/secure/standard before
+`app.ready` (`index.ts:33`) and served through `protocol.handle` (`catalog-artwork.ts:64`,
+`index.ts:186`) — the modern API, not the removed `registerFileProtocol` family.
 
 ---
 
-## API Security Audit
+## IPC boundary
 
-| Control | Status | Detail |
-|---|---|---|
-| Rate limiting | ✓ PASS | `@fastify/rate-limit` per endpoint group |
-| Input validation | ✓ PASS | Zod schemas on all request bodies and query params |
-| SQL injection | ✓ PASS | Drizzle ORM / SQLite parameterised queries; no raw string interpolation |
-| NoSQL injection (DynamoDB) | ✓ PASS | AWS SDK parameterised expressions |
-| CORS | ✓ PASS | Restricted to localhost origins |
-| Security headers | ✓ PASS | `@fastify/helmet` on all services |
+- **Sender validation.** `assertTrustedRenderer` (`ipc/security.ts:6`) accepts only `file:` frames
+  or the two development origins `http://localhost:5173` / `http://127.0.0.1:5173`; anything else
+  throws `Untrusted IPC sender`.
+- **Payload validation.** Zod schemas cover the API proxy, keychain credentials, download IDs,
+  metadata, headers, subtitles, artwork, source URLs, destination folders, provider requests, and
+  library import files.
+- **API proxy.** `validateApiProxyUrl` allows only HTTPS `api.themoviedb.org` and `api.github.com`
+  on port 443, method `GET` only, and only the `accept`, `authorization`, and
+  `x-github-api-version` request headers (`ipc/security.ts:20`). Credentialed URLs, look-alike
+  hosts, alternate ports, and request bodies are rejected. Covered by
+  `client/src/renderer/lib/security-boundaries.test.ts`.
+- **Legacy surface.** The dormant auth/refresh-token and `oauth:callback` handlers noted in Phase 1
+  were removed with the account UI in Phase 9.
+
+## Local network services
+
+The HLS/subtitle proxy (`ipc/providers.ts:941`) and the torrent server (`ipc/torrent.ts:501`) both
+bind explicitly to `127.0.0.1` on an ephemeral port and are unreachable off-host. The stream proxy
+rejects private, loopback, link-local, multicast, credentialed, non-HTTP(S), and undeclared
+redirect targets; the same policy is reused for downloads and is covered by 19 assertions in
+`provider-network-policy.test.ts`.
+
+## Local data
+
+- Database: `userData/kokomovie.db`, WAL and foreign keys enabled at startup, all access through
+  prepared statements.
+- TMDB credential: OS keychain via `keytar` only. A legacy plaintext credential is migrated once
+  and deleted after a successful keychain write.
+- Downloads: AES-256-GCM per segment, key derived with HKDF-SHA256, IV random per segment.
+- Filenames and destination folders are validated and contained; orphan detection is report-only
+  and never touches user-selected folders.
+- Library export contains no credentials, no absolute media paths, and no provider secrets.
+
+## Diagnostics and privacy
+
+Diagnostics are rotating, size-bounded, and redacted at write time. The Settings report uses an
+allowlisted aggregate schema that excludes credentials, content identifiers, watch history,
+provider URLs and headers, and filesystem paths. The complete JSON is displayed for review before
+a manual save dialog. Nothing is transmitted automatically. No telemetry or analytics exists.
+
+## Supply chain and distribution
+
+- **Dependency audit policy.** `npm run audit:production` fails on every high or critical
+  *production* advisory except `GHSA-qwww-vcr4-c8h2` for exactly `react-router-dom@7.18.2`. That
+  advisory concerns React Server Components and server actions; KokoMovie is a client-only Vite SPA
+  with neither. The script also fails if the pinned version changes or the reviewed advisory
+  disappears, so the exception cannot silently outlive its justification.
+- **Licence gate.** `npm run check:licenses` fails on any production dependency that is
+  undeclared, unrecognised, or incompatible with GPL-3.0-or-later distribution, and re-verifies the
+  bundled FFmpeg's recorded provenance.
+- **Bundled FFmpeg.** Replaced GPL `ffmpeg-static` with a pinned LGPL-3.0 build. The archive is
+  SHA-256 verified and the configure string is read back out of the binary and rejected if it
+  contains `--enable-gpl`, `--enable-nonfree`, `--enable-libx264`, `--enable-libx265`, or
+  `--enable-libxvid` (`scripts/fetch-ffmpeg.mjs`).
+- **Runtime currency.** Electron 31 → 43 moves the shipped Chromium from 126 to 150, closing
+  roughly two years of accumulated Chromium and V8 security fixes. This is the single largest
+  security improvement in this release.
+- **Updates.** `electron-updater` over HTTPS from GitHub Releases with SHA-512 block-map
+  verification; downgrades are refused. Installers are **unsigned** on Windows and Linux — users
+  may see OS trust prompts and there is no platform-level publisher identity. Every release
+  therefore publishes `SHA256SUMS.txt` for manual verification. macOS stays build-only until Apple
+  signing and notarization are configured.
 
 ---
 
-## Offline Encryption Audit
+## Open findings
 
-| Control | Status | Detail |
-|---|---|---|
-| Encryption algorithm | ✓ PASS | AES-256-GCM (authenticated encryption) |
-| Key derivation | ✓ PASS | HKDF-SHA256 — device fingerprint as IKM, drmKeyId as salt |
-| Key storage | ✓ PASS | Never written to disk; derived on-the-fly at playback |
-| IV uniqueness | ✓ PASS | `randomBytes(12)` per segment |
-| Authentication tag | ✓ PASS | 16-byte GCM auth tag prepended to ciphertext |
-| Device binding | ✓ PASS | Fingerprint uses `userData + platform + COMPUTERNAME` |
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | High | Extraction windows run hostile pages with `webSecurity: false` | Accepted; compensated by ephemeral partition, sandbox, denied permissions/popups/downloads, bounded lifetime. Needs provider parity tests before tightening. |
+| 2 | Medium | Production CSP retains `'unsafe-inline'`, `'unsafe-eval'`, bare `https:` in `frame-src`, and `http:` in `media-src` | Open. Requires reworking the YouTube embed and confirming provider HTTPS coverage. |
+| 3 | Medium | Windows and Linux installers are unsigned | Open, documented. Mitigated by published SHA-256 checksums. |
+| 4 | Low | Provider/CDN behaviour is externally unstable | Accepted; circuit breaker plus redacted diagnostics. |
+| 5 | Low | Torrent playback joins a public swarm with the user's IP | Accepted and surfaced in Settings with a VPN recommendation. |
 
----
+## Verification commands
 
-## Local Infrastructure Security
-
-| Control | Status | Detail |
-|---|---|---|
-| Docker Isolation | ✓ PASS | Local services run in dedicated Docker network |
-| DB Access Control | ✓ PASS | PostgreSQL, Redis, and DynamoDB Local require auth and bind to localhost |
-| Local Keychain storage | ✓ PASS | App tokens saved in OS-level credential store (`keytar`) |
-
----
-
-## GDPR & Privacy Compliance
-
-| Requirement | Status | Implementation |
-|---|---|---|
-| Right to export | ✓ PASS | `GET /user/export` returns full profile + watchlist + history JSON |
-| Data Residency | ✓ PASS | All user data, credentials, and viewing habits are stored strictly on the local machine |
-| Data minimisation | ✓ PASS | IP addresses SHA-256+salt hashed before storage |
-| PII in logs | ✓ PASS | No email/password logged; only UUIDs and error codes |
-
-### Findings Requiring Remediation
-
-1. **[LOW] COMPUTERNAME in device fingerprint** — On shared Windows machines, `COMPUTERNAME` may not uniquely identify individual users. Consider adding a device-specific UUID stored in `localStorage` (renderer process) as an additional fingerprint input.
-2. **[RESOLVED] npm audit (2026-05-28)** — Transitive dependencies and direct dependencies (`drizzle-orm`, `@fastify/jwt`) were upgraded to fix known vulnerabilities.
-
----
-
-## 2026-05-28 Security Hardening & Snyk Mitigations
-
-In May 2026, a comprehensive security audit of the repository was conducted using Snyk. A total of 51 vulnerabilities (spanning application logic, dependency packages, and infrastructure-as-code configurations) were resolved.
-
-### 1. Application-Level Mitigations
-
-- **Path Traversal Prevention in Downloader**: Hardened the downloader queue in the Electron main process. Implemented strict regular expression validation to verify download UUIDs and filenames, and resolved paths using path-safe functions, ensuring downloaded HLS segment files cannot write outside the designated secure storage directory.
-- **IPC Proxy and Provider Protection**:
-  - Bound the local HTTP proxy interface explicitly to the loopback interface (`127.0.0.1` / `localhost`) instead of exposing it to all network interfaces.
-  - Implemented rate limiting and request size/structure bounds on the proxy to prevent denial-of-service (DoS) vectors.
-  - Added request execution timeouts to prevent resources from hanging indefinitely.
-- **Information Leakage Prevention**: Sanitized error responses returned by the main process and microservices to prevent leakage of server directories, runtime stack traces, or environment details to the client or console logs.
-- **Cross-Site Scripting (XSS) & Open Redirect Prevention**:
-  - Restricted the target origin of `postMessage` calls in the `HeroBanner` component specifically to `https://www.youtube.com`, preventing messages from being intercepted or spoofed by other origins.
-  - Added robust validation and sanitization for content detail backdrop images and trailer URLs in `ContentDetail.tsx` to block open redirect exploits and arbitrary JavaScript execution.
-- **DRM Buffer Validation**: Enforced strict buffer-type validation in the Widevine license handler (`services/playback/src/handlers/drm.ts`) to prevent out-of-bounds memory reading or potential heap overflow issues.
-- **Secret Removal**: Purged all hardcoded passwords, test accounts, and private key strings from the repository test suites (`test_watchlist_api.ts`, `test_watchlist_flow.ts`), transitioning them to standard runtime configuration variables.
-
-### 2. Dependency Management
-
-- **Package Upgrades**: Upgraded `drizzle-orm` (to `^0.30.x` or later) and `@fastify/jwt` to fix known security vulnerabilities.
-- **Node v18+ Compatibility**: Added explicit imports of the `crypto` library to ensure correct, secure cryptographic primitives are loaded on modern Node.js versions.
-
-### 3. Infrastructure Hardening (Terraform IaC)
-
-- **S3 Bucket Security**: Enforced AWS KMS customer managed key (CMK) encryption for all S3 buckets, blocked all public access, and enabled full access logs.
-- **DynamoDB Security**: Enabled Point-in-Time Recovery (PITR) for all DynamoDB tables, securing data against accidental deletes or service corruptions.
-- **ECS & ECR Hardening**: Enabled Amazon ECS Container Insights for microservice clusters, configured ECR image scan-on-push, and set ECR repository tag immutability.
-- **Network Logging**: Enabled AWS VPC Flow Logs on all public, private, and database subnets to track all network ingress/egress.
-- **Snyk Baseline Policy**: Drafted a `.snyk` policy file at the repository root to catalog and enforce security configurations for the development pipeline.
-
+```bash
+npm run lint             # ESLint 9, zero warnings enforced
+npm run typecheck        # strict renderer + main-process typecheck
+npm test                 # deterministic Vitest suite, including boundary tests
+npm run audit:production  # production advisory policy
+npm run check:licenses   # distribution licence gate
+npm run build            # production build
+```

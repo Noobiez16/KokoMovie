@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.4.1 (Fully Local, Multi-Architecture Linux)
-**Date:** August 2026
+**Version:** 1.5.1 development baseline (Fully Local, Multi-Architecture Linux)
+**Date:** 2026-08-03
 **Status:** Current
 
 ---
@@ -13,11 +13,10 @@
 3. [System Architecture](#3-system-architecture)
 4. [Client Architecture — Electron + React](#4-client-architecture--electron--react)
 5. [Providers Framework](#5-providers-framework)
-6. [DEPRECATED Backend Microservices](#6-deprecated-backend-microservices)
-7. [Data Architecture — Local SQLite](#7-data-architecture--local-sqlite)
-8. [Security Architecture](#8-security-architecture)
-9. [Infrastructure](#9-infrastructure)
-10. [IPC Bridge & API Contracts](#10-ipc-bridge--api-contracts)
+6. [Data Architecture — Local SQLite](#6-data-architecture--local-sqlite)
+7. [Security Architecture](#7-security-architecture)
+8. [Infrastructure](#8-infrastructure)
+9. [IPC Bridge & API Contracts](#9-ipc-bridge--api-contracts)
 
 ---
 
@@ -41,8 +40,8 @@ Watchlists, playback positions, continue-watching lists, and preferences are sto
 
 ### ADR-001 — Electron for cross-platform desktop
 
-**Decision:** Electron 31  
-**Rationale:** Cross-platform (Linux/Windows/macOS) execution, integrated Chromium shell for `hls.js` HLS playback, Node.js main process context for sandboxed browser-based stream extraction, and native OS keychain access.
+**Decision:** Electron 43 (Chromium 150, Node.js 24) — upgraded from Electron 31 in v1.5.1  
+**Rationale:** Cross-platform (Linux/Windows/macOS) execution, integrated Chromium shell for `hls.js` HLS playback, Node.js main process context for sandboxed browser-based stream extraction, and native OS keychain access. The 31 → 43 jump carries roughly two years of Chromium and V8 security fixes into the shipped runtime, which matters because the extraction window renders untrusted provider pages.
 
 ### ADR-002 — Fully Local Architecture (v3.0.0 Pivot)
 
@@ -100,7 +99,7 @@ Watchlists, playback positions, continue-watching lists, and preferences are sto
 
 ```
 User opens app
-  → Renderer calls TMDB directly via ipcRenderer (CORS bypassed by Main proxy)
+  → Renderer sends structured TMDB paths and parameters through the preload bridge; Main reads the keychain and owns network access/cache
   → TMDB API returns details (popular, trending, specific titles)
   → React displays catalog content
 ```
@@ -128,7 +127,8 @@ Main Process (Node.js)
 ├── SQLite Manager (better-sqlite3)
 ├── IPC Handlers
 │   ├── keychain:* — OS keychain via keytar
-│   ├── api:request — CORS-free TMDB API proxy
+│   ├── api:request — restricted GitHub Help Center proxy
+│   ├── tmdb:* — keychain-backed repository, JSON cache, cache controls
 │   ├── library:* — watchlist, history, position CRUD
 │   ├── providers:* — provider preferences & scrape
 │   └── download:* — offline HLS downloader
@@ -146,19 +146,15 @@ Renderer Process (Chromium)
 
 ## 5. Providers Framework
 
-The client races multiple streaming providers in parallel. Refer to the provider registry and hidden window extraction logic outlined in standard repository developer documentation.
+The main process ships a fixed, verified provider registry. Provider definitions remain simple deterministic embed-URL builders and are retained as the rollback/reference implementation. A separate runtime contract declares each provider's allowed HTTPS host, bounded extraction policy, request schema, health state, and diagnostics behavior.
+
+Enabled providers retain their registry order and run through the existing staggered quality-aware race. Cancellation tears down ephemeral extraction windows, provider sessions deny permissions/popups/downloads, and repeated infrastructure failures temporarily open an in-memory circuit without affecting catalog, library, or offline features. Installable packs and remote registries remain deferred until signing, revocation, isolated execution, permission confirmation, and last-known-good rollback are proven.
+
+The HLS proxy listens only on loopback. Initial targets and every redirect reject credentials, unsafe protocols, localhost, private/LAN, link-local, carrier-grade NAT, benchmark, and multicast addresses. Downloads may use only public HTTP(S) targets or the exact active KokoMovie proxy port.
 
 ---
 
-## 6. [DEPRECATED] Backend Microservices
-
-All services in the `services/` directory (Auth, User, Catalog, Playback, Recommendation) and their associated Docker container setup (`docker-compose.yml`) are **deprecated and completely unused**. 
-
-All database operations and business logic are now integrated directly inside the main and renderer processes of the Electron application.
-
----
-
-## 7. Data Architecture — Local SQLite
+## 6. Data Architecture — Local SQLite
 
 Watchlist, playback tracking, preferences, and download queues are managed in a local SQLite database named `kokomovie.db` located inside the Electron app's `userData` directory.
 
@@ -220,7 +216,7 @@ CREATE TABLE preferences (
 
 ---
 
-## 8. Security Architecture
+## 7. Security Architecture
 
 - **Context Isolation**: Enabled in all windows. Renderer processes communicate only through whitelisted IPC channels in the preload script.
 - **Keychain Storage**: API keys are saved in the OS keychain via `keytar` to prevent raw exposure on disk or in standard localStorage.
@@ -230,7 +226,28 @@ CREATE TABLE preferences (
 
 ---
 
-## 9. Infrastructure
+### Bundled FFmpeg
+
+FFmpeg is **not** an npm dependency. `scripts/fetch-ffmpeg.mjs` vendors a checksum-pinned
+LGPL-3.0 build (BtbN/FFmpeg-Builds, FFmpeg 8.1) into `client/vendor/ffmpeg/<platform>-<arch>/`,
+verifying the SHA-256 of the archive and then reading the configure string back out of the binary
+to reject any build carrying `--enable-gpl`, `--enable-nonfree`, `--enable-libx264`,
+`--enable-libx265`, or `--enable-libxvid`.
+
+electron-builder copies the per-target binary through `extraResources` to
+`resources/ffmpeg/ffmpeg[.exe]`, alongside `LICENSE.txt` and `PROVENANCE.json`. Because it lives
+outside the asar archive it is spawned directly and remains user-replaceable, which is what LGPL
+§4 requires. `client/src/main/ffmpeg.ts` resolves the path (packaged `resourcesPath` first, then
+the development vendor tree) and exports a single `FFMPEG_BIN`; the torrent remuxer and the
+download finalizer both consume it. When no binary is present — currently any macOS build — those
+two features report a clear error and the rest of the application is unaffected.
+
+This replaced `ffmpeg-static`, whose binary is configured `--enable-gpl --enable-version3` and so
+dictated the project's distribution licence. See `docs/LEGAL.md` and `THIRD-PARTY-NOTICES.md`.
+
+---
+
+## 8. Infrastructure
 
 No hosting infrastructure or local Docker orchestration is required. The application only requires the local desktop runtime.
 
@@ -238,7 +255,10 @@ No hosting infrastructure or local Docker orchestration is required. The applica
 
 Linux packages are produced independently for x64 (`x86_64`) and ARM64 (`aarch64`). Release CI
 runs each build on a native GitHub-hosted runner so Electron, `better-sqlite3`, `keytar`, and the
-bundled FFmpeg binary all match the package architecture. The local HTTP proxy and torrent server
+bundled FFmpeg binary all match the package architecture. Since better-sqlite3 v13 the SQLite
+addon ships as an ABI-stable N-API prebuild under `prebuilds/<platform>-<arch>.node` rather than
+`build/Release/`, so CI names each verified binary explicitly instead of globbing.
+The local HTTP proxy and torrent server
 bind only to the loopback interface and use Node's architecture-independent socket APIs, so their
 IPC and URL contracts are identical on both architectures.
 
@@ -248,7 +268,7 @@ on the target CPU architecture.
 
 ---
 
-## 10. IPC Bridge & API Contracts
+## 9. IPC Bridge & API Contracts
 
 All transactions between the UI and backend logic are defined by the IPC contracts exposed in `client/src/main/preload.ts` under the global `window.electronAPI` bridge:
 
@@ -256,3 +276,13 @@ All transactions between the UI and backend logic are defined by the IPC contrac
 - `electronAPI.watchlistGet(profileId)` / `watchlistAdd(contentId, type, profileId)` / `watchlistRemove(contentId, profileId)`
 - `electronAPI.positionGet(contentId, episodeId, profileId)` / `positionSave(contentId, episodeId, type, pos, dur, completedAt, profileId)`
 - `electronAPI.preferencesGet(profileId)` / `preferencesSave(prefs, profileId)`
+
+## 10. Local Library Portability
+
+Manual portability is implemented entirely in the main process. The renderer can request a native save/open dialog, receive a validation preview, and submit a short-lived import token with an explicit `merge` or `replace` decision; it never receives arbitrary filesystem access.
+
+The versioned JSON format includes watchlist, playback history/positions, preferences, and optional bounded catalog artwork. Credentials, downloaded media, and machine-specific paths are excluded. Imports are strict-schema validated, previewed, backed up with SQLite's online backup API, applied transactionally with timestamp-based conflict rules, and artwork files are restored atomically after extension and signature checks. Cloud and watched-folder sync remain disabled and out of scope.
+
+## 11. Local diagnostics boundary
+
+Diagnostics flow from main-process operational events into a rotating 512 KiB log with three retained generations. Every field is length-bounded and redacted before persistence. Export does not copy arbitrary logs or database rows: it constructs a schema-v1 report from app/platform metadata, aggregate local-library counts, aggregate download states, and the latest redacted events. A trusted-renderer IPC issues a ten-minute preview token; only that reviewed immutable snapshot can be saved.

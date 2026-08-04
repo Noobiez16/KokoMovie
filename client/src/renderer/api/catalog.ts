@@ -5,8 +5,14 @@ import {
   createTmdbClient, GENRES, TMDB_GENRE_MAP,
   posterUrl, backdropUrl, profileUrl, stillUrl,
   tmdbTitle, tmdbType, tmdbYear, tmdbContentId, decodeTmdbContentId, tmdbEpisodeId,
-  type TmdbItem, type TmdbClient,
+  type TmdbItem, type TmdbClient, tmdbCatalogSource,
 } from '../lib/tmdb'
+
+// TMDB refuses discover queries beyond page 500.
+const TMDB_MAX_PAGE = 500
+// Upper bound on TMDB requests combined into a single category view. Category pages request 80
+// items (4 pages); the cap keeps one page change from fanning out into an unbounded burst.
+const TMDB_PAGES_PER_VIEW_MAX = 5
 
 export interface ContentSummary {
   id: string
@@ -87,7 +93,7 @@ export interface HomeData {
   rows: HomeRow[]
 }
 
-export type CatalogSource = 'tmdb' | 'local'
+export type CatalogSource = 'tmdb' | 'cache' | 'local'
 
 export interface PaginatedMeta {
   requestId: string
@@ -193,7 +199,7 @@ export const catalogApi = {
       .filter((r) => r.items.length > 0)
 
     const featured = trending[0] ?? null
-    return { success: true as const, data: { featured, trending, rows } as HomeData, meta: { ...meta(), source: 'tmdb' as CatalogSource } }
+    return { success: true as const, data: { featured, trending, rows } as HomeData, meta: { ...meta(), source: tmdbCatalogSource(trendingPage, ...rowPages) as CatalogSource } }
   },
 
   browse: async (
@@ -204,14 +210,48 @@ export const catalogApi = {
     const page = params.page ?? 1
     const g = params.genre ? GENRES.find((x) => x.slug === params.genre) : undefined
     const isTv = params.type === 'series'
-    const res = isTv ? await c.discoverTv(g?.tvId, page, params.year) : await c.discoverMovie(g?.movieId, page, params.year)
+
+    // TMDB discover pages are fixed at 20 results, so a larger page size means fetching several
+    // consecutive TMDB pages and presenting them as one. `limit` used to be accepted and silently
+    // ignored, which is why category views always showed 20 items no matter what was requested.
+    const perTmdbPage = 20
+    const batch = Math.min(Math.max(Math.ceil((params.limit ?? perTmdbPage) / perTmdbPage), 1), TMDB_PAGES_PER_VIEW_MAX)
+    const firstTmdbPage = (page - 1) * batch + 1
+
+    const responses = (
+      await Promise.all(
+        Array.from({ length: batch }, (_, offset) => {
+          const tmdbPage = firstTmdbPage + offset
+          if (tmdbPage > TMDB_MAX_PAGE) return null
+          const request = isTv
+            ? c.discoverTv(g?.tvId, tmdbPage, params.year)
+            : c.discoverMovie(g?.movieId, tmdbPage, params.year)
+          // A later page in the batch can legitimately fall past the end of the result set; that
+          // must shorten the view, not fail the whole request.
+          return offset === 0 ? request : request.catch(() => null)
+        }),
+      )
+    ).filter((res): res is NonNullable<typeof res> => res !== null)
+
+    const [first] = responses
+    if (!first) throw new Error('Could not load this category.')
+
+    // Consecutive discover pages can repeat a title as popularity shifts between requests.
+    const combined = [...new Map(responses.flatMap((res) => res.results).map((item) => [item.id, item])).values()]
+    const totalTmdbPages = Math.min(first.total_pages, TMDB_MAX_PAGE)
+
     return {
       success: true as const,
-      data: summaries(res.results),
+      data: summaries(combined),
       meta: {
         ...meta(),
-        source: 'tmdb' as CatalogSource,
-        pagination: { page, limit: 20, total: res.total_results, pages: Math.min(res.total_pages, 500) },
+        source: tmdbCatalogSource(...responses) as CatalogSource,
+        pagination: {
+          page,
+          limit: batch * perTmdbPage,
+          total: first.total_results,
+          pages: Math.max(Math.ceil(totalTmdbPages / batch), 1),
+        },
       } as PaginatedMeta,
     }
   },
@@ -238,7 +278,7 @@ export const catalogApi = {
         cast: mapCast(m.credits?.cast ?? []),
         seasons: [],
       }
-      return { success: true as const, data: detail, meta: meta() }
+      return { success: true as const, data: detail, meta: { ...meta(), source: tmdbCatalogSource(m) as CatalogSource } }
     }
 
     // TV
@@ -284,17 +324,27 @@ export const catalogApi = {
       cast: mapCast(tv.credits?.cast ?? []),
       seasons,
     }
-    return { success: true as const, data: detail, meta: meta() }
+    return { success: true as const, data: detail, meta: { ...meta(), source: tmdbCatalogSource(tv, ...seasonDetails) as CatalogSource } }
   },
 
   search: async (q: string, params: { type?: string; genres?: string; page?: number } = {}, _profileId?: string) => {
-    const c = client()
     const page = params.page ?? 1
-    const res = await c.searchMulti(q, page)
-    let data = summaries(res.results)
-    if (params.type === 'movie') data = data.filter((d) => d.type === 'movie')
-    if (params.type === 'series') data = data.filter((d) => d.type === 'series')
-    return { success: true as const, data, meta: { ...meta(), query: q, total: res.total_results } }
+    const downloaded = window.electronAPI ? await window.electronAPI.searchDownloadedCatalog(q) : []
+    let online: ContentSummary[] = []
+    let onlineTotal = 0
+    let searchSource: CatalogSource = downloaded.length > 0 ? 'cache' : 'tmdb'
+    try {
+      const res = await client().searchMulti(q, page)
+      online = summaries(res.results)
+      onlineTotal = res.total_results
+      searchSource = tmdbCatalogSource(res) as CatalogSource
+    } catch (error) {
+      if (downloaded.length === 0) throw error
+    }
+    let data = [...new Map([...online, ...downloaded].map((item) => [item.id, item])).values()]
+    if (params.type === 'movie') data = data.filter((item) => item.type === 'movie')
+    if (params.type === 'series') data = data.filter((item) => item.type === 'series')
+    return { success: true as const, data, meta: { ...meta(), query: q, total: Math.max(onlineTotal, data.length), source: searchSource } }
   },
 
   // No AI backend in the local build — behave like a normal search.

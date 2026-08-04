@@ -10,7 +10,7 @@ import type { CatalogSource } from '../../api/catalog'
  */
 export function CatalogFallbackBanner({ source }: { source?: CatalogSource }) {
   const navigate = useNavigate()
-  if (source !== 'local') return null
+  if (source !== 'local' && source !== 'cache') return null
 
   return (
     <div className="mx-8 mt-4 flex items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-amber-100 animate-fade-in">
@@ -20,17 +20,17 @@ export function CatalogFallbackBanner({ source }: { source?: CatalogSource }) {
         <line x1="12" y1="17" x2="12.01" y2="17" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">You're viewing a limited offline catalog</p>
+        <p className="text-sm font-semibold">{source === 'cache' ? 'Showing saved catalog data' : "You're viewing a limited offline catalog"}</p>
         <p className="text-xs text-amber-200/70">
-          Add your free TMDB API key to unlock the full library of movies and shows.
+          {source === 'cache' ? 'Some information may be out of date. KokoMovie will refresh it when TMDB is reachable.' : 'Add your free TMDB API key to unlock the full library of movies and shows.'}
         </p>
       </div>
-      <button
+      {source === 'local' && <button
         onClick={() => navigate('/settings')}
         className="shrink-0 rounded-lg bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-50 transition-colors hover:bg-amber-400/30"
       >
         Add TMDB key
-      </button>
+      </button>}
     </div>
   )
 }

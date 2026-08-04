@@ -3,14 +3,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 // E1-S2: Expose ONLY whitelisted APIs via contextBridge — no direct Node.js access
 contextBridge.exposeInMainWorld('electronAPI', {
   // ─── Auth / Keychain ──────────────────────────────────────────────────────
-  getAuthToken: () => ipcRenderer.invoke('keychain:get-token'),
-  setAuthToken: (token: string) => ipcRenderer.invoke('keychain:set-token', token),
-  clearAuthToken: () => ipcRenderer.invoke('keychain:clear-token'),
-  getRefreshToken: () => ipcRenderer.invoke('keychain:get-refresh-token'),
-  setRefreshToken: (token: string, persist?: boolean) => ipcRenderer.invoke('keychain:set-refresh-token', token, persist ?? true),
   getTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:get-tmdb-key', accountId),
   setTmdbApiKey: (accountId: string, key: string) => ipcRenderer.invoke('keychain:set-tmdb-key', accountId, key),
   clearTmdbApiKey: (accountId: string) => ipcRenderer.invoke('keychain:clear-tmdb-key', accountId),
+  validateTmdbApiKey: (key: string) => ipcRenderer.invoke('tmdb:validate-credential', key),
+  tmdbRequest: (path: string, params: Record<string, string> = {}) => ipcRenderer.invoke('tmdb:request', { path, params }),
+  searchDownloadedCatalog: (query: string) => ipcRenderer.invoke('tmdb:search-downloads', query),
+  getTmdbCacheStats: () => ipcRenderer.invoke('tmdb:cache:stats'),
+  clearTmdbCache: () => ipcRenderer.invoke('tmdb:cache:clear'),
 
   // ─── Downloads ────────────────────────────────────────────────────────────
   downloadContent: (opts: {
@@ -24,8 +24,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     drmKeyId?: string
     customDownloadPath?: string
     headers?: Record<string, string>
+    subtitles?: Array<{ lang: string; url: string }>
   }) => ipcRenderer.invoke('download:start', opts),
   cancelDownload: (id: string) => ipcRenderer.invoke('download:cancel', id),
+  pauseDownload: (id: string) => ipcRenderer.invoke('download:pause', id),
+  resumeDownload: (id: string) => ipcRenderer.invoke('download:resume', id),
   deleteDownload: (id: string) => ipcRenderer.invoke('download:delete', id),
   listDownloads: () => ipcRenderer.invoke('download:list'),
   getOfflineManifest: (id: string) => ipcRenderer.invoke('download:get-manifest', id),
@@ -86,14 +89,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) =>
     ipcRenderer.invoke('discord:set-activity', activity),
 
-  // ─── Deep-link OAuth callback ─────────────────────────────────────────────
-  onOAuthCallback: (callback: (url: string) => void) => {
-    ipcRenderer.on('oauth:callback', (_: Electron.IpcRendererEvent, url: string) => callback(url))
-    return () => ipcRenderer.removeAllListeners('oauth:callback')
-  },
 
   // ─── API proxy (bypasses file:// CORS restrictions) ─────────────────────
-  apiRequest: (opts: { url: string; method: string; headers: Record<string, string>; body?: string }) =>
+  apiRequest: (opts: { url: string; method: 'GET'; headers: Record<string, string> }) =>
     ipcRenderer.invoke('api:request', opts),
 
   // ─── Local library (watchlist, resume positions, preferences) ────────────
@@ -110,7 +108,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   prefsGet: () => ipcRenderer.invoke('library:prefs:get'),
   prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) =>
     ipcRenderer.invoke('library:prefs:set', p),
-
+  exportLibraryFile: (input: { includeArtwork: boolean }) =>
+    ipcRenderer.invoke('library:export-file', input),
+  selectLibraryImport: () => ipcRenderer.invoke('library:import-select'),
+  applyLibraryImport: (input: { token: string; mode: 'merge' | 'replace' }) =>
+    ipcRenderer.invoke('library:import-apply', input),
+  previewDiagnostics: () => ipcRenderer.invoke('diagnostics:preview'),
+  saveDiagnostics: (input: { token: string }) => ipcRenderer.invoke('diagnostics:save', input),
   // ─── Providers (stream aggregator) ───────────────────────────────────────
   listProviders: () => ipcRenderer.invoke('providers:list'),
   toggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('providers:toggle', id, enabled),

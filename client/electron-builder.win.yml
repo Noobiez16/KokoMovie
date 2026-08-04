@@ -1,7 +1,7 @@
 appId: com.kokomovie.app
 productName: KokoMovie
 copyright: Copyright © 2026 KokoMovie Inc.
-electronVersion: "31.7.7"
+electronVersion: "43.2.0"
 
 directories:
   buildResources: build
@@ -15,6 +15,14 @@ files:
 extraResources:
   - from: build/icons
     to: icons
+  # LGPL FFmpeg is shipped as a standalone executable outside the asar archive so it can be
+  # spawned directly, inspected, and replaced by the user (see docs/LEGAL.md).
+  - from: vendor/ffmpeg/win32-${arch}
+    to: ffmpeg
+    filter:
+      - ffmpeg.exe
+      - LICENSE.txt
+      - PROVENANCE.json
 
 npmRebuild: false
 asar: false
@@ -25,7 +33,11 @@ win:
     - target: nsis
       arch: [x64]
   icon: build/icons/icon.ico
-  sign: false
+  # electron-builder 26 has no `win.sign` key — that is the v27 spelling, and `win` is declared
+  # with additionalProperties:false, so an unknown key invalidates the whole block. Releases are
+  # deliberately unsigned (see docs/LEGAL.md); signExecutable:false skips code signing while
+  # resedit still applies the icon and version metadata.
+  signExecutable: false
 
 nsis:
   oneClick: false

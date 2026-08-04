@@ -2,9 +2,17 @@ import { app, BrowserWindow, session } from 'electron'
 import { promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { lookup } from 'dns'
+import { reclaimOversizedLog, rotateLogIfNeeded } from '../diagnostics.js'
+
+// Extraction logging keeps full provider URLs on purpose: it is the only way to diagnose a
+// provider that stops resolving, and it never leaves the machine (the Settings diagnostic report
+// is built from the separate redacted diagnostics log, not from this file). It is bounded and
+// rotated so it cannot grow without limit — earlier builds reached tens of megabytes.
+const MAX_EXTRACTION_LOG_BYTES = 2 * 1024 * 1024
 
 const logQueue: string[] = []
 let isWritingLog = false
+let reclaimedLegacyLog = false
 
 function logExtraction(msg: string) {
   logQueue.push(`[${new Date().toISOString()}] ${msg}\n`)
@@ -24,6 +32,12 @@ function triggerLogWrite() {
   }
   const content = chunks.join('')
   const logPath = join(app.getPath('userData'), 'extraction.log')
+
+  if (!reclaimedLegacyLog) {
+    reclaimedLegacyLog = true
+    reclaimOversizedLog(logPath, MAX_EXTRACTION_LOG_BYTES)
+  }
+  rotateLogIfNeeded(logPath, Buffer.byteLength(content), MAX_EXTRACTION_LOG_BYTES)
 
   fsPromises.appendFile(logPath, content, 'utf8')
     .catch(() => {})
@@ -68,6 +82,8 @@ const BLOCKED_HOSTS = [
 // for the entire app session, causing legitimate providers to always time out.
 const hostResolutionCache = new Map<string, { ok: boolean; expiresAt: number }>()
 const HOST_RESOLUTION_TTL_MS = 3 * 60 * 1000
+const MAX_EXTRACTION_WINDOWS = 8
+const activeExtractionWindows = new Set<BrowserWindow>()
 
 function isStreamUrl(url: string): boolean {
   try {
@@ -182,7 +198,7 @@ export async function extractStream(
     signal?: AbortSignal
   } = {},
 ): Promise<ExtractedStream | null> {
-  const { timeoutMs = 30000, sessionName, attempt = 0, signal } = options
+  const { timeoutMs = 30000, attempt = 0, signal } = options
 
   return new Promise((resolve) => {
     if (signal?.aborted) {
@@ -195,6 +211,8 @@ export async function extractStream(
     const partition = `providers-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const providerSession = session.fromPartition(partition)
+    providerSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+    providerSession.on('will-download', (_event, item) => item.cancel())
 
     const win = new BrowserWindow({
       show: false,
@@ -206,7 +224,12 @@ export async function extractStream(
       webPreferences: {
         session: providerSession,
         nodeIntegration: false,
+        nodeIntegrationInSubFrames: false,
         contextIsolation: true,
+        sandbox: true,
+        webviewTag: false,
+        allowRunningInsecureContent: false,
+        experimentalFeatures: false,
         // E1-S7: webSecurity is disabled on this isolated off-screen scraper window
         // to permit CORS-disabled stream segment and manifest extraction from external CDNs.
         // This is mitigated by isolating the browser context inside a random ephemeral partition
@@ -216,6 +239,22 @@ export async function extractStream(
         images: false,
         backgroundThrottling: false,
       },
+    })
+
+    if (activeExtractionWindows.size >= MAX_EXTRACTION_WINDOWS) {
+      win.destroy()
+      resolve(null)
+      return
+    }
+    activeExtractionWindows.add(win)
+
+    win.webContents.on('will-navigate', (event, targetUrl) => {
+      try {
+        const protocol = new URL(targetUrl).protocol
+        if (protocol !== 'https:' && protocol !== 'http:') event.preventDefault()
+      } catch {
+        event.preventDefault()
+      }
     })
 
     win.webContents.setWindowOpenHandler((details) => {
@@ -255,6 +294,8 @@ export async function extractStream(
       try { providerSession.webRequest.onHeadersReceived(null as any) } catch { /* ignore */ }
       try { providerSession.webRequest.onBeforeRequest(null as any) } catch { /* ignore */ }
       try { win.destroy() } catch { /* already destroyed */ }
+      activeExtractionWindows.delete(win)
+      void providerSession.clearStorageData().catch(() => {})
       resolve(result)
     }
 

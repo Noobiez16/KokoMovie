@@ -1,0 +1,25 @@
+# GitGuardian / ggshield configuration.
+#
+# KokoMovie stores no secrets in the repository. TMDB credentials are supplied by the user at
+# runtime and held in the OS keychain; there is no backend, account system, or service credential
+# to commit. The exclusions below are high-entropy values that are deliberately public and must
+# stay in version control.
+version: 2
+
+secret:
+  ignored-matches:
+    # SHA-256 digests of the public BtbN LGPL FFmpeg release archives fetched by
+    # scripts/fetch-ffmpeg.mjs. These are supply-chain integrity pins, not credentials: they are
+    # published alongside the upstream artifacts, and both `npm run check:licenses` and
+    # client/src/renderer/lib/ffmpeg-licensing.test.ts read them to prove the shipped binary is
+    # the audited LGPL build. Removing or rotating them would silently disable that guarantee.
+    - name: FFmpeg linux-x64 release archive SHA-256
+      match: c6794916cf8acef176d55d09f16752ff7abf188f0afe4285f8e45bec40f9aba2
+    - name: FFmpeg linux-arm64 release archive SHA-256
+      match: 819b2edc2c65b8d1f4157e00a10e4b7116f06ad989355124c8d4ee34f5b90a1a
+    - name: FFmpeg win32-x64 release archive SHA-256
+      match: 17593d84c02c3569cfd507541e1c1aecb87d2a8b87ab0ba1d260400c3380efbf
+
+    # Static UUID fixture asserting that the download-id schema accepts a well-formed UUID.
+    - name: Download identifier test fixture UUID
+      match: 2d05d7f0-44c8-4cd0-a474-d37549e5ea9c

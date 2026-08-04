@@ -1,7 +1,7 @@
 appId: com.kokomovie.app
 productName: KokoMovie
 copyright: Copyright © 2026 KokoMovie Inc.
-electronVersion: "31.7.7"
+electronVersion: "43.2.0"
 
 directories:
   buildResources: build
@@ -15,6 +15,14 @@ files:
 extraResources:
   - from: build/icons
     to: icons
+  # LGPL FFmpeg is shipped as a standalone executable outside the asar archive so it can be
+  # spawned directly, inspected, and replaced by the user (see docs/LEGAL.md).
+  - from: vendor/ffmpeg/linux-${arch}
+    to: ffmpeg
+    filter:
+      - ffmpeg
+      - LICENSE.txt
+      - PROVENANCE.json
 
 npmRebuild: false
 asar: true
@@ -22,7 +30,6 @@ asarUnpack:
   - "**/*.node"
   - node_modules/better-sqlite3/**/*
   - node_modules/keytar/**/*
-  - node_modules/ffmpeg-static/**/*
 compression: maximum
 
 linux:
