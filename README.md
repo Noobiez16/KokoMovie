@@ -6,7 +6,7 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.4.1-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-1.5.1-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#-download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#-automatic-updates)
 
@@ -156,6 +156,18 @@ KokoMovie/
 | `npm run dev:client` | Start the Electron/Vite client locally |
 | `npm run build` | Build the production bundle |
 | `npm run lint` | Run ESLint |
+| `npm run typecheck` | Typecheck renderer and main process |
+| `npm test` | Run the deterministic Vitest suite |
+| `npm run audit:production` | Production dependency advisory policy |
+| `npm run check:licenses` | Distribution licence gate (`-- --report` for the inventory) |
+| `npm run vendor:ffmpeg` | Fetch + verify the pinned LGPL FFmpeg for this platform |
+
+### Bundled FFmpeg
+
+FFmpeg is not an npm dependency. `npm run vendor:ffmpeg` downloads a checksum-pinned **LGPL-3.0**
+build into `client/vendor/ffmpeg/<platform>-<arch>/` and refuses any binary configured with
+GPL-only components. The `dist:*` scripts run it automatically; run it manually if you want
+torrent remuxing or download finalization while developing with `npm run dev:client`.
 
 ### Building installers
 
@@ -178,12 +190,12 @@ cd client && npm run dist:mac
 ### Releasing (auto-update pipeline)
 
 Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on any
-`v*` tag. The same workflow can be dispatched manually to validate both Linux architectures without publishing a release. The workflow builds Windows plus native Linux x64 and ARM64 jobs, then publishes the installers **plus the
+`v*` tag. The same workflow can be dispatched manually to validate both Linux architectures without publishing a release. The workflow builds Windows plus native Linux x64 and ARM64 jobs, then publishes the installers, `SHA256SUMS.txt`, **plus the
 `latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
-git tag v1.0.4-beta
-git push origin v1.0.4-beta
+git tag v1.5.1
+git push origin v1.5.1
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
@@ -191,7 +203,7 @@ each `client/electron-builder.*.yml`.
 
 ### Tech stack
 
-**Client:** Electron 31 · React 19 · Vite 5 · TypeScript · SQLite 3 (via `better-sqlite3`) · TanStack Query v5 · Zustand v5 · hls.js v1.5
+**Client:** Electron 43 (Chromium 150 · Node 24) · React 19 · Vite 5 · TypeScript · SQLite 3 (via `better-sqlite3` v13) · TanStack Query v5 · Zustand v5 · hls.js v1.5 · bundled LGPL FFmpeg 8.1
 
 </details>
 
@@ -204,3 +216,15 @@ by loading third-party embed pages in a sandboxed browser context, at the user's
 request — equivalent to visiting those pages in your own browser. Use of third-party
 streaming sites is subject to their terms of service and the law in your jurisdiction.
 This project is for personal and educational use only.
+
+### License
+
+KokoMovie is free software licensed under **GPL-3.0-or-later** — see [`LICENSE`](LICENSE).
+It bundles an unmodified **LGPL-3.0** FFmpeg executable, installed at `resources/ffmpeg/`
+outside the application archive so it can be inspected or replaced; its licence text and full
+provenance ship beside it. Third-party components are inventoried in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+### Signing and verification limits
+
+Current Windows and Linux artifacts are unsigned. Users may receive operating-system trust warnings, and unsigned artifacts do not provide platform-level publisher identity. Every release must therefore include `SHA256SUMS.txt`; users can verify downloads with `sha256sum -c SHA256SUMS.txt`. macOS remains build-only until Apple signing and notarization are configured and validated.
