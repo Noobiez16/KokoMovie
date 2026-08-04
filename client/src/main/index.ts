@@ -2,12 +2,16 @@ import { app, BrowserWindow, session, shell, protocol, nativeImage } from 'elect
 import { join } from 'path'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
-import { registerAuthIpc } from './ipc/auth'
-import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange } from './ipc/download'
+import { purgeAccountEraKeychainEntries, purgeLegacyCredentialFile, registerAuthIpc } from './ipc/auth'
+import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange, readOfflineArtwork, readOfflineSubtitle } from './ipc/download'
 import { registerAppIpc } from './ipc/app'
 import { registerApiProxy } from './ipc/api-proxy'
 import { registerLibraryIpc } from './ipc/library'
+import { registerLibraryPortabilityIpc } from './ipc/library-portability'
+import { registerDiagnosticsIpc } from './ipc/diagnostics'
+import { registerTmdbRepositoryIpc } from './ipc/tmdb-repository'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
+import { registerArtworkProtocol } from './catalog-artwork'
 import { registerTorrentIpc } from './ipc/torrent'
 import { destroyDiscordPresence, registerDiscordPresence } from './discord-presence'
 import { installApplicationMenu } from './app-menu'
@@ -27,6 +31,7 @@ process.stderr?.on?.('error', (err: NodeJS.ErrnoException) => {
 
 // Register offline:// before app is ready — required for privileged schemes
 protocol.registerSchemesAsPrivileged([
+  { scheme: 'catalog-cache', privileges: { secure: true, standard: true, supportFetchAPI: true } },
   { scheme: 'offline', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ])
 
@@ -138,7 +143,7 @@ app.whenReady().then(async () => {
               "style-src 'self' 'unsafe-inline' https:",
               "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
               "media-src 'self' blob: https: http://localhost:* offline:",
-              "img-src 'self' data: blob: https:",
+              "img-src 'self' data: blob: https: catalog-cache: offline:",
               "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com",
               "font-src 'self' data: https:",
             ].join('; ')
@@ -148,7 +153,7 @@ app.whenReady().then(async () => {
               "style-src 'self' 'unsafe-inline' https:",
               "media-src 'self' blob: https: http: http://localhost:* offline:",
               "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
-              "img-src 'self' data: blob: https:",
+              "img-src 'self' data: blob: https: catalog-cache: offline:",
               "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
               "font-src 'self' data: https:",
             ].join('; '),
@@ -203,6 +208,20 @@ app.whenReady().then(async () => {
       })
     }
 
+    if (filename.startsWith('subtitle/')) {
+      const subtitle = readOfflineSubtitle(downloadId, filename.slice('subtitle/'.length))
+      return subtitle !== null
+        ? new Response(subtitle, { status: 200, headers: { 'Content-Type': 'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } })
+        : new Response(null, { status: 404 })
+    }
+
+    if (filename === 'artwork.jpg') {
+      const artwork = readOfflineArtwork(downloadId)
+      return artwork
+        ? new Response(new Uint8Array(artwork), { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' } })
+        : new Response(null, { status: 404 })
+    }
+
     if (filename.startsWith('video.')) {
       const videoRegex = /^video\.[a-z0-9]+$/i
       if (!videoRegex.test(filename)) {
@@ -249,6 +268,8 @@ app.whenReady().then(async () => {
     })
   })
 
+  registerArtworkProtocol()
+
   // Start the local stream proxy BEFORE creating the window
   // This proxies HLS requests through Node.js to bypass CORS enforcement
   await startStreamProxy()
@@ -258,10 +279,15 @@ app.whenReady().then(async () => {
   installApplicationMenu()
   setupUpdater()
   registerAuthIpc()
+  void purgeLegacyCredentialFile()
+  void purgeAccountEraKeychainEntries()
   registerDownloadIpc()
   registerAppIpc()
   registerApiProxy()
+  registerTmdbRepositoryIpc()
   registerLibraryIpc()
+  registerDiagnosticsIpc()
+  registerLibraryPortabilityIpc()
   initStreamHeaderInjector()
   registerProvidersIpc()
   registerTorrentIpc()

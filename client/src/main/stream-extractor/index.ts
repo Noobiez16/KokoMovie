@@ -2,9 +2,17 @@ import { app, BrowserWindow, session } from 'electron'
 import { promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { lookup } from 'dns'
+import { reclaimOversizedLog, rotateLogIfNeeded } from '../diagnostics.js'
+
+// Extraction logging keeps full provider URLs on purpose: it is the only way to diagnose a
+// provider that stops resolving, and it never leaves the machine (the Settings diagnostic report
+// is built from the separate redacted diagnostics log, not from this file). It is bounded and
+// rotated so it cannot grow without limit — earlier builds reached tens of megabytes.
+const MAX_EXTRACTION_LOG_BYTES = 2 * 1024 * 1024
 
 const logQueue: string[] = []
 let isWritingLog = false
+let reclaimedLegacyLog = false
 
 function logExtraction(msg: string) {
   logQueue.push(`[${new Date().toISOString()}] ${msg}\n`)
@@ -24,6 +32,12 @@ function triggerLogWrite() {
   }
   const content = chunks.join('')
   const logPath = join(app.getPath('userData'), 'extraction.log')
+
+  if (!reclaimedLegacyLog) {
+    reclaimedLegacyLog = true
+    reclaimOversizedLog(logPath, MAX_EXTRACTION_LOG_BYTES)
+  }
+  rotateLogIfNeeded(logPath, Buffer.byteLength(content), MAX_EXTRACTION_LOG_BYTES)
 
   fsPromises.appendFile(logPath, content, 'utf8')
     .catch(() => {})
@@ -184,7 +198,7 @@ export async function extractStream(
     signal?: AbortSignal
   } = {},
 ): Promise<ExtractedStream | null> {
-  const { timeoutMs = 30000, sessionName, attempt = 0, signal } = options
+  const { timeoutMs = 30000, attempt = 0, signal } = options
 
   return new Promise((resolve) => {
     if (signal?.aborted) {

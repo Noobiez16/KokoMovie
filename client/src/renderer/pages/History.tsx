@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
 import { userApi, type HistoryItem } from '../api/user'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -17,14 +16,11 @@ function formatDate(iso: string): string {
 }
 
 export function HistoryPage() {
-  const { isAuthenticated, activeProfile } = useAuthStore()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'history' | 'list'>('history')
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
 
-  const profileId = activeProfile.id
+  const profileId = 'local'
 
   const queryClient = useQueryClient()
   const removeMutation = useMutation({

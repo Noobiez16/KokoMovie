@@ -1,7 +1,7 @@
 appId: com.kokomovie.app
 productName: KokoMovie
 copyright: Copyright © 2026 KokoMovie Inc.
-electronVersion: "31.7.7"
+electronVersion: "43.2.0"
 
 directories:
   buildResources: build
@@ -21,8 +21,11 @@ asarUnpack:
   - "**/*.node"
   - node_modules/better-sqlite3/**/*
   - node_modules/keytar/**/*
-  - node_modules/ffmpeg-static/**/*
 compression: maximum
+
+# NOTE: macOS remains build-only. BtbN publishes no macOS FFmpeg artifact, so no LGPL binary is
+# vendored for darwin and torrent remuxing / download finalization are unavailable in a macOS
+# build. Source and verify a macOS LGPL build before macOS leaves build-only status.
 
 mac:
   target:
@@ -34,8 +37,10 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.entertainment
-  notarize:
-    teamId: ${env.APPLE_TEAM_ID}
+  # electron-builder 26 takes `notarize` as a boolean; the team is read from APPLE_TEAM_ID (or
+  # APPLE_API_* / APPLE_KEYCHAIN_*) in the environment. macOS is build-only and unsigned, and no
+  # Apple credentials exist in CI, so notarization stays off until macOS is properly released.
+  notarize: false
 
 dmg:
   sign: true

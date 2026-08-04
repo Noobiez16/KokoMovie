@@ -5,9 +5,8 @@ import { apiProxyRequestSchema, localAccountSchema, tmdbCredentialSchema, valida
 
 describe('main-process security boundaries', () => {
   it('allows only measured HTTPS API destinations', () => {
-    expect(validateApiProxyUrl('https://api.themoviedb.org/3/movie/1').hostname).toBe('api.themoviedb.org')
     expect(validateApiProxyUrl('https://api.github.com/repos/a/b/issues').hostname).toBe('api.github.com')
-    for (const url of ['http://api.themoviedb.org/3/movie/1', 'https://example.com/', 'https://api.themoviedb.org.evil.example/', 'https://user:secret@api.github.com/', 'https://api.github.com:444/']) {
+    for (const url of ['https://api.themoviedb.org/3/movie/1', 'http://api.themoviedb.org/3/movie/1', 'https://example.com/', 'https://api.themoviedb.org.evil.example/', 'https://user:secret@api.github.com/', 'https://api.github.com:444/']) {
       expect(() => validateApiProxyUrl(url)).toThrow('API destination is not allowed')
     }
   })

@@ -2,11 +2,17 @@
   "name": "kokomovie-pc",
   "version": "1.5.1",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "workspaces": [
     "client"
   ],
   "overrides": {
     "fast-xml-parser": ">=4.4.1"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-arm64-gnu": "4.61.1",
+    "@rollup/rollup-linux-x64-gnu": "4.61.1",
+    "@rollup/rollup-win32-x64-msvc": "4.61.1"
   },
   "scripts": {
     "dev": "npm run dev:client",
@@ -17,21 +23,20 @@
     "dist:linux": "npm run dist:linux --workspace=client",
     "dist:win": "npm run dist:win --workspace=client",
     "dist:mac": "npm run dist:mac --workspace=client",
-    "typecheck": "tsc -p client/tsconfig.json --noEmit && npm run build:main --workspace=client"
+    "typecheck": "tsc -p client/tsconfig.json --noEmit && npm run build:main --workspace=client",
+    "audit:production": "node scripts/audit-production.mjs",
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "vendor:ffmpeg": "npm run vendor:ffmpeg --workspace=client"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^5.2.0",
-    "npm": "^10.8.1",
     "typescript": "^5.5.4"
   },
   "engines": {
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
-  },
-  "dependencies": {
-    "zod": "^3.25.76"
   }
 }

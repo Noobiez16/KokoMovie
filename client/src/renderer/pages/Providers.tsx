@@ -1,12 +1,8 @@
-import { Navigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
 import { providersApi } from '../api/providers'
 import { AppLayout } from '../components/layout/AppLayout'
 
 export function ProvidersPage() {
-  const { isAuthenticated } = useAuthStore()
-  if (!isAuthenticated) return <Navigate to="/login" replace />
 
   const qc = useQueryClient()
 
@@ -33,7 +29,7 @@ export function ProvidersPage() {
         </p>
 
         {isLoading ? (
-          <div className="flex items-center gap-3 text-white/40">
+          <div role="status" aria-live="polite" className="flex items-center gap-3 text-white/40">
             <div className="w-5 h-5 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
             Loading providers...
           </div>
@@ -47,6 +43,7 @@ export function ProvidersPage() {
                 <div>
                   <p className="text-white font-medium flex items-center gap-2">
                     {p.name}
+                    {p.circuitOpen && (                      <span className="text-amber-300 text-[10px] font-semibold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 uppercase tracking-wider">                        Temporarily unavailable                      </span>                    )}
                     {['vidbinge', 'vidsrc', 'vidsrc-su'].includes(p.id) && (
                       <span className="text-km-accent text-[10px] font-semibold bg-km-accent/15 px-1.5 py-0.5 rounded border border-km-accent/25 uppercase tracking-wider">
                         Recommended
@@ -75,6 +72,10 @@ export function ProvidersPage() {
                 </div>
 
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={p.enabled}
+                  aria-label={`${p.enabled ? 'Disable' : 'Enable'} ${p.name}`}
                   onClick={() => toggleMutation.mutate({ id: p.id, enabled: !p.enabled })}
                   disabled={toggleMutation.isPending}
                   style={{
@@ -89,7 +90,7 @@ export function ProvidersPage() {
                     backgroundColor: p.enabled ? 'var(--km-accent, #a855f7)' : 'rgba(255,255,255,0.1)',
                     boxShadow: p.enabled ? '0 0 12px rgba(168,85,247,0.4)' : 'none',
                   }}
-                  className="shrink-0 focus:outline-none disabled:opacity-50"
+                  className="shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg disabled:opacity-50"
                 >
                   <span
                     style={{

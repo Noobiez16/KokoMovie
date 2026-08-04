@@ -1,5 +1,5 @@
-import { ipcMain, BrowserWindow, app, dialog, shell } from 'electron'
-import ffmpegPath from 'ffmpeg-static'
+import { ipcMain, BrowserWindow, app, dialog, shell, net } from 'electron'
+import { FFMPEG_BIN } from '../ffmpeg.js'
 import { spawn } from 'child_process'
 import {
   createCipheriv,
@@ -8,11 +8,14 @@ import {
   randomBytes,
   createHash,
 } from 'crypto'
-import { createWriteStream, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync, statSync, openSync, readSync, closeSync } from 'fs'
-import { join, dirname } from 'path'
+import { copyFileSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync, statSync, openSync, readSync, closeSync } from 'fs'
+import { basename, join, dirname, isAbsolute } from 'path'
 import https from 'https'
 import http from 'http'
+import { contiguousRecoverablePrefix } from '../download-state-policy.js'
+import { downloadIdSchema, downloadStartSchema, type DownloadStartInput } from '../download-contracts.js'
 import zlib from 'zlib'
+import { normalizeSubtitleText, parseByteRange } from '../download-offline-policy'
 import { getDb, type DownloadRow } from '../db/sqlite.js'
 
 const MAX_CONCURRENT = 3
@@ -57,7 +60,7 @@ export function decryptSegment(encrypted: Buffer, key: Buffer): Buffer {
 
 // ─── HTTP fetch helper ────────────────────────────────────────────────────────
 
-import { getStreamHeaders, mergeHeadersCaseInsensitive, getStandardHeight } from './providers.js'
+import { getStreamHeaders, mergeHeadersCaseInsensitive, getStandardHeight, validateDownloadSourceUrl } from './providers.js'
 
 const httpAgent = new http.Agent({
   keepAlive: true,
@@ -103,6 +106,7 @@ async function waitForHostSlot(url: string, id?: string): Promise<void> {
   let remaining = waitMs
   while (remaining > 0) {
     if (id && cancelSignals.get(id)) throw new Error('cancelled')
+    if (id && pauseSignals.get(id)) throw new Error('paused')
     const slice = Math.min(remaining, 500)
     await new Promise((resolve) => setTimeout(resolve, slice))
     remaining -= slice
@@ -166,6 +170,7 @@ function fetchBuffer(
       host = new URL(normalizedUrl).host
     } catch {}
 
+    validateDownloadSourceUrl(normalizedUrl)
     const streamHeaders = mergeHeadersCaseInsensitive(
       getStreamHeaders(host),
       customHeaders || {}
@@ -307,11 +312,13 @@ async function fetchBufferWithRetry(
     attempt++
     try {
       if (id && cancelSignals.get(id)) throw new Error('cancelled')
+    if (id && pauseSignals.get(id)) throw new Error('paused')
       await waitForHostSlot(url, id)
       return await fetchBuffer(url, id, customHeaders, onProgress)
     } catch (err) {
       if (err instanceof Error && err.message === 'cancelled') throw err
       if (id && cancelSignals.get(id)) throw new Error('cancelled')
+    if (id && pauseSignals.get(id)) throw new Error('paused')
 
       const status = err instanceof HttpStatusError ? err.statusCode : null
       const transientStatus = status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504
@@ -432,6 +439,7 @@ async function parseManifest(manifestUrl: string, customHeaders?: Record<string,
 // ─── Active cancellation signals ─────────────────────────────────────────────
 
 const cancelSignals = new Map<string, boolean>()
+const pauseSignals = new Map<string, boolean>()
 let activeCount = 0
 
 async function downloadDirectVideo(
@@ -452,6 +460,7 @@ async function downloadDirectVideo(
 
   while (redirectsCount <= 5) {
     if (cancelSignals.get(id)) throw new Error('cancelled')
+    if (pauseSignals.get(id)) throw new Error('paused')
     await waitForHostSlot(currentUrl, id)
 
     let host = ''
@@ -459,6 +468,7 @@ async function downloadDirectVideo(
       host = new URL(currentUrl).host
     } catch {}
 
+    validateDownloadSourceUrl(currentUrl)
     const streamHeaders = mergeHeadersCaseInsensitive(
       getStreamHeaders(host),
       customHeaders || {}
@@ -542,12 +552,9 @@ async function downloadDirectVideo(
   }
 
   const total = parseInt(responseStream.headers['content-length'] ?? '0', 10)
-  const contentType = responseStream.headers['content-type'] || 'video/mp4'
 
   let received = 0
   let completed = 0
-      let downloadedBytes = 0
-      let estimatedTotalBytes = 0
   const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunk size
 
   let chunkBuffer = Buffer.alloc(CHUNK_SIZE)
@@ -571,6 +578,11 @@ async function downloadDirectVideo(
   // Wait for data chunk by chunk
   await new Promise<void>((resolve, reject) => {
     const onData = (chunk: Buffer) => {
+      if (pauseSignals.get(id)) {
+        cleanup()
+        reject(new Error('paused'))
+        return
+      }
       if (cancelSignals.get(id)) {
         cleanup()
         reject(new Error('cancelled'))
@@ -631,7 +643,7 @@ async function downloadDirectVideo(
       inputStream.removeListener('end', onEnd)
       inputStream.removeListener('error', onError)
       responseStream?.removeListener('aborted', onAborted)
-      if (cancelSignals.get(id)) {
+      if (pauseSignals.get(id) || cancelSignals.get(id)) {
         try { responseStream?.destroy() } catch {}
         try { decompressor?.destroy() } catch {}
       }
@@ -661,6 +673,9 @@ async function downloadDirectVideo(
   db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
   notifyProgress(id, 99, 'downloading', completed, completed, received, received)
   const portable = await finalizeDirectMp4(row, key, completed)
+      await artworkJobs.get(row.id)
+  writePortableSidecars(row, portable.path)
+      artworkJobs.delete(row.id)
   rmSync(localDir, { recursive: true, force: true })
   db.prepare(`
     UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ?
@@ -669,8 +684,6 @@ async function downloadDirectVideo(
   notifyProgress(id, 100, 'completed', completed, completed, portable.size, portable.size)
 }
 
-const FFMPEG_BIN = ffmpegPath ? ffmpegPath.replace('app.asar', 'app.asar.unpacked') : null
-
 function portableVideoPath(row: DownloadRow): string {
   const safeTitle = row.title.replace(/[\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim() || "KokoMovie Download"
   const baseDir = dirname(row.local_dir)
@@ -678,6 +691,21 @@ function portableVideoPath(row: DownloadRow): string {
   return existsSync(preferred) ? join(baseDir, safeTitle + ' - ' + row.id.slice(0, 8) + '.mp4') : preferred
 }
 
+function validatePortableVideo(path: string, durationMins: number | null): void {
+  const size = statSync(path).size
+  const minimum = (durationMins ?? 0) >= 20 ? 1024 * 1024 : 1
+  if (size < minimum) throw new Error('Finalized MP4 is unexpectedly small')
+  const fd = openSync(path, 'r')
+  try {
+    const header = Buffer.alloc(16)
+    const bytesRead = readSync(fd, header, 0, header.length, 0)
+    if (bytesRead < 8 || header.subarray(4, 8).toString('ascii') !== 'ftyp') {
+      throw new Error('Finalized output is not a valid MP4 container')
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
 async function finalizeDirectMp4(row: DownloadRow, key: Buffer, chunkCount: number): Promise<{ path: string; size: number }> {
   if (!FFMPEG_BIN) throw new Error('The bundled FFmpeg executable is unavailable')
   const outputPath = portableVideoPath(row)
@@ -696,6 +724,7 @@ async function finalizeDirectMp4(row: DownloadRow, key: Buffer, chunkCount: numb
     }
     ff.stdin.end()
     await exited
+    validatePortableVideo(partialPath, row.duration_mins)
     renameSync(partialPath, outputPath)
     return { path: outputPath, size: statSync(outputPath).size }
   } catch (err) {
@@ -728,6 +757,7 @@ async function finalizeHlsMp4(row: DownloadRow, key: Buffer, segmentCount: numbe
     }
     ff.stdin.end()
     await exited
+    validatePortableVideo(partialPath, row.duration_mins)
     renameSync(partialPath, outputPath)
     return { path: outputPath, size: statSync(outputPath).size }
   } catch (err) {
@@ -758,7 +788,6 @@ async function downloadContent(id: string): Promise<void> {
 
     // Parse manifest (may be master or variant)
     let variantUrl = normalizeUrl(row.s3_hls_key)
-    let rawPlaylist = ''
     let variantSegments: string[] = []
 
     const master = await parseManifest(variantUrl, customHeaders, id)
@@ -766,20 +795,39 @@ async function downloadContent(id: string): Promise<void> {
       variantUrl = master.variantUrl
       const variant = await parseManifest(variantUrl, customHeaders, id)
       variantSegments = variant.segments
-      rawPlaylist = variant.rawPlaylist
     } else if (!master.isMaster && master.segments.length > 0) {
       variantSegments = master.segments
-      rawPlaylist = master.rawPlaylist
     }
 
     if (variantSegments.length > 0) {
       db.prepare(`UPDATE downloads SET total_segments = ? WHERE id = ?`).run(variantSegments.length, id)
 
-      let completed = 0
-      let downloadedBytes = 0
-      let estimatedTotalBytes = 0
-      for (const segUrl of variantSegments) {
+      const existingSegmentSizes = new Map<number, number>()
+      for (const name of readdirSync(localDir)) {
+        const match = name.match(/^seg_(\d+)\.enc$/)
+        if (!match) continue
+        try {
+          const index = Number(match[1])
+          const encrypted = readFileSync(join(localDir, name))
+          decryptSegment(encrypted, key)
+          existingSegmentSizes.set(index, encrypted.length)
+        } catch { /* leave corrupt or incomplete files outside the recoverable prefix */ }
+      }
+      const recovered = contiguousRecoverablePrefix(existingSegmentSizes, variantSegments.length)
+      let completed = recovered.completed
+      let downloadedBytes = Array.from(existingSegmentSizes.entries())
+        .filter(([index]) => index < completed)
+        .reduce((total, [, size]) => total + Math.max(0, size - GCM_IV_LEN - GCM_TAG_LEN), 0)
+      let estimatedTotalBytes = row.total_bytes || 0
+      if (completed > 0) {
+        const resumedPct = Math.round((completed / variantSegments.length) * 100)
+        db.prepare('UPDATE downloads SET completed_segments = ?, progress_percent = ?, downloaded_bytes = ? WHERE id = ?')
+          .run(completed, resumedPct, downloadedBytes, id)
+        notifyProgress(id, resumedPct, 'downloading', completed, variantSegments.length, downloadedBytes, estimatedTotalBytes)
+      }
+      for (const segUrl of variantSegments.slice(completed)) {
         if (cancelSignals.get(id)) throw new Error('cancelled')
+    if (pauseSignals.get(id)) throw new Error('paused')
 
         const segName = `seg_${completed}.enc`
         const segPath = join(localDir, segName)
@@ -815,6 +863,9 @@ async function downloadContent(id: string): Promise<void> {
       db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
       notifyProgress(id, 99, 'downloading', completed, variantSegments.length, downloadedBytes, downloadedBytes)
       const portable = await finalizeHlsMp4(row, key, completed)
+      await artworkJobs.get(row.id)
+      writePortableSidecars(row, portable.path)
+      artworkJobs.delete(row.id)
       rmSync(localDir, { recursive: true, force: true })
 
       db.prepare(`
@@ -834,6 +885,22 @@ async function downloadContent(id: string): Promise<void> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+    if (message === 'paused' || pauseSignals.get(id)) {
+      const current = db.prepare(
+        'SELECT progress_percent, completed_segments, total_segments, downloaded_bytes, total_bytes FROM downloads WHERE id = ?',
+      ).get(id) as Pick<DownloadRow, 'progress_percent' | 'completed_segments' | 'total_segments' | 'downloaded_bytes' | 'total_bytes'> | undefined
+      db.prepare("UPDATE downloads SET status = 'paused', download_speed_kbps = 0 WHERE id = ?").run(id)
+      notifyProgress(
+        id,
+        current?.progress_percent ?? 0,
+        'paused',
+        current?.completed_segments,
+        current?.total_segments,
+        current?.downloaded_bytes,
+        current?.total_bytes,
+      )
+      return
+    }
     if (message === 'cancelled' || cancelSignals.get(id)) {
       notifyProgress(id, 0, 'cancelled')
     } else {
@@ -845,18 +912,21 @@ async function downloadContent(id: string): Promise<void> {
     }
   } finally {
     cancelSignals.delete(id)
+    pauseSignals.delete(id)
     activeCount--
+
     processQueue()
   }
 }
 
 function processQueue(): void {
-  if (activeCount >= MAX_CONCURRENT) return
   const db = getDb()
-  const next = db.prepare(`SELECT id FROM downloads WHERE status = 'pending' ORDER BY rowid LIMIT 1`).get() as { id: string } | undefined
-  if (!next) return
-  activeCount++
-  downloadContent(next.id)
+  while (activeCount < MAX_CONCURRENT) {
+    const next = db.prepare(`SELECT id FROM downloads WHERE status = 'pending' ORDER BY rowid LIMIT 1`).get() as { id: string } | undefined
+    if (!next) return
+    activeCount++
+    void downloadContent(next.id)
+  }
 }
 
 function notifyProgress(
@@ -879,24 +949,204 @@ function notifyProgress(
   })
 }
 
-// ─── IPC registration ─────────────────────────────────────────────────────────
+// ─── Offline download artwork, subtitle, and metadata sidecars ─────────────────────────────────────────────────────────
+const MAX_DOWNLOAD_ARTWORK_BYTES = 15 * 1024 * 1024
+const artworkJobs = new Map<string, Promise<void>>()
 
+async function cacheDownloadArtwork(id: string, sourceUrl: string, localDir: string): Promise<void> {
+  try {
+    const response = await net.fetch(sourceUrl, { signal: AbortSignal.timeout(20_000) })
+    if (!response.ok) return
+    const declared = Number(response.headers.get('content-length') ?? 0)
+    if (declared > MAX_DOWNLOAD_ARTWORK_BYTES) return
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_DOWNLOAD_ARTWORK_BYTES) return
+    writeFileSync(join(localDir, 'artwork.jpg'), bytes)
+    getDb().prepare('UPDATE downloads SET thumbnail_url = ? WHERE id = ?')
+      .run(`offline://${id}/artwork.jpg`, id)
+  } catch {
+    // Artwork is optional; the download itself must continue.
+  }
+}
+
+interface DownloadSubtitleInput {
+  lang: string
+  url: string
+}
+
+interface OfflineSubtitle {
+  id: number
+  name: string
+  lang: string
+  url: string
+}
+
+async function cacheDownloadSubtitles(localDir: string, tracks: DownloadSubtitleInput[]): Promise<void> {
+  const selected = tracks.slice(0, 8)
+  if (selected.length === 0) return
+  const subtitleDir = join(localDir, 'subtitles')
+  mkdirSync(subtitleDir, { recursive: true })
+  const saved: Array<{ file: string; lang: string; name: string }> = []
+
+  for (const [index, track] of selected.entries()) {
+    try {
+      const url = new URL(track.url)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
+      const response = await net.fetch(url.toString(), { signal: AbortSignal.timeout(20_000) })
+      if (!response.ok) continue
+      const declared = Number(response.headers.get('content-length') ?? 0)
+      if (declared > 2 * 1024 * 1024) continue
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.byteLength > 2 * 1024 * 1024) continue
+      const text = normalizeSubtitleText(new TextDecoder().decode(bytes))
+      const lang = track.lang.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16) || 'und'
+      const file = `${index}-${lang}.vtt`
+      writeFileSync(join(subtitleDir, file), text, 'utf8')
+      saved.push({ file, lang, name: lang.toUpperCase() })
+    } catch {
+      // Individual subtitle failures do not fail the media download.
+    }
+  }
+  writeFileSync(join(subtitleDir, 'index.json'), JSON.stringify(saved, null, 2), 'utf8')
+}
+
+function copySubtitleSidecars(row: DownloadRow, mediaPath: string): void {
+  const source = join(row.local_dir, 'subtitles')
+  if (!existsSync(source)) return
+  const target = mediaPath + '.subtitles'
+  mkdirSync(target, { recursive: true })
+  for (const name of readdirSync(source)) {
+    if (/^(?:\d+-[a-z0-9-]+\.vtt|index\.json)$/.test(name)) copyFileSync(join(source, name), join(target, name))
+  }
+}
+
+export function listOfflineSubtitles(downloadId: string): OfflineSubtitle[] {
+  const row = getDb().prepare('SELECT local_dir, manifest_path FROM downloads WHERE id = ?')
+    .get(downloadId) as { local_dir: string; manifest_path: string | null } | undefined
+  if (!row) return []
+  const root = row.manifest_path?.toLowerCase().endsWith('.mp4')
+    ? row.manifest_path + '.subtitles'
+    : join(row.local_dir, 'subtitles')
+  try {
+    const entries = JSON.parse(readFileSync(join(root, 'index.json'), 'utf8')) as Array<{ file: string; lang: string; name: string }>
+    return entries
+      .filter((entry) => /^\d+-[a-z0-9-]+\.vtt$/.test(entry.file))
+      .map((entry, index) => ({ id: 1000 + index, name: entry.name, lang: entry.lang, url: `offline://${downloadId}/subtitle/${entry.file}` }))
+  } catch {
+    return []
+  }
+}
+
+export function readOfflineSubtitle(downloadId: string, filename: string): string | null {
+  if (!/^\d+-[a-z0-9-]+\.vtt$/.test(filename)) return null
+  const row = getDb().prepare('SELECT local_dir, manifest_path FROM downloads WHERE id = ?')
+    .get(downloadId) as { local_dir: string; manifest_path: string | null } | undefined
+  if (!row) return null
+  const root = row.manifest_path?.toLowerCase().endsWith('.mp4')
+    ? row.manifest_path + '.subtitles'
+    : join(row.local_dir, 'subtitles')
+  try {
+    return readFileSync(join(root, filename), 'utf8')
+  } catch {
+    return null
+  }
+}
+function writePortableSidecars(row: DownloadRow, mediaPath: string): void {
+  const temporaryArtwork = join(row.local_dir, 'artwork.jpg')
+  const artworkPath = mediaPath + '.jpg'
+  copySubtitleSidecars(row, mediaPath)
+  if (existsSync(temporaryArtwork)) copyFileSync(temporaryArtwork, artworkPath)
+
+  const metadata = {
+    schemaVersion: 1,
+    downloadId: row.id,
+    contentId: row.content_id,
+    episodeId: row.episode_id,
+    title: row.title,
+    contentType: row.content_type,
+    durationMins: row.duration_mins,
+    mediaFile: basename(mediaPath),
+    artworkFile: existsSync(artworkPath) ? basename(artworkPath) : null,
+    subtitleDirectory: existsSync(mediaPath + '.subtitles') ? basename(mediaPath + '.subtitles') : null,
+    downloadedAt: new Date().toISOString(),
+  }
+  writeFileSync(mediaPath + '.kokomovie.json', JSON.stringify(metadata, null, 2), 'utf8')
+}
+
+export function readOfflineArtwork(downloadId: string): Buffer | null {
+  const row = getDb().prepare('SELECT local_dir, manifest_path FROM downloads WHERE id = ?')
+    .get(downloadId) as { local_dir: string; manifest_path: string | null } | undefined
+  if (!row) return null
+  const path = row.manifest_path?.toLowerCase().endsWith('.mp4')
+    ? row.manifest_path + '.jpg'
+    : join(row.local_dir, 'artwork.jpg')
+  try {
+    return existsSync(path) ? readFileSync(path) : null
+  } catch {
+    return null
+  }
+}
+
+// ─── IPC registration ─────────────────────────────────────────────────────────
 export function registerDownloadIpc(): void {
   const db = getDb()
 
-  // Reset any interrupted downloads (status = 'downloading') back to 'pending' on startup
-  db.prepare(`UPDATE downloads SET status = 'pending' WHERE status = 'downloading'`).run()
-
-  // Trigger processQueue() once on startup to resume download queue
-  processQueue()
-  // Upgrade legacy completed segment caches into the portable MP4 format in place.
-  const legacyRows = db.prepare("SELECT * FROM downloads WHERE status = 'completed' AND manifest_path LIKE '%.m3u8'").all() as DownloadRow[]
   void (async () => {
+    const backupDir = join(app.getPath('userData'), 'backups')
+    const backupPath = join(backupDir, `kokomovie-${new Date().toISOString().slice(0, 10)}.db`)
+    mkdirSync(backupDir, { recursive: true })
+    if (!existsSync(backupPath)) {
+      try {
+        await db.backup(backupPath)
+      } catch (error) {
+        console.error('[downloads] SQLite safety backup failed; recovery will continue:', error)
+      }
+    }
+
+    // Requeue only transfers interrupted by process termination. Valid encrypted HLS
+    // segments remain in place and are reconciled by downloadContent before fetching.
+    db.prepare("UPDATE downloads SET status = 'pending' WHERE status = 'downloading'").run()
+
+    // A completed row whose media was moved or deleted remains visible and recoverable
+    // instead of silently disappearing from the library.
+    const completedRows = db.prepare(
+      "SELECT id, manifest_path FROM downloads WHERE status = 'completed'",
+    ).all() as Array<{ id: string; manifest_path: string | null }>
+    for (const row of completedRows) {
+      if (row.manifest_path && !existsSync(row.manifest_path)) {
+        db.prepare("UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?")
+          .run('Downloaded media is missing or was moved outside KokoMovie', row.id)
+      }
+    }
+
+    // Report only orphaned UUID work directories inside KokoMovie's own default folder.
+    // Never inspect, rename, import, or remove files in user-selected directories.
+    const defaultDir = join(app.getPath('userData'), 'downloads')
+    if (existsSync(defaultDir)) {
+      const referenced = new Set(
+        (db.prepare('SELECT local_dir FROM downloads').all() as Array<{ local_dir: string }>)
+          .map((row) => row.local_dir),
+      )
+      for (const entry of readdirSync(defaultDir, { withFileTypes: true })) {
+        const path = join(defaultDir, entry.name)
+        if (entry.isDirectory() && /^[0-9a-f-]{36}$/i.test(entry.name) && !referenced.has(path)) {
+          console.warn(`[downloads] Recoverable orphan directory detected: ${entry.name}`)
+        }
+      }
+    }
+
+    // Upgrade v1.4.1 segment-cache downloads in place only after the safety backup.
+    const legacyRows = db.prepare(
+      "SELECT * FROM downloads WHERE status = 'completed' AND manifest_path LIKE '%.m3u8'",
+    ).all() as DownloadRow[]
     for (const row of legacyRows) {
       try {
         db.prepare("UPDATE downloads SET status = 'downloading', progress_percent = 99, error_message = NULL WHERE id = ?").run(row.id)
         notifyProgress(row.id, 99, 'downloading', row.completed_segments, row.total_segments, row.downloaded_bytes, row.total_bytes)
         const portable = await finalizeHlsMp4(row, deriveSegmentKey(row.drm_key_id), row.completed_segments)
+        await artworkJobs.get(row.id)
+        writePortableSidecars(row, portable.path)
+        artworkJobs.delete(row.id)
         rmSync(row.local_dir, { recursive: true, force: true })
         db.prepare("UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?")
           .run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, row.id)
@@ -907,11 +1157,12 @@ export function registerDownloadIpc(): void {
         notifyProgress(row.id, 0, 'error')
       }
     }
+    processQueue()
   })()
 
   ipcMain.handle('download:start', async (
     _event,
-    opts: {
+    input: {
       contentId: string
       episodeId?: string
       title: string
@@ -922,8 +1173,14 @@ export function registerDownloadIpc(): void {
       drmKeyId?: string
       customDownloadPath?: string
       headers?: Record<string, string>
+      subtitles?: Array<{ lang: string; url: string }>
     },
   ) => {
+    const opts: DownloadStartInput = downloadStartSchema.parse(input)
+    validateDownloadSourceUrl(opts.manifestUrl)
+    if (opts.customDownloadPath && !isAbsolute(opts.customDownloadPath)) {
+      throw new Error("Download directory must be an absolute path")
+    }
     const id = crypto.randomUUID()
     const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
     const localDir = join(baseDir, id)
@@ -942,47 +1199,103 @@ export function registerDownloadIpc(): void {
       opts.headers ? JSON.stringify(opts.headers) : null
     )
 
+    writeFileSync(join(localDir, 'content.kokomovie.json'), JSON.stringify({
+      schemaVersion: 1, downloadId: id, contentId: opts.contentId, episodeId: opts.episodeId ?? null,
+      title: opts.title, contentType: opts.contentType, durationMins: opts.durationMins ?? null,
+      createdAt: new Date().toISOString(),
+    }, null, 2), 'utf8')
+    const assetJobs: Promise<void>[] = []
+    if (opts.thumbnailUrl) assetJobs.push(cacheDownloadArtwork(id, opts.thumbnailUrl, localDir))
+    if (opts.subtitles?.length) assetJobs.push(cacheDownloadSubtitles(localDir, opts.subtitles))
+    if (assetJobs.length) artworkJobs.set(id, Promise.all(assetJobs).then(() => undefined))
+
     processQueue()
     return { id, expiresAt }
   })
 
-  ipcMain.handle('download:cancel', (_event, id: string) => {
+  ipcMain.handle('download:pause', (_event, rawId: string) => {
+    const id = downloadIdSchema.parse(rawId)
+    const row = db.prepare('SELECT status, s3_hls_key, progress_percent, completed_segments, total_segments, downloaded_bytes, total_bytes FROM downloads WHERE id = ?')
+      .get(id) as Pick<DownloadRow, 'status' | 's3_hls_key' | 'progress_percent' | 'completed_segments' | 'total_segments' | 'downloaded_bytes' | 'total_bytes'> | undefined
+    if (!row || !['pending', 'downloading'].includes(row.status)) {
+      return { ok: false, reason: 'Download is not active' }
+    }
+    if (isDirectVideoUrl(row.s3_hls_key)) {
+      return { ok: false, reason: 'Pause is unavailable because this source cannot resume safely' }
+    }
+    pauseSignals.set(id, true)
+    abortActiveRequests(id)
+    db.prepare("UPDATE downloads SET status = 'paused', download_speed_kbps = 0 WHERE id = ?").run(id)
+    notifyProgress(id, row.progress_percent, 'paused', row.completed_segments, row.total_segments, row.downloaded_bytes, row.total_bytes)
+    return { ok: true }
+  })
+
+  ipcMain.handle('download:resume', (_event, rawId: string) => {
+    const id = downloadIdSchema.parse(rawId)
+    const changed = db.prepare(
+      "UPDATE downloads SET status = 'pending', error_message = NULL WHERE id = ? AND status = 'paused'",
+    ).run(id)
+    if (changed.changes === 0) return { ok: false, reason: 'Download is not paused' }
+    pauseSignals.delete(id)
+    cancelSignals.delete(id)
+    processQueue()
+    return { ok: true }
+  })
+
+  ipcMain.handle('download:cancel', (_event, rawId: string) => {
+    const id = downloadIdSchema.parse(rawId)
     cancelSignals.set(id, true)
     abortActiveRequests(id)
-    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?').get(id) as { local_dir: string } | undefined
-    db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
+    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?')
+      .get(id) as { local_dir: string } | undefined
+    db.prepare("UPDATE downloads SET status = 'cancelled', error_message = NULL WHERE id = ?").run(id)
+    notifyProgress(id, 0, 'cancelled')
     if (row) {
       setTimeout(() => {
         try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
       }, 500)
     }
     return true
   })
 
-  ipcMain.handle('download:delete', (_event, id: string) => {
+  ipcMain.handle('download:delete', (_event, rawId: string) => {
+    const id = downloadIdSchema.parse(rawId)
     cancelSignals.set(id, true)
     abortActiveRequests(id)
-    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?').get(id) as { local_dir: string } | undefined
+    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?')
+      .get(id) as { local_dir: string } | undefined
     db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
     if (row) {
       setTimeout(() => {
         try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
+        try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
       }, 500)
     }
     return true
   })
 
-  ipcMain.handle('download:list', () =>
-    db.prepare('SELECT * FROM downloads ORDER BY rowid DESC').all() as DownloadRow[],
-  )
+
+  ipcMain.handle('download:list', () => {
+    const rows = db.prepare('SELECT * FROM downloads ORDER BY rowid DESC').all() as DownloadRow[]
+    return rows.map((row) => ({
+      ...row,
+      can_pause: ['pending', 'downloading'].includes(row.status) && !isDirectVideoUrl(row.s3_hls_key),
+    }))
+  })
 
   ipcMain.handle('download:get-manifest', (_event, id: string) => {
+    id = downloadIdSchema.parse(id)
     const row = db.prepare('SELECT manifest_path, drm_key_id FROM downloads WHERE id = ? AND status = ?').get(id, 'completed') as { manifest_path: string; drm_key_id: string | null } | undefined
     if (!row?.manifest_path || !existsSync(row.manifest_path)) return null
     if (row.manifest_path.toLowerCase().endsWith('.mp4')) {
-      return { manifestContent: 'direct:offline://' + id + '/video.mp4', drmKeyId: null }
+      return { manifestContent: 'direct:offline://' + id + '/video.mp4', drmKeyId: null, subtitles: listOfflineSubtitles(id) }
     }
-    return { manifestContent: readFileSync(row.manifest_path, 'utf-8'), drmKeyId: row.drm_key_id }
+    return { manifestContent: readFileSync(row.manifest_path, 'utf-8'), drmKeyId: row.drm_key_id, subtitles: listOfflineSubtitles(id) }
   })
 
   // Legacy shim — kept for any callers that still use the old API
@@ -1041,34 +1354,19 @@ export interface DirectVideoRangeResult {
 
 function readPortableVideoRange(filePath: string, rangeHeader: string | null): DirectVideoRangeResult {
   const totalSize = statSync(filePath).size
-  let start = 0
-  let end = totalSize - 1
-  let isRange = true
-  if (rangeHeader) {
-    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
-    if (match) {
-      const startText = match[1] ?? ''
-      const endText = match[2] ?? ''
-      if (!startText && endText) {
-        start = Math.max(0, totalSize - Number(endText))
-      } else {
-        if (startText) start = Number(startText)
-        if (endText) end = Number(endText)
-      }
-    }
+  const range = parseByteRange(rangeHeader, totalSize)
+  if (range.status === 416) {
+    return { status: 416, headers: { 'Content-Range': range.contentRange ?? `bytes */${totalSize}` }, data: null }
   }
-  if (start >= totalSize) return { status: 416, headers: { 'Content-Range': 'bytes */' + totalSize }, data: null }
-  end = Math.min(end, totalSize - 1, start + 4 * 1024 * 1024 - 1)
-  const length = end - start + 1
-  const data = Buffer.allocUnsafe(length)
+  const data = Buffer.allocUnsafe(range.length)
   const fd = openSync(filePath, 'r')
-  try { readSync(fd, data, 0, length, start) } finally { closeSync(fd) }
+  try { readSync(fd, data, 0, range.length, range.start) } finally { closeSync(fd) }
   const headers: Record<string, string> = {
-    'Content-Type': 'video/mp4', 'Content-Length': String(length), 'Accept-Ranges': 'bytes',
+    'Content-Type': 'video/mp4', 'Content-Length': String(range.length), 'Accept-Ranges': 'bytes',
     'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
   }
-  if (isRange) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + totalSize
-  return { status: isRange ? 206 : 200, headers, data }
+  if (range.contentRange) headers['Content-Range'] = range.contentRange
+  return { status: range.status, headers, data }
 }
 
 export function decryptLocalDirectVideoRange(
@@ -1194,6 +1492,9 @@ export function purgeExpiredDownloads(): void {
 
   for (const row of expired) {
     try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
+    try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
+    try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
+    try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
     db.prepare('DELETE FROM downloads WHERE id = ?').run(row.id)
   }
 

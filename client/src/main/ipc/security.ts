@@ -38,7 +38,7 @@ export const apiProxyRequestSchema = z.object({
 
 export type ApiProxyRequest = z.infer<typeof apiProxyRequestSchema>
 
-const ALLOWED_API_HOSTS = new Set(['api.themoviedb.org', 'api.github.com'])
+const ALLOWED_API_HOSTS = new Set(['api.github.com'])
 
 export function validateApiProxyUrl(raw: string): URL {
   const url = new URL(raw)

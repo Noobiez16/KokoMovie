@@ -56,6 +56,7 @@ export function PlayerHost() {
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [nextEpisodeLoading, setNextEpisodeLoading] = useState(false)
   const [offlineManifestUrl, setOfflineManifestUrl] = useState<string | null>(null)
+  const [offlineSubtitles, setOfflineSubtitles] = useState<Array<{ id: number; name: string; lang: string; url: string }>>([])
 
   const { data: contentData, isLoading } = useQuery({
     queryKey: ['content', contentId, profileId],
@@ -96,7 +97,7 @@ export function PlayerHost() {
     }
     window.electronAPI?.setDiscordActivity({ title: sortedContent.title, episode: episodeLabel, startedAt: Date.now() }).catch(() => {})
     return () => { window.electronAPI?.setDiscordActivity(null).catch(() => {}) }
-  }, [sortedContent?.id, currentEpisode?.id, request?.contentId])
+  }, [sortedContent, currentEpisode, request])
 
   const nextEpisode: Episode | null = useMemo(() => {
     if (!sortedContent || !currentEpisode) return null
@@ -187,6 +188,7 @@ export function PlayerHost() {
     if (request.offlineId) {
       downloadsApi.getManifest(request.offlineId)
         .then((res) => {
+          setOfflineSubtitles(res?.subtitles ?? [])
           if (!res) { setSessionError('Offline download not found'); return }
           if (res.manifestContent.startsWith('direct:')) {
             setSession({ sessionId: request.offlineId!, manifestUrl: res.manifestContent.substring(7), drmKeyId: res.drmKeyId, expiresIn: 14400 })
@@ -199,6 +201,8 @@ export function PlayerHost() {
         .catch((err: Error) => setSessionError(err.message ?? 'Failed to load offline manifest'))
       return
     }
+
+    setOfflineSubtitles([])
 
     if (request.streamUrl) {
       setSession({ sessionId: crypto.randomUUID(), manifestUrl: request.streamUrl, drmKeyId: null, expiresIn: 14400 })
@@ -402,6 +406,7 @@ export function PlayerHost() {
             profileId={profileId}
             resumeAtSeconds={request.resumeAtSeconds}
             defaultSubtitleLanguage={preferencesData?.data.subtitleDefault}
+            offlineSubtitles={offlineSubtitles}
             onClose={handleClose}
             onPip={handlePip}
             onNextEpisode={handleNextEpisode}

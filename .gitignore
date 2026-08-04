@@ -15,6 +15,9 @@ client/release/*
 !client/release/README.md
 client/*.asar
 
+# Vendored LGPL FFmpeg executables — fetched and SHA-256 verified by scripts/fetch-ffmpeg.mjs
+client/vendor/ffmpeg/
+
 # Generated RSA keys
 
 # SQLite offline DB
@@ -24,3 +27,6 @@ client/*.asar
 
 # Unnecessary Files
 AGENTS.md
+
+# Internal planning notes — kept locally, not published
+KokoMovie-Phased-Implementation-Plan.md

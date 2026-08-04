@@ -7,6 +7,7 @@ import { providersApi, torrentApi } from '../../api/providers'
 import { PlayerControls } from './PlayerControls'
 import { NextEpisodeOverlay } from './NextEpisodeOverlay'
 import { autoSyncSubtitles, type SubCue } from '../../lib/subtitleAutoSync'
+import { resolveSubtitleTrackUrl } from '../../../main/download-offline-policy'
 
 interface CachedStream {
   providerId: string
@@ -24,6 +25,7 @@ interface Props {
   profileId: string
   resumeAtSeconds?: number
   defaultSubtitleLanguage?: string | null
+  offlineSubtitles?: Array<{ id: number; name: string; lang: string; url: string }>
   onClose: () => void
   onNextEpisode?: (ep: Episode) => void
   nextEpisode?: Episode | null
@@ -206,12 +208,9 @@ const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle, subtitl
   // shift from the original timing (never compound).
   const originalsRef = useRef<Array<{ start: number; end: number }> | null>(null)
 
-  const selected = currentSubtitle >= 1000 ? externalSubs.find((s) => s.id === currentSubtitle) : undefined
-  const cleanUrl = selected ? selected.url.replace(/^https?:\/\//, '') : ''
-  const proxiedUrl = selected
-    ? `http://localhost:${proxyPort}/proxy/${cleanUrl}${cleanUrl.includes('?') ? '&' : '?'}format=vtt`
-    : ''
-
+  const selected = currentSubtitle >= 1000 ? externalSubs.find((subtitle) => subtitle.id === currentSubtitle) : undefined
+  const localUrl = selected?.url.startsWith('offline:') ?? false
+  const proxiedUrl = selected ? resolveSubtitleTrackUrl(selected.url, proxyPort) : ''
   // New subtitle source → forget the previous track's captured timings.
   useEffect(() => { originalsRef.current = null }, [proxiedUrl])
 
@@ -243,7 +242,7 @@ const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle, subtitl
     return () => el.removeEventListener('load', applyOffset)
   }, [subtitleOffset, timelineOffset, proxiedUrl])
 
-  if (!proxyPort || !selected) return null
+  if (!selected || (!localUrl && !proxyPort)) return null
 
   return (
     <track
@@ -264,7 +263,7 @@ SubtitleTracks.displayName = 'SubtitleTracks'
 
 export function VideoPlayer({
   content, episode, session, streamHeaders, initialProviderId, allStreams = [], profileId, resumeAtSeconds: initialResumeAt,
-  defaultSubtitleLanguage, onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
+  defaultSubtitleLanguage, offlineSubtitles = [], onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -364,7 +363,7 @@ export function VideoPlayer({
       hls.subtitleDisplay = internal
       hls.subtitleTrack = internal ? preferred.id : -1
     }
-  }, [defaultSubtitleLanguage, content.id, episode?.id, activeStreamUrl, internalSubs, externalSubs])
+  }, [defaultSubtitleLanguage, content.id, episode?.id, activeStreamUrl, subtitleTracks])
   // Subtitle size is a global preference — remember the user's S/M/L choice across
   // titles and sessions via localStorage.
   const [subtitleSize, setSubtitleSize] = useState<'small' | 'medium' | 'large'>(() => {
@@ -744,6 +743,10 @@ export function VideoPlayer({
   useEffect(() => {
     let active = true
     setExternalSubs([])
+    if (offlineSubtitles.length > 0) {
+      setExternalSubs(offlineSubtitles)
+      return () => { active = false }
+    }
 
     const fetchSubtitles = async () => {
       try {
@@ -798,7 +801,7 @@ export function VideoPlayer({
     return () => {
       active = false
     }
-  }, [content.id, episode?.id, activeStreamUrl, hlsProxyPort])
+  }, [content.id, content.imdbId, content.type, content.seasons, episode, activeStreamUrl, hlsProxyPort, offlineSubtitles])
 
   // Enable the selected subtitle track programmatically — disable ALL others to prevent duplication.
   // Three cases:
@@ -1138,7 +1141,7 @@ export function VideoPlayer({
       hlsRef.current?.destroy()
       hlsRef.current = null
     }
-  }, [activeStreamUrl, resumeAtSeconds])
+  }, [activeStreamUrl, resumeAtSeconds, content.id, episode?.id, profileId, session.sessionId])
 
   // Video event listeners
   useEffect(() => {
@@ -1245,7 +1248,7 @@ export function VideoPlayer({
         bufferingTimerRef.current = null
       }
     }
-  }, [nextEpisode, activeStreamUrl])
+  }, [nextEpisode, activeStreamUrl, knownRuntimeSecs])
 
   // Heartbeat every 10s
   useEffect(() => {
@@ -1276,8 +1279,9 @@ export function VideoPlayer({
 
   // Save final position on unmount to prevent progress loss
   useEffect(() => {
+    const mountedVideo = videoRef.current
     return () => {
-      const video = videoRef.current
+      const video = mountedVideo
       const pos = video ? Math.floor(video.currentTime) : Math.floor(currentTimeRef.current)
       const dur = overrideDurationRef.current > 0
         ? Math.floor(overrideDurationRef.current)
@@ -1322,7 +1326,7 @@ export function VideoPlayer({
   useEffect(() => {
     resetControlsTimeout()
     return () => { if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current) }
-  }, [])
+  }, [resetControlsTimeout])
 
   // Recovering from a Stream Error opens the settings menu (see the hlsError screen). The video is
   // paused/dead at that point, so PIN the controls open instead of letting the 3s auto-hide fade

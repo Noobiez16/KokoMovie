@@ -1,11 +1,11 @@
-import { ipcMain, app } from 'electron'
+import { ipcMain } from 'electron'
 import http from 'http'
 import { createServer } from 'http'
 import { spawn, type ChildProcess } from 'child_process'
 import { join, isAbsolute } from 'path'
 import { mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
-import ffmpegPath from 'ffmpeg-static'
+import { FFMPEG_BIN } from '../ffmpeg.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -51,11 +51,6 @@ const TRACKERS = [
 ]
 
 function log(msg: string) { console.log(`[torrent] ${msg}`) }
-
-// In a packaged app the ffmpeg binary is unpacked outside the asar archive (it can't be spawned
-// from inside asar). electron-builder's asarUnpack puts it in app.asar.unpacked; rewrite the path
-// accordingly. No-op in dev (path doesn't contain app.asar).
-const FFMPEG_BIN = ffmpegPath ? ffmpegPath.replace('app.asar', 'app.asar.unpacked') : null
 
 // ── Language + quality parsing from a Torrentio release title ────────────────
 const FLAG_LANG: Record<string, string> = {

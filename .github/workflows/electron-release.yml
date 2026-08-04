@@ -7,9 +7,38 @@ on:
       - 'v*'
 
 jobs:
+  quality:
+    name: Quality and security boundaries
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck renderer and main process
+        run: npm run typecheck
+      - name: Deterministic tests
+        run: npm test
+      - name: Production dependency audit policy
+        run: npm run audit:production
+      # Vendor FFmpeg first: the licence gate verifies the recorded provenance of every LGPL
+      # build present, and a release must never ship a GPL-configured binary.
+      - name: Vendor LGPL FFmpeg for every shipped target
+        run: npm run vendor:ffmpeg --workspace=client -- linux-x64 linux-arm64 win32-x64
+      - name: Distribution licence gate
+        run: npm run check:licenses -- --report
+      - name: Production build
+        run: npm run build
+
   # ─── Linux: native x64 + ARM64 AppImage/.deb builds ─────────────────────────────────────────────────
   build-linux:
     name: Build Linux (${{ matrix.arch }})
+    needs: quality
     strategy:
       fail-fast: false
       matrix:
@@ -40,18 +69,48 @@ jobs:
       - name: Build renderer + main process
         run: npm run build --workspace=client
 
+      - name: Vendor LGPL FFmpeg
+        run: npm run vendor:ffmpeg --workspace=client -- linux-${{ matrix.arch }}
+
       - name: Rebuild native modules
         run: npm run rebuild:native --workspace=client -- --arch=${{ matrix.arch }}
 
+      # Each shipped native binary is named explicitly. A glob would silently stop covering a
+      # dependency that changes how it distributes its binary — better-sqlite3 v13 moved from
+      # build/Release/ to ABI-stable N-API prebuilds/, and FFmpeg moved out of node_modules
+      # entirely when the GPL ffmpeg-static dependency was replaced.
       - name: Verify native binaries
         shell: bash
         run: |
+          set -euo pipefail
           expected="x86-64"
           if [ "${{ matrix.arch }}" = "arm64" ]; then expected="ARM aarch64"; fi
-          find node_modules -path '*/build/Release/*.node' -exec file {} \; | tee native-builds.txt
-          file "$(node -p "require('ffmpeg-static')")" | tee -a native-builds.txt
-          test "$(wc -l < native-builds.txt)" -ge 3
-          test "$(grep -c "$expected" native-builds.txt)" = "$(wc -l < native-builds.txt)"
+          : > native-builds.txt
+          for binary in \
+            "node_modules/keytar/build/Release/keytar.node" \
+            "node_modules/better-sqlite3/prebuilds/linux-${{ matrix.arch }}.node" \
+            "client/vendor/ffmpeg/linux-${{ matrix.arch }}/ffmpeg" ; do
+            test -f "$binary" || { echo "Missing native binary: $binary"; exit 1; }
+            file "$binary" | tee -a native-builds.txt
+          done
+          test "$(wc -l < native-builds.txt)" -eq 3
+          test "$(grep -c "$expected" native-builds.txt)" -eq 3
+
+      - name: Verify FFmpeg is an LGPL build
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="client/vendor/ffmpeg/linux-${{ matrix.arch }}"
+          test -f "$dir/LICENSE.txt"
+          test -f "$dir/PROVENANCE.json"
+          grep -q "LESSER GENERAL PUBLIC LICENSE" "$dir/LICENSE.txt"
+          # The configure line is embedded in the binary, so this holds for cross-architecture
+          # builds that cannot be executed on this runner.
+          for flag in --enable-gpl --enable-nonfree --enable-libx264 --enable-libx265; do
+            if grep -aqF -- "$flag" "$dir/ffmpeg"; then
+              echo "FFmpeg was configured with $flag; only LGPL builds may ship."; exit 1
+            fi
+          done
 
       # Stage the complete app on ARM so architecture selection, ASAR packing, native modules,
       # Electron, and extra resources cross the job boundary as one immutable unit.
@@ -64,11 +123,21 @@ jobs:
         if: matrix.arch == 'arm64'
         shell: bash
         run: |
+          set -euo pipefail
           app_dir="client/release/linux/linux-arm64-unpacked"
-          file "$app_dir/kokomovie-client" | tee staged-native.txt
-          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee -a staged-native.txt
-          test "$(wc -l < staged-native.txt)" -ge 4
-          test "$(grep -c 'ARM aarch64' staged-native.txt)" = "$(wc -l < staged-native.txt)"
+          : > staged-native.txt
+          for binary in \
+            "$app_dir/kokomovie-client" \
+            "$app_dir/resources/ffmpeg/ffmpeg" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-arm64.node" ; do
+            test -f "$binary" || { echo "Missing staged binary: $binary"; exit 1; }
+            file "$binary" | tee -a staged-native.txt
+          done
+          test "$(wc -l < staged-native.txt)" -eq 4
+          test "$(grep -c 'ARM aarch64' staged-native.txt)" -eq 4
+          test -f "$app_dir/resources/ffmpeg/LICENSE.txt"
+          test -f "$app_dir/resources/ffmpeg/PROVENANCE.json"
 
       - name: Archive staged Linux ARM64 application
         if: matrix.arch == 'arm64'
@@ -92,15 +161,35 @@ jobs:
         if: matrix.arch == 'x64'
         shell: bash
         run: |
-          expected="x86-64"
+          set -euo pipefail
           app_dir="client/release/linux/linux-unpacked"
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            expected="ARM aarch64"
-            app_dir="client/release/linux/linux-arm64-unpacked"
-          fi
-          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee packaged-native.txt
-          test "$(wc -l < packaged-native.txt)" -ge 3
-          test "$(grep -c "$expected" packaged-native.txt)" = "$(wc -l < packaged-native.txt)"
+          : > packaged-native.txt
+          for binary in \
+            "$app_dir/kokomovie-client" \
+            "$app_dir/resources/ffmpeg/ffmpeg" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-x64.node" ; do
+            test -f "$binary" || { echo "Missing packaged binary: $binary"; exit 1; }
+            file "$binary" | tee -a packaged-native.txt
+          done
+          test "$(wc -l < packaged-native.txt)" -eq 4
+          test "$(grep -c 'x86-64' packaged-native.txt)" -eq 4
+
+      - name: Verify packaged LGPL compliance artifacts
+        if: matrix.arch == 'x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="client/release/linux/linux-unpacked/resources/ffmpeg"
+          test -f "$dir/LICENSE.txt"
+          test -f "$dir/PROVENANCE.json"
+          "$dir/ffmpeg" -version | head -1
+          "$dir/ffmpeg" -hide_banner -encoders | grep -qw aac
+          for flag in --enable-gpl --enable-nonfree --enable-libx264 --enable-libx265; do
+            if "$dir/ffmpeg" -version | grep -qF -- "$flag"; then
+              echo "Packaged FFmpeg was configured with $flag."; exit 1
+            fi
+          done
 
       - name: Upload Linux artifacts
         if: matrix.arch == 'x64'
@@ -141,13 +230,21 @@ jobs:
       - name: Restore and verify staged Linux ARM64 application
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p client/release/linux
           tar -C client/release/linux -xzf linux-arm64-unpacked.tar.gz
           app_dir="client/release/linux/linux-arm64-unpacked"
-          file "$app_dir/kokomovie-client" | tee staged-native.txt
-          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee -a staged-native.txt
-          test "$(wc -l < staged-native.txt)" -ge 4
-          test "$(grep -c 'ARM aarch64' staged-native.txt)" = "$(wc -l < staged-native.txt)"
+          : > staged-native.txt
+          for binary in \
+            "$app_dir/kokomovie-client" \
+            "$app_dir/resources/ffmpeg/ffmpeg" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-arm64.node" ; do
+            test -f "$binary" || { echo "Missing staged binary: $binary"; exit 1; }
+            file "$binary" | tee -a staged-native.txt
+          done
+          test "$(wc -l < staged-native.txt)" -eq 4
+          test "$(grep -c 'ARM aarch64' staged-native.txt)" -eq 4
 
       - name: Package Linux ARM64 (.AppImage + .deb)
         run: npx electron-builder --config electron-builder.linux.yml --prepackaged release/linux/linux-arm64-unpacked --linux AppImage deb --arm64 --publish never
@@ -156,10 +253,21 @@ jobs:
       - name: Verify packaged native architecture
         shell: bash
         run: |
+          set -euo pipefail
           app_dir="client/release/linux/linux-arm64-unpacked"
-          find "$app_dir/resources/app.asar.unpacked" \( -path '*/build/Release/*.node' -o -path '*/ffmpeg-static/ffmpeg' \) -exec file {} \; | tee packaged-native.txt
-          test "$(wc -l < packaged-native.txt)" -ge 3
-          test "$(grep -c 'ARM aarch64' packaged-native.txt)" = "$(wc -l < packaged-native.txt)"
+          : > packaged-native.txt
+          for binary in \
+            "$app_dir/kokomovie-client" \
+            "$app_dir/resources/ffmpeg/ffmpeg" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node" \
+            "$app_dir/resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-arm64.node" ; do
+            test -f "$binary" || { echo "Missing packaged binary: $binary"; exit 1; }
+            file "$binary" | tee -a packaged-native.txt
+          done
+          test "$(wc -l < packaged-native.txt)" -eq 4
+          test "$(grep -c 'ARM aarch64' packaged-native.txt)" -eq 4
+          test -f "$app_dir/resources/ffmpeg/LICENSE.txt"
+          test -f "$app_dir/resources/ffmpeg/PROVENANCE.json"
 
       - name: Upload Linux ARM64 artifacts
         uses: actions/upload-artifact@v4
@@ -175,6 +283,7 @@ jobs:
   # ─── Windows: NSIS .exe installer → client/release/windows/ ─────────────────
   build-windows:
     name: Build Windows
+    needs: quality
     runs-on: windows-latest
 
     steps:
@@ -191,6 +300,9 @@ jobs:
       - name: Build renderer + main process
         run: npm run build --workspace=client
 
+      - name: Vendor LGPL FFmpeg
+        run: npm run vendor:ffmpeg --workspace=client -- win32-x64
+
       - name: Rebuild native modules
         run: npm run rebuild:native --workspace=client
 
@@ -198,27 +310,59 @@ jobs:
         shell: pwsh
         run: |
           $nativeFiles = @(
-            "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+            "node_modules/better-sqlite3/prebuilds/win32-x64.node",
             "node_modules/keytar/build/Release/keytar.node",
-            (node -p "require('ffmpeg-static')")
+            "client/vendor/ffmpeg/win32-x64/ffmpeg.exe"
           )
           foreach ($nativeFile in $nativeFiles) {
             if (-not (Test-Path $nativeFile)) { throw "Missing native binary: $nativeFile" }
-            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $nativeFile))
-            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-              throw "Not a Windows PE binary: $nativeFile"
-            }
-            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
-            if ($machine -ne 0x8664) {
-              throw ("Expected Windows x64 PE binary, found machine 0x{0:X4}: {1}" -f $machine, $nativeFile)
-            }
+            # Read only the PE header: ffmpeg.exe is ~110 MB and does not need to be buffered.
+            $stream = [System.IO.File]::OpenRead((Resolve-Path $nativeFile))
+            try {
+              $bytes = New-Object byte[] 1024
+              $read = $stream.Read($bytes, 0, 1024)
+              if ($read -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+                throw "Not a Windows PE binary: $nativeFile"
+              }
+              $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+              if ($peOffset -lt 0 -or $peOffset + 6 -gt $read) { throw "Unreadable PE header: $nativeFile" }
+              $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+              if ($machine -ne 0x8664) {
+                throw ("Expected Windows x64 PE binary, found machine 0x{0:X4}: {1}" -f $machine, $nativeFile)
+              }
+            } finally { $stream.Dispose() }
             Write-Host "Verified Windows x64: $nativeFile"
           }
+
+      - name: Verify FFmpeg is an LGPL build
+        shell: pwsh
+        run: |
+          $dir = "client/vendor/ffmpeg/win32-x64"
+          foreach ($required in @("$dir/LICENSE.txt", "$dir/PROVENANCE.json")) {
+            if (-not (Test-Path $required)) { throw "Missing LGPL compliance file: $required" }
+          }
+          if (-not (Select-String -Path "$dir/LICENSE.txt" -Pattern 'LESSER GENERAL PUBLIC LICENSE' -Quiet)) {
+            throw "Bundled FFmpeg licence text is not the LGPL."
+          }
+          # The configure line is embedded in the executable; a GPL build cannot ship.
+          $configuration = (& "$dir/ffmpeg.exe" -version 2>&1 | Out-String)
+          foreach ($flag in @('--enable-gpl', '--enable-nonfree', '--enable-libx264', '--enable-libx265')) {
+            if ($configuration.Contains($flag)) { throw "FFmpeg was configured with $flag; only LGPL builds may ship." }
+          }
+          Write-Host "Verified LGPL FFmpeg for Windows."
 
       - name: Package Windows (.exe)
         run: npx electron-builder --config electron-builder.win.yml --publish never
         working-directory: client
+
+      - name: Verify packaged Windows LGPL compliance artifacts
+        shell: pwsh
+        run: |
+          $dir = "client/release/windows/win-unpacked/resources/ffmpeg"
+          foreach ($required in @("$dir/ffmpeg.exe", "$dir/LICENSE.txt", "$dir/PROVENANCE.json")) {
+            if (-not (Test-Path $required)) { throw "Missing packaged FFmpeg file: $required" }
+          }
+          Write-Host "Verified packaged LGPL FFmpeg resources."
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -255,6 +399,40 @@ jobs:
           name: windows-release
           path: artifacts/windows
 
+      - name: Verify release version, filenames, and required artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          test "$version" = "$(node -p "require('./client/package.json').version")"
+          test -f "artifacts/windows/KokoMovie-Setup-$version.exe"
+          test -f "artifacts/windows/latest.yml"
+          test -f "artifacts/windows/KokoMovie-Setup-$version.exe.blockmap"
+          grep -F "KokoMovie-Setup-$version.exe" artifacts/windows/latest.yml
+          find artifacts/linux -maxdepth 1 -name "KokoMovie-$version-linux-x86_64.AppImage" | grep -q .
+          test -f "artifacts/linux/KokoMovie-$version-linux-amd64.deb"
+          find artifacts/linux -maxdepth 1 -name "KokoMovie-$version-linux-arm64.AppImage" | grep -q .
+          test -f "artifacts/linux/KokoMovie-$version-linux-arm64.deb"
+          test -f "artifacts/linux/latest-linux.yml"
+          test -f "artifacts/linux/latest-linux-arm64.yml"
+          grep -F "KokoMovie-$version-linux-x86_64.AppImage" artifacts/linux/latest-linux.yml
+          grep -F "KokoMovie-$version-linux-arm64.AppImage" artifacts/linux/latest-linux-arm64.yml
+          grep -F "blockMapSize:" artifacts/linux/latest-linux.yml
+          grep -F "blockMapSize:" artifacts/linux/latest-linux-arm64.yml
+
+      # GPL-3.0-or-later and the bundled LGPL FFmpeg both require the licence terms to accompany
+      # the binaries, so they are published as release assets rather than living only in the repo.
+      - name: Stage licence and notice files
+        shell: bash
+        run: cp LICENSE THIRD-PARTY-NOTICES.md artifacts/
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.blockmap' -o -name 'latest*.yml' \) -print0 |
+            sort -z |
+            xargs -0 sha256sum > artifacts/SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -269,5 +447,8 @@ jobs:
             artifacts/windows/*.exe
             artifacts/windows/latest.yml
             artifacts/windows/*.blockmap
+            artifacts/SHA256SUMS.txt
+            artifacts/LICENSE
+            artifacts/THIRD-PARTY-NOTICES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

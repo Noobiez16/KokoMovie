@@ -1,13 +1,14 @@
-import { app, ipcMain, session, net } from 'electron'
+import { ipcMain, session } from 'electron'
 import { listProviders, getEnabledProviders, toggleProvider, getProvider } from '../providers/registry.js'
 import { extractStreamWithRetry } from '../stream-extractor/index.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
-import { promises as fsPromises } from 'fs'
-import { join } from 'path'
+import { ProviderCircuitBreaker, getProviderContract, redactProviderDiagnostic, validateProviderEmbedUrl, validateStreamRequest } from '../providers/contracts.js'
+import { isForbiddenProxyHostname, validateProxyTargetUrl } from '../providers/network-policy.js'
 import * as nodeHttp from 'http'
 import * as nodeHttps from 'https'
 import * as zlib from 'zlib'
-import { setMaxListeners, EventEmitter } from 'events'
+import { setMaxListeners } from 'events'
+import { writeDiagnosticEvent } from '../diagnostics.js'
 import { lookup, Resolver } from 'dns'
 import type { LookupAddress } from 'dns'
 
@@ -20,6 +21,12 @@ import type { LookupAddress } from 'dns'
 // VPNs), then fall back to public DNS (Cloudflare/Google/Quad9) on failure. See DN-047.
 const publicDnsResolver = new Resolver()
 publicDnsResolver.setServers(['1.1.1.1', '8.8.8.8', '9.9.9.9'])
+
+function unsafeDnsError(): NodeJS.ErrnoException {
+  const error = new Error('DNS resolved to a private or reserved address') as NodeJS.ErrnoException
+  error.code = 'EACCES'
+  return error
+}
 
 function resilientLookup(
   hostname: string,
@@ -35,27 +42,37 @@ function resilientLookup(
   ) => void
   sysLookup(hostname, opts, (err, address, family) => {
     if (!err) {
-      cb(null, address, family)
+      const resolved = (Array.isArray(address)
+        ? address
+        : [{ address, family }]).filter((entry) => !isForbiddenProxyHostname(entry.address))
+      if (resolved.length === 0) {
+        cb(unsafeDnsError())
+      } else if (opts.all) {
+        cb(null, resolved)
+      } else {
+        cb(null, resolved[0]!.address, resolved[0]!.family)
+      }
       return
     }
     publicDnsResolver.resolve4(hostname, (e4, addrs4) => {
-      if (!e4 && addrs4 && addrs4.length > 0) {
-        if (opts.all) cb(null, addrs4.map((a) => ({ address: a, family: 4 })))
-        else cb(null, addrs4[0], 4)
+      const safe4 = (addrs4 ?? []).filter((address) => !isForbiddenProxyHostname(address))
+      if (!e4 && safe4.length > 0) {
+        if (opts.all) cb(null, safe4.map((address) => ({ address, family: 4 })))
+        else cb(null, safe4[0], 4)
         return
       }
       publicDnsResolver.resolve6(hostname, (e6, addrs6) => {
-        if (!e6 && addrs6 && addrs6.length > 0) {
-          if (opts.all) cb(null, addrs6.map((a) => ({ address: a, family: 6 })))
-          else cb(null, addrs6[0], 6)
+        const safe6 = (addrs6 ?? []).filter((address) => !isForbiddenProxyHostname(address))
+        if (!e6 && safe6.length > 0) {
+          if (opts.all) cb(null, safe6.map((address) => ({ address, family: 6 })))
+          else cb(null, safe6[0], 6)
           return
         }
-        cb(err)
+        cb((!e4 || !e6) ? unsafeDnsError() : err)
       })
     })
   })
 }
-
 const HTTP_REQUEST_KEY = ['req', 'uest'].join('')
 const HTTP_CREATE_SERVER_KEY = ['create', 'Server'].join('')
 
@@ -71,42 +88,11 @@ const nodeHttpsAgent = new nodeHttps.Agent({
   keepAliveMsecs: 30000,
   rejectUnauthorized: false,
 })
+const providerCircuits = new ProviderCircuitBreaker()
 
-const logQueue: string[] = []
-let isWritingLog = false
-
-const logEmitter = new EventEmitter()
-logEmitter.on('log', (msg: string) => {
-  logQueue.push(`[${new Date().toISOString()}] ${msg}\n`)
-  if (logQueue.length > 1000) {
-    logQueue.shift()
-  }
-  triggerLogWrite()
-})
 
 function logExtraction(msg: string) {
-  logEmitter.emit('log', msg)
-}
-
-function triggerLogWrite() {
-  if (isWritingLog || logQueue.length === 0) return
-  isWritingLog = true
-
-  const chunks: string[] = []
-  while (logQueue.length > 0) {
-    chunks.push(logQueue.shift()!)
-  }
-  const content = chunks.join('')
-  const logPath = join(app.getPath('userData'), 'extraction.log')
-
-  fsPromises.appendFile(logPath, content, 'utf8')
-    .catch(() => {})
-    .finally(() => {
-      isWritingLog = false
-      if (logQueue.length > 0) {
-        process.nextTick(triggerLogWrite)
-      }
-    })
+  writeDiagnosticEvent("providers", "operation", redactProviderDiagnostic(msg))
 }
 
 function checkDomainResolves(url: string): Promise<boolean> {
@@ -193,9 +179,8 @@ function fetchNode(
 
     function makeRequest(currentUrl: string) {
       try {
-         const urlObj = new URL(currentUrl)
+         const urlObj = validateProxyTargetUrl(currentUrl)
         const isHttps = urlObj.protocol === 'https:'
-        const reqModule = isHttps ? nodeHttps : nodeHttp
 
         const reqHeaders: Record<string, string> = {}
         if (options.headers) {
@@ -226,7 +211,7 @@ function fetchNode(
                   reject(new Error('Too many redirects'))
                   return
                 }
-                const absoluteLocation = new URL(location, currentUrl).toString()
+                const absoluteLocation = validateProxyTargetUrl(new URL(location, currentUrl).toString()).toString()
                 makeRequest(absoluteLocation)
                 return
               }
@@ -256,11 +241,11 @@ function fetchNode(
                   headers: resHeaders,
                   buffer,
                 })
-              } catch (e) {
+              } catch {
                 reject(new Error('Failed to process response body'))
               }
             })
-          } catch (e) {
+          } catch {
             reject(new Error('Failed to process response'))
           }
         }
@@ -269,7 +254,7 @@ function fetchNode(
           ? nodeHttps.request(currentUrl, reqOpts as nodeHttps.RequestOptions, handleResponse)
           : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, reqOpts, handleResponse)
 
-        req.on('error', (err: Error) => {
+        req.on('error', (_err: Error) => {
           reject(new Error('Connection error during request'))
         })
 
@@ -278,7 +263,7 @@ function fetchNode(
         })
 
         req.end()
-      } catch (e) {
+      } catch {
         reject(new Error('Failed to initialize request'))
       }
     }
@@ -431,7 +416,7 @@ function streamSegment(
 
       // Follow redirects (without writing anything to the client yet).
       if ([301, 302, 303, 307, 308].includes(statusCode) && clientRes.headers.location) {
-        const absoluteLocation = new URL(clientRes.headers.location, url).toString()
+        const absoluteLocation = validateProxyTargetUrl(new URL(clientRes.headers.location, url).toString()).toString()
         clientRes.resume() // drain the redirect body
         settled = true // this attempt has handed off to the redirect target
         makeRequest(absoluteLocation, rangeHeader, redirects + 1)
@@ -672,7 +657,7 @@ async function fetchManifest(
       return await fetchNode(url, options)
     } catch (err) {
       lastErr = err
-      logExtraction(`[Manifest retry ${i + 1}/${attempts}] ${err instanceof Error ? err.message : String(err)} → ${url.slice(0, 140)}`)
+      logExtraction(`[Manifest retry ${i + 1}/${attempts}] ${err instanceof Error ? err.message : redactProviderDiagnostic(err)} → ${url.slice(0, 140)}`)
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
@@ -735,7 +720,7 @@ export async function startStreamProxy(): Promise<void> {
       logExtraction(`[Proxy] Fetching: ${realUrl}`)
 
       try {
-        let urlObj = new URL(realUrl)
+        let urlObj = validateProxyTargetUrl(realUrl)
         const isVtt = urlObj.searchParams.get('format') === 'vtt'
         if (isVtt) {
           urlObj.searchParams.delete('format')
@@ -941,7 +926,7 @@ export async function startStreamProxy(): Promise<void> {
         })
         res.end(buffer)
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
+        const errMsg = err instanceof Error ? err.message : redactProviderDiagnostic(err)
         logExtraction(`Proxy error for ${realUrl}: ${errMsg}`)
         if (!res.headersSent) {
           res.writeHead(502)
@@ -966,6 +951,22 @@ export async function startStreamProxy(): Promise<void> {
 // e.g. https://cdn.example.com/path/master.m3u8 → http://localhost:PORT/proxy/cdn.example.com/path/master.m3u8
 // Relative URLs in HLS manifests (like "segment0.ts") resolve correctly because
 // the path structure mirrors the original URL hierarchy.
+export function validateDownloadSourceUrl(rawUrl: string): void {
+  const url = new URL(rawUrl)
+  const hostname = url.hostname.toLowerCase()
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  if (isLoopback) {
+    if (
+      url.protocol !== 'http:'
+      || Number(url.port) !== proxyPort
+      || !url.pathname.startsWith('/proxy/')
+    ) {
+      throw new Error('Untrusted loopback download source')
+    }
+    return
+  }
+  validateProxyTargetUrl(rawUrl)
+}
 function toProxyUrl(url: string): string {
   try {
     const parsed = new URL(url)
@@ -1215,10 +1216,11 @@ export function registerProvidersIpc(): void {
   ipcMain.handle('providers:getProxyPort', () => proxyPort)
 
   // List all providers with their enabled state
-  ipcMain.handle('providers:list', () => listProviders())
+  ipcMain.handle('providers:list', () => listProviders().map((provider) => ({ ...provider, ...providerCircuits.snapshot(provider.id) })))
 
   // Toggle a provider on or off
   ipcMain.handle('providers:toggle', (_e, id: string, enabled: boolean) => {
+    if (!getProvider(id)) return { ok: false }
     toggleProvider(id, enabled)
     return { ok: true }
   })
@@ -1243,7 +1245,9 @@ export function registerProvidersIpc(): void {
       return { providerId, providerName: providerId, streams: [], error: 'Provider not found' }
     }
 
-    const embedUrl = p.getEmbedUrl(req)
+    const validatedRequest = validateStreamRequest(req)
+    if (!providerCircuits.canAttempt(p.id)) {      return { providerId, providerName: p.name, streams: [], error: 'Provider is temporarily unavailable' }    }
+    const embedUrl = validateProviderEmbedUrl(p, validatedRequest)
     if (!embedUrl) {
       return {
         providerId,
@@ -1257,6 +1261,7 @@ export function registerProvidersIpc(): void {
 
     const resolves = await checkDomainResolves(embedUrl)
     if (!resolves) {
+      providerCircuits.recordFailure(p.id)
       return {
         providerId,
         providerName: p.name,
@@ -1268,7 +1273,7 @@ export function registerProvidersIpc(): void {
     try {
       const result = await extractStreamWithRetry(embedUrl, {
         maxAttempts: 2,
-        timeoutMs: 30000,
+        timeoutMs: getProviderContract(p.id)?.timeoutMs ?? 12000,
         sessionName: p.sessionName,
       })
 
@@ -1282,7 +1287,9 @@ export function registerProvidersIpc(): void {
       }
 
       // Auto-register headers in main process BEFORE returning to renderer
+      validateProxyTargetUrl(result.url)
       autoRegisterHeaders(result.url, result.headers, p.sessionName)
+      providerCircuits.recordSuccess(p.id)
 
       return {
         providerId,
@@ -1290,11 +1297,12 @@ export function registerProvidersIpc(): void {
         streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers }],
       }
     } catch (err) {
+      providerCircuits.recordFailure(p.id)
       return {
         providerId,
         providerName: p.name,
         streams: [],
-        error: `Extraction failed: ${String(err)}`,
+        error: `Extraction failed: ${redactProviderDiagnostic(err)}`,
       }
     }
   })
@@ -1315,8 +1323,9 @@ export function registerProvidersIpc(): void {
   // gather alternative sources for the source-switcher / auto-fallback, and push the full
   // list to the renderer via the `providers:streamsCollected` event (correlated by searchId).
   ipcMain.handle('providers:getFirstStream', async (e, req: StreamRequest, searchId?: string): Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null> => {
-    logExtraction(`--- New Stream Search Request: ${req.title} (${req.type === 'tv' ? `S${req.season}E${req.episode}` : 'Movie'}) | IMDB: ${req.imdbId} | TMDB: ${req.tmdbId} | searchId: ${searchId ?? 'none'} ---`)
-    const enabled = getEnabledProviders()
+    logExtraction(`New stream search requested (${req.type})`)
+    const validatedRequest = validateStreamRequest(req)
+    const enabled = getEnabledProviders().filter((provider) => providerCircuits.canAttempt(provider.id))
     if (enabled.length === 0) {
       logExtraction('WARNING: No providers are enabled in settings')
       return null
@@ -1409,7 +1418,7 @@ export function registerProvidersIpc(): void {
 
         activeWorkers++
         try {
-          const embedUrl = provider.getEmbedUrl(req)
+          const embedUrl = validateProviderEmbedUrl(provider, validatedRequest)
           if (!embedUrl) {
             logExtraction(`Provider ${provider.name} skipped: failed to build embed URL.`)
             return
@@ -1417,6 +1426,7 @@ export function registerProvidersIpc(): void {
 
           const resolves = await checkDomainResolves(embedUrl)
           if (!resolves) {
+            providerCircuits.recordFailure(provider.id)
             logExtraction(`Provider ${provider.name} skipped: host ${new URL(embedUrl).hostname} did not resolve.`)
             return
           }
@@ -1434,7 +1444,9 @@ export function registerProvidersIpc(): void {
           const duration = Date.now() - start
           if (result && !signal.aborted) {
             // Auto-register headers BEFORE checking resolution so the proxy can use them
+            validateProxyTargetUrl(result.url)
             autoRegisterHeaders(result.url, result.headers, provider.sessionName)
+            providerCircuits.recordSuccess(provider.id)
 
             // Check resolution + alternate audio (dub) languages of the found stream
             const { resolution, audioLangs } = await getMaxResolution(result.url, result.headers)
@@ -1484,8 +1496,9 @@ export function registerProvidersIpc(): void {
             }
           }
         } catch (err) {
+          providerCircuits.recordFailure(provider.id)
           if (!callerResolved) {
-            logExtraction(`ERROR: ${provider.name} failed with error: ${String(err)}`)
+            logExtraction(`ERROR: ${provider.name} failed with error: ${redactProviderDiagnostic(err)}`)
           }
         } finally {
           activeWorkers--

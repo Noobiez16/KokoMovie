@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
-import { useAuthStore } from '../store/auth'
+import { useNavigate } from 'react-router-dom'
 import { downloadsApi, type DownloadItem } from '../api/downloads'
 import { AppLayout } from '../components/layout/AppLayout'
+import { applyDownloadProgress } from '../lib/download-progress'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Queued',
+  paused: 'Paused',
   downloading: 'Downloading',
   completed: 'Downloaded',
   cancelled: 'Cancelled',
@@ -14,6 +15,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'text-yellow-400',
+  paused: 'text-amber-300',
   downloading: 'text-blue-400',
   completed: 'text-green-400',
   cancelled: 'text-white/40',
@@ -32,12 +34,10 @@ function daysUntil(iso: string): number {
 }
 
 export function DownloadsPage() {
-  const { isAuthenticated } = useAuthStore()
   const navigate = useNavigate()
   const [items, setItems] = useState<DownloadItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
 
   useEffect(() => {
     const refresh = () => downloadsApi.list().then((list) => {
@@ -48,24 +48,7 @@ export function DownloadsPage() {
     void refresh()
     const poll = window.setInterval(() => void refresh(), 1000)
     const unsub = window.electronAPI?.onDownloadProgress(({ id, percent, status, completedSegments, totalSegments, downloadedBytes, totalBytes }) => {
-      setItems((prev) => {
-        if (status === 'cancelled') {
-          return prev.filter((item) => item.id !== id)
-        }
-        return prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                progress_percent: percent,
-                status: status || (percent >= 100 ? 'completed' : 'downloading'),
-                completed_segments: completedSegments ?? item.completed_segments,
-                total_segments: totalSegments ?? item.total_segments,
-                downloaded_bytes: downloadedBytes ?? item.downloaded_bytes,
-                total_bytes: totalBytes ?? item.total_bytes,
-              }
-            : item,
-        )
-      })
+      setItems((previous) => applyDownloadProgress(previous, { id, percent, status, completedSegments, totalSegments, downloadedBytes, totalBytes }))
     })
 
     return () => {
@@ -81,8 +64,20 @@ export function DownloadsPage() {
 
   async function handleCancel(id: string) {
     await downloadsApi.cancel(id)
-    await downloadsApi.delete(id)
-    setItems((prev) => prev.filter((item) => item.id !== id))
+    setItems((previous) => previous.map((item) =>
+      item.id === id ? { ...item, status: 'cancelled' as const } : item))
+  }
+
+  async function handlePause(id: string) {
+    const result = await downloadsApi.pause(id)
+    if (result.ok) setItems((previous) => previous.map((item) =>
+      item.id === id ? { ...item, status: 'paused' as const } : item))
+  }
+
+  async function handleResume(id: string) {
+    const result = await downloadsApi.resume(id)
+    if (result.ok) setItems((previous) => previous.map((item) =>
+      item.id === id ? { ...item, status: 'pending' as const } : item))
   }
 
   async function handlePlay(item: DownloadItem) {
@@ -93,7 +88,7 @@ export function DownloadsPage() {
     }
   }
 
-  const active = items.filter((i) => i.status === 'pending' || i.status === 'downloading')
+  const active = items.filter((i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused')
   const completed = items.filter((i) => i.status === 'completed')
   const other = items.filter((i) => i.status === 'cancelled' || i.status === 'error')
 
@@ -128,6 +123,7 @@ export function DownloadsPage() {
                   key={item.id}
                   item={item}
                   onOpenFolder={() => downloadsApi.openFolder(item.id)}
+                  onPause={item.can_pause ? () => handlePause(item.id) : undefined}                  onResume={item.status === 'paused' ? () => handleResume(item.id) : undefined}
                   onCancel={() => handleCancel(item.id)}
                 />
               ))}
@@ -176,12 +172,16 @@ function DownloadCard({
   item,
   onPlay,
   onCancel,
+  onPause,
+  onResume,
   onDelete,
   onOpenFolder,
 }: {
   item: DownloadItem
   onPlay?: () => void
   onCancel?: () => void
+  onPause?: () => void
+  onResume?: () => void
   onDelete?: () => void
   onOpenFolder?: () => void
 }) {
@@ -204,7 +204,7 @@ function DownloadCard({
             {item.status === 'error' && item.error_message ? ` — ${item.error_message}` : ''}
           </p>
 
-          {(item.status === 'pending' || item.status === 'downloading') && (
+          {(item.status === 'pending' || item.status === 'downloading' || item.status === 'paused') && (
             <div className="mb-2">
               <div className="flex justify-between text-[10px] text-white/40 mb-1">
                 <span>{item.progress_percent}%</span>
@@ -246,7 +246,23 @@ function DownloadCard({
               Folder
             </button>
           )}
-          {(item.status === 'pending' || item.status === 'downloading') && onCancel && (
+          {item.status === 'paused' && onResume && (
+            <button
+              onClick={onResume}
+              className="flex-1 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25 text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
+            >
+              Resume
+            </button>
+          )}
+          {item.status === 'downloading' && onPause && (
+            <button
+              onClick={onPause}
+              className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
+            >
+              Pause
+            </button>
+          )}
+          {(item.status === 'pending' || item.status === 'downloading' || item.status === 'paused') && onCancel && (
             <button
               onClick={onCancel}
               className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
@@ -254,7 +270,7 @@ function DownloadCard({
               Cancel
             </button>
           )}
-          {onDelete && item.status !== 'pending' && item.status !== 'downloading' && (
+          {onDelete && item.status !== 'pending' && item.status !== 'downloading' && item.status !== 'paused' && (
             <button
               onClick={onDelete}
               className="flex-1 bg-red-500/10 text-red-400/80 hover:bg-red-500/20 hover:text-red-300 text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"

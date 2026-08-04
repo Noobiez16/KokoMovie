@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -17,7 +16,6 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function SearchPage() {
-  const { isAuthenticated, activeProfile } = useAuthStore()
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const location = useLocation()
   const initialQuery = new URLSearchParams(location.search).get('q') ?? ''
@@ -29,14 +27,12 @@ export function SearchPage() {
     setQuery(q)
   }, [location.search])
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
 
   type SearchResult = { success: true; data: ContentSummary[]; meta: Record<string, unknown> }
 
   const { data, isFetching, isError } = useQuery<SearchResult>({
-    queryKey: ['search', debouncedQuery, activeProfile.id, tmdbApiKey],
-    queryFn: () => catalogApi.search(debouncedQuery, {}, activeProfile.id) as Promise<SearchResult>,
+    queryKey: ['search', debouncedQuery, 'local', tmdbApiKey],
+    queryFn: () => catalogApi.search(debouncedQuery, {}, 'local') as Promise<SearchResult>,
     enabled: debouncedQuery.length >= 2,
     staleTime: 2 * 60 * 1000,
   })

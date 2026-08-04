@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
+import { LOCAL_PROFILE } from '../lib/local-identity'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type Episode, type Season } from '../api/catalog'
 import { userApi } from '../api/user'
@@ -12,26 +12,42 @@ import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
 import type { ContentSummary } from '../api/catalog'
+import { sanitizeMediaUrl } from '../lib/media-url'
 
-function sanitizeUrl(url: string | null | undefined): string {
-  if (!url) return ''
-  const trimmed = url.trim()
-  // Allow relative, absolute paths starting with /, http, https, or data:image/
-  if (trimmed.startsWith('/') || /^https?:\/\//i.test(trimmed) || /^data:image\//i.test(trimmed)) {
-    return trimmed
-  }
-  return ''
-}
+const sanitizeUrl = sanitizeMediaUrl
 type DownloadTorrentOption = { id: string; name: string; magnet: string; language: string }
 
 const DOWNLOAD_LANGUAGE_NAMES: Record<string, string> = { en: 'English', es: 'Spanish', fr: 'French', ru: 'Russian' }
+
+async function getDownloadSubtitles(
+  content: import('../api/catalog').ContentDetail,
+  episode?: Episode,
+  seasonNumber?: number,
+): Promise<Array<{ lang: string; url: string }>> {
+  if (!content.imdbId || !window.electronAPI) return []
+  try {
+    const port = await window.electronAPI.getProxyPort()
+    if (!port) return []
+    const series = content.type === 'series' && episode
+    const typePath = series ? 'series' : 'movie'
+    const query = series ? `${content.imdbId}:${seasonNumber ?? 1}:${episode.episodeNumber}` : content.imdbId
+    const response = await fetch(`http://localhost:${port}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${query}.json`)
+    if (!response.ok) return []
+    const data = await response.json() as { subtitles?: Array<{ lang?: unknown; url?: unknown }> }
+    return (data.subtitles ?? [])
+      .filter((track): track is { lang: string; url: string } => typeof track.lang === 'string' && typeof track.url === 'string')
+      .slice(0, 8)
+  } catch {
+    return []
+  }
+}
 
 
 export function ContentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { isAuthenticated, activeProfile } = useAuthStore()
+  const activeProfile = LOCAL_PROFILE
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const [selectedSeason, setSelectedSeason] = useState(0)
   const [autoStreamState, setAutoStreamState] = useState<{
@@ -85,9 +101,9 @@ export function ContentDetailPage() {
   })
 
   const content = data?.data
-  const sortedSeasons = content?.seasons
+  const sortedSeasons = useMemo(() => content?.seasons
     ? [...content.seasons].sort((a, b) => a.seasonNumber - b.seasonNumber)
-    : []
+    : [], [content?.seasons])
 
   const { data: watchlistData } = useQuery({
     queryKey: ['watchlist-check', id, profileId],
@@ -241,7 +257,10 @@ export function ContentDetailPage() {
         setSelectedSeason(0)
       }
     }
-  }, [content])
+  }, [sortedSeasons])
+
+  const handleAutoStreamRef = useRef(handleAutoStream)
+  handleAutoStreamRef.current = handleAutoStream
 
   // Auto-resume from router state if resumePosition is present
   useEffect(() => {
@@ -279,16 +298,14 @@ export function ContentDetailPage() {
         }
 
         if (foundEpisode && foundSeasonNumber !== undefined) {
-          handleAutoStream(foundEpisode, foundSeasonNumber, resumePosition)
+          handleAutoStreamRef.current(foundEpisode, foundSeasonNumber, resumePosition)
         }
       } else if (content.type === 'movie') {
-        handleAutoStream(undefined, undefined, resumePosition)
+        handleAutoStreamRef.current(undefined, undefined, resumePosition)
       }
     }
-  }, [content, navState])
+  }, [content, navState, location.pathname, navigate, sortedSeasons])
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!activeProfile) return <Navigate to="/profiles" replace />
   if (!id) return <Navigate to="/browse" replace />
 
   async function getOrScrapeManifestUrl(
@@ -401,6 +418,7 @@ export function ContentDetailPage() {
         manifestUrl: result.url,
         customDownloadPath,
         headers: result.headers,
+        subtitles: await getDownloadSubtitles(c),
       })
       setDownloadDone(true)
       navigate("/downloads")
@@ -445,6 +463,7 @@ export function ContentDetailPage() {
               manifestUrl: result.url,
               customDownloadPath,
               headers: result.headers,
+              subtitles: await getDownloadSubtitles(c, ep, seasonNum),
             })
             updatedDoneMap[ep.id] = true
             setEpisodeDownloadDoneMap((prev) => ({ ...prev, [ep.id]: true }))
@@ -483,6 +502,7 @@ export function ContentDetailPage() {
         manifestUrl: result.url,
         customDownloadPath,
         headers: result.headers,
+        subtitles: await getDownloadSubtitles(c, ep, seasonNumber),
       })
       setEpisodeDownloadDoneMap((prev) => ({ ...prev, [epId]: true }))
       navigate("/downloads")
@@ -727,7 +747,7 @@ export function ContentDetailPage() {
                   if (resumeEpisodeInfo) {
                     handleAutoStream(resumeEpisodeInfo.episode, resumeEpisodeInfo.season.seasonNumber, resumeItem.positionSeconds)
                   } else {
-                    handleAutoStream(undefined, undefined, resumeItem.positionSeconds)
+                    handleAutoStreamRef.current(undefined, undefined, resumeItem.positionSeconds)
                   }
                 }}
                 className="flex items-center gap-2 bg-violet-600 text-white font-semibold px-8 py-3 rounded hover:bg-violet-500 active:scale-95 transition-all"
