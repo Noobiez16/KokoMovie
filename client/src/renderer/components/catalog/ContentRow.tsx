@@ -22,7 +22,7 @@ export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: P
   if (!items.length) return null
 
   return (
-    <section className="mb-10">
+    <section className="catalog-row mb-10">
       <div className="flex items-center justify-between mb-3 px-8">
         <h2 className="text-white font-semibold text-base tracking-wide">{title}</h2>
         {onViewAll && (

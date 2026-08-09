@@ -301,6 +301,14 @@ export function VideoPlayer({
   const torrentTimelineOffsetRef = useRef(0)
   torrentTimelineOffsetRef.current = torrentTimelineOffset
   const torrentStreamRef = useRef<{ baseUrl: string; transcoded: boolean } | null>(null)
+  // A torrent seek is a LEGITIMATE long operation, not a dead source: the stream server downloads a
+  // ~66-second forward window (up to 90s of grace on a slow swarm) before ffmpeg emits its first
+  // byte. The generic provider watchdogs judge on elapsed time / buffer progress and would call
+  // that a failure after 20–25s, racing an in-flight request into fallback and error handling. This
+  // flag marks the window between the reload and the first byte (or a real media error).
+  const [torrentSeeking, setTorrentSeeking] = useState(false)
+  const torrentSeekingRef = useRef(false)
+  torrentSeekingRef.current = torrentSeeking
   // HLS proxy port for external subtitle fetches/tracks — NOT the torrent server's port.
   const [hlsProxyPort, setHlsProxyPort] = useState('')
   const [buffered, setBuffered] = useState(0)
@@ -499,6 +507,28 @@ export function VideoPlayer({
     setHlsError('Automatic source switching was cancelled. Choose a source manually.')
   }, [])
 
+  // A torrent stream is a progressive MP4 (remuxed or direct), not an HLS manifest: it carries the
+  // ONE audio stream ffmpeg selected and no rendition metadata, so hls.js never fires
+  // AUDIO_TRACKS_UPDATED for it and the Audio menu would keep showing the previous source's tracks.
+  // Publish the dub we asked the remux for as the stream's sole track so the menu reads "Spanish"
+  // (or French / Portuguese / German …) — and never advertise renditions the MP4 doesn't contain.
+  const publishTorrentAudioTrack = (lang: string) => {
+    if (!lang) { setAudioTracks([]); setCurrentAudioTrack(-1); return }
+    setAudioTracks([{ id: -1, name: getCleanAudioName('', lang), lang }])
+    setCurrentAudioTrack(-1)
+    currentAudioLangRef.current = lang
+  }
+
+  // Drop the outgoing source's audio renditions as a new source is COMMITTED. A torrent has already
+  // published its single dub (above), so this only clears for non-torrent sources, whose real list
+  // arrives with hls.js's AUDIO_TRACKS_UPDATED. Deliberately not done on entry: a switch that is
+  // cancelled or fails must leave the still-playing source's Audio menu intact.
+  const resetAudioForNonTorrentSource = () => {
+    if (torrentStreamRef.current) return
+    setAudioTracks([])
+    setCurrentAudioTrack(-1)
+  }
+
   const handleSourceChange = async (providerId: string, isAuto = false) => {
     if (providerId === activeSourceId) return
 
@@ -507,12 +537,17 @@ export function VideoPlayer({
     if (!isAuto) userPinnedSourceRef.current = true
 
     const currentPos = videoRef.current ? videoRef.current.currentTime : 0
+    // Silence the outgoing source NOW. Resolving a replacement can take tens of seconds (a torrent
+    // waits on peers), and leaving the old stream running means its audio keeps playing under the
+    // "Switching…" overlay — and it keeps consuming bandwidth the new source needs.
+    try { videoRef.current?.pause() } catch { /* noop */ }
     const gen = ++switchGenRef.current
     setSwitchingSource(true)
     setSwitchingError(null)
     // Reset any runtime override; only a transcoded torrent (resolved below) re-enables it.
     setOverrideDuration(0)
     torrentStreamRef.current = null
+    setTorrentSeeking(false)
     setTorrentTimelineOffset(0)
 
     // Fast path: use a stream already collected during the initial provider race
@@ -525,12 +560,14 @@ export function VideoPlayer({
       // a torrent dub — discovery never downloads anything.
       let playUrl = stream.url
       if (playUrl.startsWith('magnet:')) {
-        // Tell the torrent remux which dub to select. Prefer the language the user explicitly
-        // picked (cross-source "More languages"); otherwise, if this release is tagged with a
-        // single language, use that. A multi-audio release with no explicit pick → '' (ffmpeg
-        // default). Without this the remux can play the wrong dub (e.g. FR when ES was picked).
-        const wantLang = currentAudioLangRef.current
-          || ((stream.audioLangs?.length ?? 0) > 0 ? normalizeLang(stream.audioLangs![0]!) : '')
+        // Tell the torrent remux which dub to select. A release tagged with exactly ONE language
+        // (every Torrentio candidate is: `audioLangs: [lang]`, and its name says so — "Torrent -
+        // Spanish-1080P") DECLARES what it ships, so that wins. `currentAudioLangRef` is only a
+        // fallback for multi-audio releases: it can still hold the PREVIOUS source's language, and
+        // letting a stale 'en' win here is exactly what made a Spanish pick remux English audio and
+        // label the menu English. A multi-audio release with no remembered pick → '' (ffmpeg default).
+        const declaredLang = (stream.audioLangs?.length ?? 0) === 1 ? normalizeLang(stream.audioLangs![0]!) : ''
+        const wantLang = declaredLang || currentAudioLangRef.current
         const res = await Promise.race([
           torrentApi.resolve(playUrl, wantLang),
           new Promise<Awaited<ReturnType<typeof torrentApi.resolve>>>((resolve) =>
@@ -547,6 +584,14 @@ export function VideoPlayer({
         const baseUrl = res.url.split('?')[0]!
         torrentStreamRef.current = { baseUrl, transcoded: !!res.transcoded }
         playUrl = res.url
+        // Label with what is genuinely audible, never with what we asked for. A release advertised
+        // as Spanish that only carries Spanish SUBTITLES resolves to its English audio, and saying
+        // "Spanish" there is simply false — the exact complaint this fixes.
+        const playingLang = res.audioLang || wantLang
+        publishTorrentAudioTrack(playingLang)
+        if (wantLang && playingLang !== wantLang) {
+          setSwitchingError(`This release has no ${getCleanAudioName('', wantLang)} audio — playing ${getCleanAudioName('', playingLang)}. Pick another source for that dub.`)
+        }
         // A remuxed (non-MP4) torrent streams progressively with unknown duration — show the
         // TMDB runtime as the total instead of the buffered end ticking up. Direct-MP4 torrents
         // serve with Range and report their real duration, so no override there.
@@ -562,6 +607,7 @@ export function VideoPlayer({
         await providersApi.registerStreamHeaders(playUrl, stream.headers).catch(() => {})
       }
       if (gen !== switchGenRef.current) return
+      resetAudioForNonTorrentSource()
       setResumeAtSeconds(currentPos)
       setActiveStreamUrl(playUrl)
       setActiveHeaders(stream.headers)
@@ -604,6 +650,7 @@ export function VideoPlayer({
           await providersApi.registerStreamHeaders(winningStream.url, winningStream.headers).catch(() => {})
         }
         if (gen !== switchGenRef.current) return
+        resetAudioForNonTorrentSource()
         setResumeAtSeconds(currentPos)
         setActiveStreamUrl(winningStream.url)
         setActiveHeaders(winningStream.headers)
@@ -627,6 +674,19 @@ export function VideoPlayer({
   // keeps playback reliable on flaky CDNs instead of spinning on "Loading video…".
   const autoFallback = (reason: string) => {
     if (switchingSource) return
+    // A torrent seek is still downloading its forward window — never treat that as a dead source.
+    if (torrentSeekingRef.current) {
+      console.warn(`[auto-fallback] ${reason} — torrent seek in progress, waiting`)
+      return
+    }
+    // A torrent is ALWAYS an explicit user choice (auto-fallback never selects one), and its
+    // startup/seek costs are nothing like an embed's. Generic embed fallback must not handle it,
+    // independently of the pin below — the pin is cleared on every new title, this is not.
+    if (torrentStreamRef.current || activeSourceId?.startsWith('p2p-')) {
+      console.warn(`[auto-fallback] ${reason} — active source is an explicitly chosen torrent, not switching`)
+      networkErrorCountRef.current = 0
+      return
+    }
     // The user pinned this source (only it has what they want). Never switch away — keep
     // trying to recover the current stream instead (the key/segment loaders retry on their own).
     if (userPinnedSourceRef.current) {
@@ -686,6 +746,10 @@ export function VideoPlayer({
   // Watchdog: give up on a source only when it's genuinely dead — never when it's just slow.
   useEffect(() => {
     if (switchingSource) return
+    // A torrent seek in flight is not a stalled source. The stream server is downloading the
+    // forward window and has not written a byte yet by design; judging it on elapsed time or
+    // buffer progress races a healthy request into fallback/error handling.
+    if (torrentSeeking) return
     if (!initialLoading && !isBuffering) return
 
     // Initial load: no frame has played yet, so judge on elapsed time alone.
@@ -721,7 +785,7 @@ export function VideoPlayer({
       }
     }, STEP)
     return () => clearInterval(iv)
-  }, [initialLoading, isBuffering, switchingSource, activeStreamUrl])
+  }, [initialLoading, isBuffering, switchingSource, torrentSeeking, activeStreamUrl])
 
   // Resolve the HLS proxy port once per stream URL change. Torrent sources play from a
   // different local server, so never derive subtitle proxy port from activeStreamUrl alone.
@@ -1181,9 +1245,14 @@ export function VideoPlayer({
     // network-error streak (the source is clearly working now).
     const onPlaying = () => {
       setIsPlaying(true); setInitialLoading(false); clearBuffering()
+      setTorrentSeeking(false)
       networkErrorCountRef.current = 0
     }
-    const onCanPlay = () => clearBuffering()
+    // A seeked remux has produced decodable data — the watchdogs can resume judging this source.
+    const onCanPlay = () => { clearBuffering(); setTorrentSeeking(false) }
+    // …and a real media failure ends the grace window too, so a 503 from an unfetchable seek
+    // region can't leave the watchdogs disarmed for the rest of the session.
+    const onMediaError = () => setTorrentSeeking(false)
     // Buffering is left to hls.js + the browser — we only show the spinner. We do NOT
     // proactively pause playback to build a cushion: that "auto-rebuffer-to-goal" (v1.1.5)
     // made playback feel constantly stuck, so it was removed (see DN-035/DN-042). hls.js
@@ -1223,6 +1292,7 @@ export function VideoPlayer({
     video.addEventListener('pause', onPause)
     video.addEventListener('playing', onPlaying)
     video.addEventListener('canplay', onCanPlay)
+    video.addEventListener('error', onMediaError)
     video.addEventListener('waiting', onWaiting)
     video.addEventListener('seeking', onSeeking)
     video.addEventListener('stalled', onStalled)
@@ -1236,6 +1306,7 @@ export function VideoPlayer({
       video.removeEventListener('pause', onPause)
       video.removeEventListener('playing', onPlaying)
       video.removeEventListener('canplay', onCanPlay)
+      video.removeEventListener('error', onMediaError)
       video.removeEventListener('waiting', onWaiting)
       video.removeEventListener('seeking', onSeeking)
       video.removeEventListener('stalled', onStalled)
@@ -1370,6 +1441,10 @@ export function VideoPlayer({
       url.searchParams.set('start', String(Math.floor(target)))
       if (max > 0) url.searchParams.set('dur', String(Math.floor(max)))
       const wasPlaying = !video.paused
+      // Stand the generic watchdogs down until this request produces data or fails: the server may
+      // legitimately hold it for up to 90s while it downloads the forward window (see the flag's
+      // declaration). Cleared on canplay / playing / media error.
+      setTorrentSeeking(true)
       video.src = url.toString()
       video.load()
       if (wasPlaying) video.play().catch(() => {})
@@ -1447,11 +1522,14 @@ export function VideoPlayer({
     currentAudioLangRef.current = norm
     const langLabel = getCleanAudioName('', norm)
     const currentPos = videoRef.current ? videoRef.current.currentTime : 0
+    // Same as handleSourceChange: stop the outgoing stream before the (possibly slow) resolve.
+    try { videoRef.current?.pause() } catch { /* noop */ }
     const gen = ++switchGenRef.current
     setSwitchingSource(true)
     setSwitchingError(null)
     setOverrideDuration(0)
     torrentStreamRef.current = null
+    setTorrentSeeking(false)
     setTorrentTimelineOffset(0)
 
     for (let i = 0; i < candidates.length; i++) {
@@ -1472,9 +1550,22 @@ export function VideoPlayer({
     setAwaitingFallback(false)
           return
         }
+        // The release ADVERTISED this dub; the resolver checked whether the file actually carries
+        // it. Torrentio's language flags frequently come from SUBTITLE tracks, so a "Spanish"
+        // BluRay rip can be English-only audio. This is a language hunt, so move on to the next
+        // release that claims the dub rather than playing English under a Spanish label.
+        // A resolver that couldn't read the file reports the requested language and is accepted.
+        if (res.audioLang && res.audioLang !== norm) {
+          if (i < candidates.length - 1) continue
+          setSwitchingError(`No available source actually carries ${langLabel} audio for this title.`)
+          setSwitchingSource(false)
+          setAwaitingFallback(false)
+          return
+        }
         const baseUrl = res.url.split('?')[0]!
         torrentStreamRef.current = { baseUrl, transcoded: !!res.transcoded }
         playUrl = res.url
+        publishTorrentAudioTrack(res.audioLang || norm)
         if (res.transcoded && knownRuntimeSecs > 0) setOverrideDuration(knownRuntimeSecs)
         // Transcoded dubs stream from 0 (no ?start= resume — the on-disk file isn't written yet for
         // an early -ss seek). Switching to a dub restarts it at 0; native in-buffer seek thereafter.
@@ -1484,6 +1575,7 @@ export function VideoPlayer({
         await providersApi.registerStreamHeaders(playUrl, stream.headers).catch(() => {})
       }
       if (gen !== switchGenRef.current) return
+      resetAudioForNonTorrentSource()
       setResumeAtSeconds(currentPos)
       setActiveStreamUrl(playUrl)
       setActiveHeaders(stream.headers)
@@ -1525,15 +1617,15 @@ export function VideoPlayer({
     return out.sort((a, b) => audioLangRank(a.lang) - audioLangRank(b.lang))
   }, [audioTracks, allStreams, activeSourceId, sources])
 
-  // Source list shown in the switcher = registered embed providers PLUS any collected stream
-  // whose providerId isn't a registered provider (e.g. Real-Debrid torrent sources, id 'rd-*').
-  // Without this, debrid sources would be in availableSourceIds but never render (the switcher
-  // only shows entries that exist in `sources`).
+  // Source switching is for ordinary embed/debrid mirrors. Built-in P2P releases are language
+  // implementations, not servers: expose them only through the Audio menu so users choose the dub
+  // they want and the verified-language retry path can select a live release on their behalf.
   const mergedSources = useMemo(() => {
     const ids = new Set(sources.map((s) => s.id))
     const seen = new Set<string>()
     const extra = allStreams
-      .filter((s) => !ids.has(s.providerId) && !seen.has(s.providerId) && seen.add(s.providerId))
+      .filter((s) => !s.providerId.startsWith('p2p-')
+        && !ids.has(s.providerId) && !seen.has(s.providerId) && seen.add(s.providerId))
       .map((s) => ({ id: s.providerId, name: s.providerName, enabled: true }))
     return [...sources, ...extra]
   }, [sources, allStreams])
@@ -1791,9 +1883,10 @@ export function VideoPlayer({
           introEndSecs={episode?.introEndSecs ?? content.introEndSecs ?? null}
           creditsStartSecs={episode?.creditsStartSecs ?? content.creditsStartSecs ?? null}
           sources={mergedSources}
-          availableSourceIds={allStreams.map((s) => s.providerId)}
+          availableSourceIds={allStreams.filter((s) => !s.providerId.startsWith('p2p-')).map((s) => s.providerId)}
           audioLangsBySource={Object.fromEntries(
             allStreams
+              .filter((s) => !s.providerId.startsWith('p2p-'))
               .map((s) => [s.providerId, s.streams[0]?.audioLangs ?? []] as const)
               .filter(([, langs]) => langs.length >= 1),
           )}

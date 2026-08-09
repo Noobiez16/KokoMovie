@@ -87,3 +87,7 @@
     transition-duration: 0.01ms !important;
   }
 }
+.catalog-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}

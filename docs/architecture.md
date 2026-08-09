@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.5.1 development baseline (Fully Local, Multi-Architecture Linux)
-**Date:** 2026-08-03
+**Version:** 1.5.2 optimization baseline (Fully Local, Multi-Architecture Linux)
+**Date:** 2026-08-08
 **Status:** Current
 
 ---
@@ -222,7 +222,8 @@ CREATE TABLE preferences (
 - **Keychain Storage**: API keys are saved in the OS keychain via `keytar` to prevent raw exposure on disk or in standard localStorage.
 - **Local SQLite DB**: The SQLite file lives in the system's protected user data folders.
 - **Portable Offline MP4**: Provider segments are protected only while the download is in progress. After transfer, bundled FFmpeg remuxes video and audio without re-encoding into one standard MP4 in the selected Downloads folder; temporary encrypted segments are removed after successful finalization.
-- **Torrent Dub Downloads**: Movie and individual-episode download pickers expand compatible 1080p torrent releases into explicit English, Spanish, French, and Russian choices. `torrent:resolve` prebuffers the selected release and forces an FFmpeg remux whenever a language is requested—even for an MP4/WebM source—so the chosen dub becomes the first/default audio track before the regular downloader finalizes the file.
+- **Torrent Streaming**: Compatible 1080p releases are exposed as one explicit language per source (for example, `Torrent - Spanish-1080P`). MP4, M4V, and WebM use WebTorrent's native seekable byte-range stream; MKV, AVI, and MOV continue through the bounded FFmpeg remux path. HTTP probes are bodyless, stream cleanup follows the outgoing response lifecycle, and each language receives a stable stream token.
+- **Torrent Seeking and Audio**: A remux is progressive, so the renderer seeks by reloading the stream token at `?start=…&dur=…`. The stream server maps that time to a byte offset, downloads a forward window of roughly 66 seconds at the release's real bitrate (clamped to 24–256 MiB) before FFmpeg starts, and keeps that read stream flowing — re-arming it if it fails — so WebTorrent keeps prioritizing pieces ahead of the playhead. FFmpeg reads at real time after a short initial burst, so it cannot outrun the download into sparse file data. A window that cannot be fetched in time returns `503` instead of a stream that dies mid-playback. The remux carries a single audible audio stream and no rendition metadata, so the player publishes the requested dub itself as the stream's sole audio entry; HLS sources continue to build their audio list from `AUDIO_TRACKS_UPDATED`.
 
 ---
 

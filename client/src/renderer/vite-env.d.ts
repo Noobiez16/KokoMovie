@@ -116,7 +116,10 @@ interface ElectronAPI {
 
   // Built-in P2P torrent streaming (free dub sourcing)
   torrentGetStreams: (req: StreamRequest) => Promise<ProviderResult[]>
-  torrentResolve: (magnet: string, audioLang?: string) => Promise<{ url?: string; transcoded?: boolean; error?: string }>
+  // `audioLang` is the language that will actually be audible (verified against the file's real
+  // audio streams), which can differ from the requested one when a release advertises a dub it
+  // only carries as subtitles. `audioLangs` is the probed stream list; empty when unreadable.
+  torrentResolve: (magnet: string, audioLang?: string) => Promise<{ url?: string; transcoded?: boolean; audioLang?: string; requestedLang?: string; audioLangs?: string[]; error?: string }>
 }
 
 interface StreamRequest {

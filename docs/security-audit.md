@@ -1,7 +1,7 @@
 # KokoMovie — Security Audit
 
-**Version:** 1.5.1
-**Date:** 2026-08-03
+**Version:** 1.5.2
+**Date:** 2026-08-08
 **Scope:** The Electron desktop client in `client/` — the only shipped component
 **Framework:** OWASP Top 10 (2021) + Electron security checklist
 **Runtime:** Electron 43.2.0 · Chromium 150 · Node.js 24.18.0
@@ -166,10 +166,8 @@ a manual save dialog. Nothing is transmitted automatically. No telemetry or anal
 ## Supply chain and distribution
 
 - **Dependency audit policy.** `npm run audit:production` fails on every high or critical
-  *production* advisory except `GHSA-qwww-vcr4-c8h2` for exactly `react-router-dom@7.18.2`. That
-  advisory concerns React Server Components and server actions; KokoMovie is a client-only Vite SPA
-  with neither. The script also fails if the pinned version changes or the reviewed advisory
-  disappears, so the exception cannot silently outlive its justification.
+  production advisory without exceptions. The previously reviewed React Router advisory is no
+  longer reported and its fail-closed temporary exception was removed for v1.5.2.
 - **Licence gate.** `npm run check:licenses` fails on any production dependency that is
   undeclared, unrecognised, or incompatible with GPL-3.0-or-later distribution, and re-verifies the
   bundled FFmpeg's recorded provenance.
