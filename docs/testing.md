@@ -1,7 +1,7 @@
 # Testing and Regression Baseline
 
-**Date:** 2026-08-03
-**Automated baseline:** lint, strict renderer/main typecheck, 99 Vitest tests, the production dependency audit policy, the distribution licence gate, and the production build are active gates on the v1.5.1 release line.
+**Date:** 2026-08-08
+**Automated baseline:** lint, strict renderer/main typecheck, 113 Vitest tests, the production dependency audit policy, the distribution licence gate, and the production build are active gates on the v1.5.2 optimization line.
 
 ## Existing commands
 
@@ -11,7 +11,7 @@
 - client npm test: Vitest; empty suites now fail.
 - client npm run test:e2e: Playwright.
 - npm run lint: root ESLint command; must be audited before treating as a gate.
-- npm run audit:production: production advisory policy with one reviewed exception.
+- npm run audit:production: production advisory policy with no high/critical exceptions.
 - npm run check:licenses: distribution licence gate; `-- --report` prints the inventory.
 - npm run vendor:ffmpeg [targets]: fetches and verifies the pinned LGPL FFmpeg builds.
 
@@ -32,6 +32,36 @@ Phase 3 added deterministic TMDB and identity tests. Phase 5 adds cached-search/
 9. Verify Help → Changelog, feedback composition, and completion notification parsing.
 10. Verify update disabled/enabled/manual-check/download/install states.
 11. Inspect Windows, Linux x64, and Linux ARM64 artifacts and native binary architecture.
+
+## v1.5.2 WebTorrent regression verification (2026-08-08)
+
+- The real Electron preload IPC resolved WebTorrent's official Creative Commons Sintel torrent. A bodyless `HEAD` returned the correct media metadata and a `Range: bytes=0-1048575` request returned HTTP 206, a valid `Content-Range`, and exactly 1 MiB of media data.
+- Live Torrentio discovery for a movie fixture returned only one-language 1080p labels such as `Torrent - English-1080P`, `Torrent - French-1080P`, and `Torrent - Portuguese-1080P`.
+- Regression tests lock response-scoped stream cleanup, bodyless media probes, removal of the process-global FFmpeg terminator, and the clean source-label contract.
+
+## v1.5.2 torrent audio and seek verification (2026-08-08)
+
+Automated, on this machine:
+
+- The bundled LGPL FFmpeg 8 binary was given the exact argument vector `serveTranscoded` builds for a seek, against a synthetic 120-second MKV carrying an English audio stream flagged `default` and a Spanish one that is not — the layout that produced the wrong dub. With Spanish requested, the output is video plus `a:0 (spa) (default)` followed by `a:1 (eng)` with its default flag cleared. With French requested (absent from the release), the `0:a:0?` fallback still yields a real audio stream. No FFmpeg diagnostics were emitted, so the optional `0:a:m:language:<tag>:?` mapping is accepted by this build.
+- Pacing: seeking to 60 seconds with `-readrate_initial_burst 8 -readrate 1.0` produced 20.02 seconds of media in 14.0 seconds of wall time — the intended short burst followed by real-time reading. The previous `-readrate 1.5` setting would have been roughly 29 seconds ahead by the same point, which is what exhausted the priming cushion and produced the delayed Stream Error.
+- Electron launched against the built main process on `DISPLAY=:1` and ran to the timeout with no renderer load failure and no crash. The only console line is the unrelated Discord Rich Presence connection notice.
+- Regression tests additionally lock the real-time seek pacing, the 24–256 MiB priming clamps, the optional language mapping and `a:0` default disposition, the Torrentio `x.km-file` episode selection, the per-branch HTTP/HTTPS agent binding, and the player publishing the resolved dub as the progressive stream's sole audio track.
+- The audio-verification probe was exercised against real FFmpeg output on three fixtures: a genuine two-audio MKV (`[en, es]`, Spanish requested → Spanish plays), a reproduction of the reported Zootopia 2 failure with one English audio stream plus Spanish and French *subtitle* tracks (`[en]`, Spanish requested → correctly reports English, and the Spanish subtitle track is not mistaken for a dub), and an unreadable input (returns nothing and keeps the previous behaviour). Live Torrentio metadata for `tt26443597` confirmed the release advertises `🇬🇧 / 🇪🇸 / 🇫🇷`, so discovery was right to offer it and only the post-resolve claim was wrong.
+- Further regression tests lock the renderer-side seek boundaries: the explicit torrent-seeking state, the watchdog standing down while it is set, the grace window clearing on `canplay`/`playing`/media error, generic embed fallback refusing an explicitly chosen torrent, both switch paths pausing the outgoing video, and the settings panel no longer auto-closing on a playback resume.
+
+Manual, still required (needs live peers and several minutes of playback):
+
+1. Open a title with dubbed 1080p releases and pick a `Torrent - Spanish-1080P` source.
+2. Confirm the Audio setting reads **Spanish**, not English or Original, and that Spanish audio plays. If the release only advertised Spanish (subtitle-derived flags), expect a notice naming the audio it really carries — and expect the "more languages" Spanish entry to skip that release entirely.
+3. Confirm initial playback starts and the source stays pinned (no silent switch to another provider).
+4. Scrub forward past the buffered region and confirm the player reloads at `?start=…&dur=…`, buffers, and resumes.
+5. Let it play for at least five minutes past the seek point and confirm no Stream Error appears.
+5a. During the post-seek spinner, confirm the player does not switch source or show a fallback error while the forward window downloads, and that opening the gear leaves the settings panel open when playback resumes.
+6. Check the KokoMovie log for `ffmpeg exited` lines; there should be none reporting an invalid language map.
+7. Repeat with a French or Portuguese release and confirm the Audio label follows the release language.
+
+On a starved swarm the seek is expected to fail fast with a `503` from the stream server rather than to start and die later; arbitrary seeking is not guaranteed without sufficient peers and throughput.
 
 ## Phase 5 offline verification
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { downloadsApi, type DownloadItem } from '../api/downloads'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -46,13 +46,18 @@ export function DownloadsPage() {
     })
 
     void refresh()
-    const poll = window.setInterval(() => void refresh(), 1000)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const poll = window.setInterval(refreshWhenVisible, 5000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     const unsub = window.electronAPI?.onDownloadProgress(({ id, percent, status, completedSegments, totalSegments, downloadedBytes, totalBytes }) => {
       setItems((previous) => applyDownloadProgress(previous, { id, percent, status, completedSegments, totalSegments, downloadedBytes, totalBytes }))
     })
 
     return () => {
       window.clearInterval(poll)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
       unsub?.()
     }
   }, [])
@@ -88,9 +93,11 @@ export function DownloadsPage() {
     }
   }
 
-  const active = items.filter((i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused')
-  const completed = items.filter((i) => i.status === 'completed')
-  const other = items.filter((i) => i.status === 'cancelled' || i.status === 'error')
+  const { active, completed, other } = useMemo(() => ({
+    active: items.filter((i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'),
+    completed: items.filter((i) => i.status === 'completed'),
+    other: items.filter((i) => i.status === 'cancelled' || i.status === 'error'),
+  }), [items])
 
   return (
     <AppLayout>

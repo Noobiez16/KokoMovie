@@ -193,11 +193,15 @@ function fetchNode(
         }
         reqHeaders['Accept-Encoding'] = 'gzip, deflate'
 
-        const reqOpts: nodeHttp.RequestOptions = {
+        // `agent` is deliberately NOT part of the shared options: http.Agent and https.Agent are
+        // distinct declarations, so a `isHttps ? httpsAgent : httpAgent` ternary widens to an
+        // `Agent | Agent` union that neither request signature accepts (and duplicate @types/node
+        // graphs make editors flag it even when tsc is happy). Each protocol branch below attaches
+        // its own agent instead.
+        const reqOpts: Omit<nodeHttp.RequestOptions, 'agent'> = {
           method: options.method ?? 'GET',
           headers: reqHeaders,
           timeout: 15000,
-          agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
           lookup: resilientLookup as nodeHttp.RequestOptions['lookup'],
         }
 
@@ -251,8 +255,8 @@ function fetchNode(
         }
 
         const req = isHttps
-          ? nodeHttps.request(currentUrl, reqOpts as nodeHttps.RequestOptions, handleResponse)
-          : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, reqOpts, handleResponse)
+          ? nodeHttps.request(currentUrl, { ...reqOpts, agent: nodeHttpsAgent }, handleResponse)
+          : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, { ...reqOpts, agent: nodeHttpAgent }, handleResponse)
 
         req.on('error', (_err: Error) => {
           reject(new Error('Connection error during request'))
@@ -401,11 +405,12 @@ function streamSegment(
     const range = rangeHeader ?? req.headers.range
     if (range) reqHeaders['Range'] = String(range)
 
-    const opts: nodeHttp.RequestOptions = {
+    // Agent stays out of the shared options — see fetchNode above; each protocol branch attaches
+    // the matching keep-alive agent so no `Agent | Agent` union is ever formed.
+    const opts: Omit<nodeHttp.RequestOptions, 'agent'> = {
       method: req.method ?? 'GET',
       headers: reqHeaders,
       timeout: 30000,
-      agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
       lookup: resilientLookup as nodeHttp.RequestOptions['lookup'],
     }
 
@@ -494,8 +499,8 @@ function streamSegment(
     let clientReq: nodeHttp.ClientRequest
     try {
       clientReq = isHttps
-        ? nodeHttps.request(url, opts as nodeHttps.RequestOptions, onResponse)
-        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, opts, onResponse)
+        ? nodeHttps.request(url, { ...opts, agent: nodeHttpsAgent }, onResponse)
+        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, { ...opts, agent: nodeHttpAgent }, onResponse)
     } catch (e: any) {
       logExtraction(`[Proxy Segment Exception] ${url}: ${e?.message}`)
       settleOnce()
@@ -1047,11 +1052,12 @@ function probeDirectVideo(url: string, headers: Record<string, string>): Promise
       requestHeaders["Range"] = "bytes=0-1023"
       requestHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-      const requestOptions: nodeHttp.RequestOptions = {
+      // Agent stays out of the shared options — see fetchNode above; each protocol branch attaches
+      // the matching keep-alive agent so no `Agent | Agent` union is ever formed.
+      const requestOptions: Omit<nodeHttp.RequestOptions, "agent"> = {
         method: "GET",
         headers: requestHeaders,
         timeout: 15000,
-        agent: isHttps ? nodeHttpsAgent : nodeHttpAgent,
         lookup: resilientLookup as nodeHttp.RequestOptions["lookup"],
       }
       const onResponse = (response: nodeHttp.IncomingMessage) => {
@@ -1068,8 +1074,8 @@ function probeDirectVideo(url: string, headers: Record<string, string>): Promise
         response.once("error", (error) => { if (!settled) reject(error) })
       }
       const request = isHttps
-        ? nodeHttps.request(url, requestOptions as nodeHttps.RequestOptions, onResponse)
-        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, requestOptions, onResponse)
+        ? nodeHttps.request(url, { ...requestOptions, agent: nodeHttpsAgent }, onResponse)
+        : (nodeHttp as any)[HTTP_REQUEST_KEY](url, { ...requestOptions, agent: nodeHttpAgent }, onResponse)
       request.once("timeout", () => request.destroy(new Error("Direct-video probe timeout")))
       request.once("error", (error: Error) => { if (!settled) reject(error) })
       request.end()
@@ -1083,6 +1089,20 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
     if (isDirect) {
+      // Chromium on the supported desktop targets cannot reliably decode HEVC/H.265. Some
+      // providers expose those files with an .mp4 extension and an explicit codec directory
+      // (notably VidLink's /resource/h265/ URLs), so a successful byte probe used to score them as
+      // 1080p winners. They would show a frame or two and then fail in the renderer. Reject them
+      // before the network probe so the race can choose a playable H.264/HLS alternative.
+      let directUrlHint = url.toLowerCase()
+      try {
+        const parsed = new URL(url)
+        directUrlHint = (parsed.pathname + parsed.search).toLowerCase()
+      } catch { /* validation elsewhere reports malformed URLs */ }
+      if (/(?:^|[\/_?&=.-])(?:h\.?265|hevc|x265)(?:[\/_?&=.-]|$)/i.test(directUrlHint)) {
+        logExtraction('Rejected HEVC/H.265 direct video: ' + url.slice(0, 140))
+        return { resolution: 0, audioLangs: [] }
+      }
       try {
         const probe = await probeDirectVideo(url, headers)
         if (probe.status !== 200 && probe.status !== 206) {

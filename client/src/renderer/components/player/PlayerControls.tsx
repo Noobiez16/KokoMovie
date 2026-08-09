@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import type Hls from 'hls.js'
 import type { Episode } from '../../api/catalog'
 import { NextEpisodeButton } from './NextEpisodeButton'
@@ -116,7 +116,10 @@ export function PlayerControls({
   const [showSettings, setShowSettings] = useState(false)
   const [menuView, setMenuView] = useState<MenuView>('home')
 
-  const openSettings = useCallback(() => {
+  // The gear is inside the always-present controls layer; stop the click there so no ancestor
+  // (the controls-timeout reset, any future overlay handler) can act on the same event.
+  const openSettings = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
     setShowSettings((v) => {
       const next = !v
       if (next) setMenuView('home')
@@ -125,14 +128,11 @@ export function PlayerControls({
   }, [])
   const closeSettings = useCallback(() => { setShowSettings(false); setMenuView('home') }, [])
 
-  // Dismiss the settings overlay when playback resumes (paused → playing). Tracking the
-  // transition — rather than just `isPlaying` — means opening the menu mid-playback keeps it
-  // open; it only auto-closes on an actual resume. Click-away is handled by the backdrop below.
-  const wasPlayingRef = useRef(isPlaying)
-  useEffect(() => {
-    if (!wasPlayingRef.current && isPlaying) closeSettings()
-    wasPlayingRef.current = isPlaying
-  }, [isPlaying, closeSettings])
+  // NOTE: the settings panel deliberately does NOT auto-close when playback resumes. It used to
+  // close on a paused → playing transition, which made the menu unusable around a torrent: a seek
+  // reload or a buffering recovery flips isPlaying false → true, so the panel slammed shut a moment
+  // after the gear was clicked, seemingly at random. Dismissal is explicit only — the backdrop
+  // below, an option that commits, or the gear again.
 
   // Parent asked us to open the settings panel (e.g. the Stream-Error "Choose another source"
   // button). Skip the initial 0 so the menu doesn't pop open on every fresh mount.

@@ -22,7 +22,4 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
-  define: {
-    'process.env.NODE_ENV': JSON.stringify(process.env['NODE_ENV'] ?? 'development'),
-  },
 })

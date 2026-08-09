@@ -91,8 +91,13 @@ function parseSeeders(title: string): number {
 }
 function isLikelyHevc(text: string): boolean { return /\b(x265|h\.?265|hevc)\b/i.test(text) }
 function isUnsupportedTorrentVideo(text: string): boolean { return isLikelyHevc(text) || /\b(av1|3d|cam|telesync|hdts)\b/i.test(text) }
-const PRIORITY_TORRENT_LANGS = ['en', 'es', 'fr', 'ru'] as const
+const PRIORITY_TORRENT_LANGS = ['en', 'es', 'fr', 'it', 'de', 'pt', 'ru', 'ja', 'ko', 'hi', 'zh', 'ar', 'tr', 'pl', 'nl'] as const
 function priorityLangs(langs: string[]): string[] { return PRIORITY_TORRENT_LANGS.filter((lang) => langs.includes(lang)) }
+const TORRENT_LANG_NAMES: Record<string, string> = {
+  en: 'English', es: 'Spanish', fr: 'French', it: 'Italian', de: 'German', pt: 'Portuguese',
+  ru: 'Russian', ja: 'Japanese', ko: 'Korean', hi: 'Hindi', zh: 'Chinese', ar: 'Arabic',
+  tr: 'Turkish', pl: 'Polish', nl: 'Dutch',
+}
 
 // ISO 639-1 (2-letter, how the UI tracks languages) → ISO 639-2 tags (how MKV audio streams are
 // labelled). Both 639-2/B (e.g. "fre", "ger") and /T ("fra", "deu") variants are listed because
@@ -102,19 +107,92 @@ const ISO3: Record<string, string[]> = {
   pt: ['por'], ru: ['rus'], ja: ['jpn'], ko: ['kor'], hi: ['hin'],
   zh: ['chi', 'zho'], ar: ['ara'], tr: ['tur'], pl: ['pol'], nl: ['dut', 'nld'],
 }
+// Reverse of ISO3, plus the 2-letter codes themselves, so a tag read off a real audio stream
+// ("spa", "es", "fra") normalises to the 2-letter code the UI speaks.
+const TAG_TO_LANG: Record<string, string> = (() => {
+  const out: Record<string, string> = {}
+  for (const [two, threes] of Object.entries(ISO3)) {
+    out[two] = two
+    for (const three of threes) out[three] = two
+  }
+  return out
+})()
+function normalizeStreamTag(tag: string): string {
+  return TAG_TO_LANG[(tag || '').toLowerCase().trim()] ?? ''
+}
 
 // ffmpeg -map args that put the user's requested dub FIRST in the output (the track Chromium
 // plays by default), with a:0 appended as a guaranteed-audio fallback for releases whose audio
 // streams carry no language metadata. Returns [] when no language is requested → ffmpeg's default
 // stream selection (best single audio) is kept, matching the original behaviour.
-function audioMapArgs(audioLang: string): string[] {
+function audioMapArgs(audioLang: string, audioStreamIndex: number | null = null): string[] {
   const want = (audioLang || '').toLowerCase().split(/[-_]/)[0] ?? ''
   if (!want) return []
+  // Once the resolver has inspected the real container, select that exact stream. This mirrors
+  // native players such as mpv selecting an audio track ID and avoids language-tag ambiguity.
+  if (audioStreamIndex !== null) return ['-map', '0:v:0?', '-map', `0:${audioStreamIndex}`]
   const tags = [...new Set([...(ISO3[want] ?? []), want])]
   const args = ['-map', '0:v:0?']
-  for (const tag of tags) args.push('-map', `0:a:m:language:${tag}?`)
+  for (const tag of tags) args.push('-map', `0:a:m:language:${tag}:?`)
   args.push('-map', '0:a:0?') // fallback: always have audio even if no language tag matched
   return args
+}
+
+// ── What the release ACTUALLY contains ───────────────────────────────────────
+// Torrentio's language flags describe the RELEASE, and for scene BluRay rips they routinely come
+// from the SUBTITLE tracks: "Zootopia.2.2025.REPACK.1080p.BluRay.x264-KNiVES 🇬🇧 / 🇪🇸 / 🇫🇷" ships
+// one English audio stream and Spanish/French subtitles. Selecting the "Spanish" entry then mapped
+// nothing, fell through to `0:a:0?`, and played English — while the UI, which trusted the request,
+// confidently said "Spanish". So before committing to a release we ask ffmpeg what audio streams
+// the file really has and report the truth back to the renderer.
+//
+// The container header carries the track table, and `waitForTorrentStart` has already pulled the
+// first 12 MiB, so this reads from cache/disk and costs nothing on the wire. `ffmpeg -i <input>`
+// with NO output prints the stream table and exits immediately (non-zero, "At least one output file
+// must be specified") without decoding anything — that error IS the expected outcome.
+//
+// Best-effort by design: any failure returns [] and the caller keeps the previous behaviour. This
+// path must never be able to break a playback that would otherwise have worked.
+const PROBE_BYTES = 8 * 1024 * 1024
+const AUDIO_STREAM_RE = /Stream #\d+:(\d+)(?:\[[^\]]*\])?(?:\(([A-Za-z]{2,3})\))?: Audio:/g
+interface ProbedAudioTrack { streamIndex: number; lang: string }
+function probeAudioTracks(file: any, timeoutMs = 15_000): Promise<ProbedAudioTrack[]> {
+  return new Promise((resolve) => {
+    if (!FFMPEG_BIN) { resolve([]); return }
+    let settled = false
+    let input: any = null
+    let ff: ChildProcess | null = null
+    const finish = (tracks: ProbedAudioTrack[]) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { input?.destroy?.() } catch { /* ignore */ }
+      try { ff?.kill('SIGKILL') } catch { /* ignore */ }
+      resolve(tracks)
+    }
+    const timer = setTimeout(() => finish([]), timeoutMs)
+    try {
+      const end = Math.min((file.length ?? PROBE_BYTES) - 1, PROBE_BYTES - 1)
+      input = file.createReadStream({ start: 0, end })
+      ff = spawn(FFMPEG_BIN, ['-hide_banner', '-i', 'pipe:0'], { stdio: ['pipe', 'ignore', 'pipe'] })
+      let out = ''
+      ff.stderr?.on('data', (d) => { out = (out + d.toString()).slice(-16_000) })
+      ff.on('error', () => finish([]))
+      ff.on('close', () => {
+        const tracks: ProbedAudioTrack[] = []
+        AUDIO_STREAM_RE.lastIndex = 0
+        for (let m = AUDIO_STREAM_RE.exec(out); m; m = AUDIO_STREAM_RE.exec(out)) {
+          tracks.push({ streamIndex: Number(m[1]), lang: normalizeStreamTag(m[2] ?? '') })
+        }
+        finish(tracks)
+      })
+      input.on('error', () => finish([]))
+      ff.stdin?.on('error', () => { /* EPIPE: ffmpeg exits as soon as it has the header */ })
+      input.pipe(ff.stdin!)
+    } catch {
+      finish([])
+    }
+  })
 }
 
 interface Candidate { infoHash: string; fileIdx: number; title: string; quality: string; seeders: number; langs: string[]; trackers: string[] }
@@ -153,10 +231,13 @@ async function queryTorrentio(req: StreamRequest): Promise<Candidate[]> {
   }
 }
 
-function buildMagnet(infoHash: string, releaseTrackers: string[]): string {
-  const trackers = [...new Set([...releaseTrackers.slice(0, 6), ...TRACKERS.slice(0, 3)])]
+function buildMagnet(infoHash: string, releaseTrackers: string[], fileIdx: number): string {
+  // Torrentio's reported seeder count is only a discovery hint and is often stale. Announce to a
+  // wider fallback set so a healthy swarm is not rejected merely because the first three public
+  // trackers are unreachable from this network. Keep the list bounded to avoid oversized magnets.
+  const trackers = [...new Set([...releaseTrackers.slice(0, 6), ...TRACKERS.slice(0, 12)])]
   const tr = trackers.map((tracker) => String.fromCharCode(38) + 'tr=' + encodeURIComponent(tracker)).join('')
-  return 'magnet:?xt=urn:btih:' + infoHash + tr
+  return 'magnet:?xt=urn:btih:' + infoHash + tr + String.fromCharCode(38) + 'x.km-file=' + fileIdx
 }
 
 // Discovery only: expose filtered releases; the magnet resolves on explicit selection.
@@ -176,23 +257,26 @@ async function getTorrentStreams(req: StreamRequest): Promise<ProviderResult[]> 
 
   const seen = new Map<string, number>()
   const out: ProviderResult[] = []
-  for (const c of candidates) {
-    // Only surface releases that declare a language (the whole point is finding dubs); dedupe
-    // by language-set + quality so the menu isn't flooded with near-identical entries.
-    if (c.langs.length === 0) continue
-    const key = c.langs.slice().sort().join(',') + '|' + c.quality
-    const seenCount = seen.get(key) ?? 0
-    if (seenCount >= 2) continue
-    seen.set(key, seenCount + 1)
-    const langLabel = c.langs.map((lang) => lang.toUpperCase()).join('/')
-    out.push({
-      providerId: `p2p-${c.infoHash.slice(0, 10)}`,
-      providerName: `Torrent · ${langLabel} ${c.quality} · ${c.seeders} reported seeders`,
-      streams: [{ url: buildMagnet(c.infoHash, c.trackers), quality: c.quality, audioLangs: c.langs }],
-    })
-    if (out.length >= 6) break
+  candidateLoop: for (const candidate of candidates) {
+    for (const lang of candidate.langs) {
+      const key = lang + '|' + candidate.quality
+      const seenCount = seen.get(key) ?? 0
+      // Keep several independent releases for each dub. Resolution verifies live peers and real
+      // audio later, so limiting this to two made one stale swarm plus one subtitle-only release
+      // look like the language was unavailable even when another Torrentio candidate could play.
+      if (seenCount >= 4) continue
+      seen.set(key, seenCount + 1)
+      const language = TORRENT_LANG_NAMES[lang] ?? lang.toUpperCase()
+      const quality = candidate.quality.replace(/p$/i, 'P')
+      out.push({
+        providerId: 'p2p-' + candidate.infoHash.slice(0, 10) + '-' + lang,
+        providerName: 'Torrent - ' + language + '-' + quality,
+        streams: [{ url: buildMagnet(candidate.infoHash, candidate.trackers, candidate.fileIdx), quality: candidate.quality, audioLangs: [lang] }],
+      })
+      if (out.length >= 24) break candidateLoop
+    }
   }
-  log(`Torrentio: ${all.length} releases → ${out.length} dubbed candidates`)
+  log('Torrentio: ' + all.length + ' releases → ' + out.length + ' dubbed candidates')
   return out
 }
 
@@ -221,10 +305,9 @@ const VIDEO_EXT = /\.(mp4|mkv|avi|m4v|webm|mov)$/i
 // token -> the WebTorrent file being served (plus the audio language the user picked, so the
 // remux selects the right dub — and keeps selecting it across seek reloads, which re-hit this
 // server by token), for the range server below.
-const served = new Map<string, { file: any; audioLang: string }>()
+const served = new Map<string, { file: any; audioLang: string; audioStreamIndex: number | null }>()
 let server: http.Server | null = null
 let serverPort = 0
-let activeFF: ChildProcess | null = null
 
 // Resource-throttling: cap concurrent HTTP connections and active file-read streams.
 // Only the local player should be connecting; these limits defend against any errant
@@ -265,13 +348,13 @@ function serveDirect(file: any, req: http.IncomingMessage, res: http.ServerRespo
     const stream = file.createReadStream({ start, end })
     stream.on('error', () => res.destroy())
     stream.pipe(res)
-    req.on('close', () => stream.destroy())
+    res.on('close', () => stream.destroy())
   } else {
     res.writeHead(200, { ...headersBase, 'Content-Length': total })
     const stream = file.createReadStream()
     stream.on('error', () => res.destroy())
     stream.pipe(res)
-    req.on('close', () => stream.destroy())
+    res.on('close', () => stream.destroy())
   }
 }
 
@@ -280,21 +363,57 @@ function serveDirect(file: any, req: http.IncomingMessage, res: http.ServerRespo
 // (linear: time/duration × file size — the same estimate ffmpeg's own generic MKV seek uses, so
 // they align), then drive WebTorrent to download FROM that offset by opening a `createReadStream`
 // there and draining it. It resolves once a lead (`leadBytes`) has downloaded — guaranteeing the
-// region exists on disk before ffmpeg `-ss` reads it — and the SAME stream is kept alive and
-// returned so it keeps pulling pieces forward (ffmpeg, reading the on-disk file directly, doesn't
-// itself tell WebTorrent which pieces to fetch next). Caller destroys it on cleanup.
-function primeSeekRegion(file: any, byteOffset: number, leadBytes: number, timeoutMs: number): Promise<NodeJS.ReadableStream> {
+// region exists on disk before ffmpeg `-ss` reads it — and the SAME stream is kept flowing so it
+// keeps pulling pieces forward (ffmpeg, reading the on-disk file directly, doesn't itself tell
+// WebTorrent which pieces to fetch next).
+//
+// The driver must outlive the prime: if it dies, WebTorrent stops prioritising pieces ahead of the
+// playhead and ffmpeg walks into sparse (not-yet-written) file data a minute later — the delayed
+// "Stream Error". So a post-prime read error RE-ARMS a fresh stream from the last consumed byte
+// (bounded by MAX_SEEK_DRIVER_RESTARTS) instead of silently ending. A clean `end` needs no restart:
+// it means everything from here to EOF is already on disk. The caller destroys the handle when the
+// response closes.
+const MAX_SEEK_DRIVER_RESTARTS = 5
+interface SeekDriver { destroy: () => void }
+function primeSeekRegion(file: any, byteOffset: number, leadBytes: number, timeoutMs: number): Promise<SeekDriver> {
   return new Promise((resolve, reject) => {
     let downloaded = 0
     let settled = false
-    const driver: any = file.createReadStream({ start: byteOffset })
-    const t = setTimeout(() => { if (!settled) { settled = true; try { driver.destroy() } catch { /* ignore */ } ; reject(new Error('seek region unavailable (no data in time)')) } }, timeoutMs)
-    driver.on('data', (chunk: Buffer) => {
-      downloaded += chunk.length
-      if (!settled && downloaded >= leadBytes) { settled = true; clearTimeout(t); resolve(driver) }
-    })
-    driver.once('end', () => { if (!settled) { settled = true; clearTimeout(t); resolve(driver) } })
-    driver.once('error', (e: Error) => { if (!settled) { settled = true; clearTimeout(t); reject(e) } })
+    let closed = false
+    let restarts = 0
+    let current: any = null
+
+    const handle: SeekDriver = {
+      destroy() {
+        closed = true
+        try { current?.destroy() } catch { /* ignore */ }
+      },
+    }
+
+    const arm = (start: number) => {
+      const driver: any = file.createReadStream({ start })
+      current = driver
+      driver.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length
+        if (!settled && downloaded >= leadBytes) { settled = true; clearTimeout(t); resolve(handle) }
+      })
+      driver.once('end', () => { if (!settled) { settled = true; clearTimeout(t); resolve(handle) } })
+      driver.once('error', (e: Error) => {
+        if (!settled) { settled = true; clearTimeout(t); reject(e); return }
+        if (closed || restarts >= MAX_SEEK_DRIVER_RESTARTS) {
+          log(`seek driver stopped feeding ahead: ${e.message}`)
+          return
+        }
+        restarts++
+        log(`seek driver restart ${restarts} after: ${e.message}`)
+        arm(byteOffset + downloaded)
+      })
+    }
+
+    const t = setTimeout(() => {
+      if (!settled) { settled = true; handle.destroy(); reject(new Error('seek region unavailable (no data in time)')) }
+    }, timeoutMs)
+    arm(byteOffset)
   })
 }
 
@@ -308,7 +427,7 @@ function primeSeekRegion(file: any, byteOffset: number, leadBytes: number, timeo
 // buffered points. The output timeline restarts at 0; the player tracks a separate timeline offset.
 // snyk:disable-next-line
 // deepcode ignore CommandInjection: ffmpeg is run with static config and pre-validated inputs
-async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.ServerResponse, startSec: number, audioLang: string, totalDur: number) {
+async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.ServerResponse, startSec: number, audioLang: string, audioStreamIndex: number | null, totalDur: number) {
   if (!FFMPEG_BIN) { res.writeHead(500); res.end('ffmpeg unavailable'); return }
 
   // WebTorrent's `file.path` is RELATIVE to the torrent's download dir (e.g. "Movie.Folder/movie.mkv"),
@@ -331,23 +450,28 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   // forward past it). Lets the user jump anywhere — including the middle of the movie — not just to
   // already-buffered points. If the region can't be fetched in time (dead/slow swarm at that part),
   // return 503 so the player surfaces a loading/error state instead of a broken stream.
-  let seekDriver: NodeJS.ReadableStream | null = null
+  let seekDriver: SeekDriver | null = null
   if (startSec > 0 && inputPath && totalDur > 0 && typeof file.length === 'number' && file.length > 0) {
     const byteOffset = Math.min(file.length - 1, Math.max(0, Math.floor((startSec / totalDur) * file.length)))
     // CRITICAL for video: `-ss` + `-c:v copy` lands on the KEYFRAME at/before the target, which can be
     // a whole GOP (~up to 10s) EARLIER. Those bytes MUST be on disk or ffmpeg can't decode the video
     // (Chromium freezes on the last frame) even though the audio — which has no keyframe dependency —
-    // keeps playing. So prime a window that starts ~12s of video BEFORE the target and runs ~8s after,
-    // sized from the file's real bitrate (bytes/sec = length/duration), clamped to sane bounds.
+    // keeps playing. So prime a window that starts ~12s of video BEFORE the target, sized from the
+    // file's real bitrate (bytes/sec = length/duration), clamped to sane bounds.
     const bytesPerSec = file.length / totalDur
     const beforeBytes = Math.min(64 * 1024 * 1024, Math.max(4 * 1024 * 1024, Math.floor(12 * bytesPerSec)))
-    // 12s before (keyframe) + ~14s after, so the player's initial ~10s burst-read reads already-
-    // downloaded data before the 1.5× readrate pacing takes over.
-    const leadBytes = Math.min(96 * 1024 * 1024, Math.max(10 * 1024 * 1024, Math.floor(26 * bytesPerSec)))
+    // Forward cushion: ~12s before (keyframe) + ~54s after the target, i.e. a ~66s window at the
+    // file's real bitrate. The previous ~26s cushion was the delayed-failure bug: ffmpeg (paced at
+    // 1.5× real time) ate it in under a minute and then read sparse file data → the player's "Stream
+    // Error" a while AFTER a seek that had looked fine. A minute of lead plus real-time pacing below
+    // means the seek driver only has to sustain roughly playback bitrate to stay ahead.
+    const leadBytes = Math.min(256 * 1024 * 1024, Math.max(24 * 1024 * 1024, Math.floor(66 * bytesPerSec)))
     const primeStart = Math.max(0, byteOffset - beforeBytes)
     if (byteOffset > 0) {
       try {
-        seekDriver = await primeSeekRegion(file, primeStart, leadBytes, 60_000)
+        // 90s to fetch the (now larger) window. Exceeding it is a genuinely slow/starved swarm —
+        // fail with 503 below rather than starting a stream that is guaranteed to die mid-playback.
+        seekDriver = await primeSeekRegion(file, primeStart, leadBytes, 90_000)
       } catch (e) {
         log(`seek prime failed (start=${startSec}): ${(e as Error).message}`)
         res.writeHead(503, CORS_HEADERS)
@@ -363,11 +487,12 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   if (startSec > 0) {
     // Pace the disk reading on a seek. ffmpeg reads the on-disk file at disk speed, which outruns the
     // torrent download into not-yet-written (zero) bytes a few seconds in → the video froze on a frame
-    // while audio (already buffered) kept playing. So: burst the first ~10s (already primed) to fill
-    // the player's buffer, then read at 1.5× real-time — fast enough to keep a cushion, slow enough
-    // that the seekDriver (downloading forward) stays ahead. First play needs none of this: it reads
-    // the piece-aware pipe, which blocks until data is available.
-    args.push('-readrate_initial_burst', '10', '-readrate', '1.5', '-ss', String(startSec))
+    // while audio (already buffered) kept playing. So: burst the first ~8s (already primed) to fill
+    // the player's buffer, then read at REAL TIME (1.0×). 1.5× was still faster than the swarm could
+    // sustain — it drained the priming cushion and hit sparse data, surfacing as a delayed "Stream
+    // Error". At 1.0× the seek driver only has to match playback bitrate to keep the cushion intact.
+    // First play needs none of this: it reads the piece-aware pipe, which blocks until data arrives.
+    args.push('-readrate_initial_burst', '8', '-readrate', '1.0', '-ss', String(startSec))
   }
   // Input selection — two distinct cases:
   //  • FIRST PLAY (startSec === 0): stream through WebTorrent's `file.createReadStream()` (`-i
@@ -389,7 +514,7 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   // Select the requested dub (and put it first) when a language was picked; otherwise let ffmpeg
   // choose its default single audio stream. Without this a multi-audio MKV plays whichever track
   // ffmpeg deems "best" (most channels) — e.g. French even though the user picked Spanish.
-  const mapArgs = audioMapArgs(audioLang)
+  const mapArgs = audioMapArgs(audioLang, audioStreamIndex)
   args.push(
     ...mapArgs,
     '-c:v', 'copy',
@@ -411,12 +536,7 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   // it on a non-zero exit. Without this the renderer only ever sees a generic "Video failed to
   // load" with no way to tell WHY (HEVC video that can't be copied, a release with no usable audio,
   // truncated torrent input, …). The tail lands in ~/.config/KokoMovie logs for diagnosis.
-  if (activeFF) {
-    try { activeFF.kill('SIGKILL') } catch { /* ignore */ }
-    activeFF = null
-  }
   const ff: ChildProcess = spawn(FFMPEG_BIN, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-  activeFF = ff
   let errTail = ''
   ff.stderr?.on('data', (d) => { errTail = (errTail + d.toString()).slice(-2000) })
   ff.on('close', (code) => {
@@ -432,13 +552,10 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   ff.stdout?.pipe(res)
   const cleanup = () => {
     if (input) { try { (input as any).destroy?.() } catch { /* ignore */ } }
-    if (seekDriver) { try { (seekDriver as any).destroy?.() } catch { /* ignore */ } }
+    if (seekDriver) { try { seekDriver.destroy() } catch { /* ignore */ } }
     try { ff.kill('SIGKILL') } catch { /* ignore */ }
-    if (activeFF === ff) {
-      activeFF = null
-    }
   }
-  req.on('close', cleanup)
+  res.on('close', cleanup)
   ff.on('error', () => { try { res.destroy() } catch { /* ignore */ } })
 }
 
@@ -481,13 +598,28 @@ async function ensureServer(): Promise<number> {
         const token = url.pathname.replace(/^\/t\//, '').replace(/\.(mp4|stream)$/i, '')
         const entry = served.get(token)
         if (!entry) { res.writeHead(404, CORS_HEADERS); res.end('not found'); return }
-        const { file, audioLang } = entry
+        const { file, audioLang, audioStreamIndex } = entry
         const startSec = Math.max(0, parseFloat(url.searchParams.get('start') || '0') || 0)
         const totalDur = Math.max(0, parseFloat(url.searchParams.get('dur') || '0') || 0)
         const name: string = file.name ?? file.path ?? ''
-        // A requested dub must pass through ffmpeg even for MP4/WebM so the chosen language is first.
-        if (PLAYABLE_EXT.test(name) && !audioLang) serveDirect(file, req, res)
-        else serveTranscoded(file, req, res, startSec, audioLang, totalDur).catch((e) => {
+        // A requested dub must pass through FFmpeg even when the source container is natively
+        // playable. Chromium otherwise chooses the file's default track (usually English).
+        const direct = PLAYABLE_EXT.test(name) && audioStreamIndex === null
+        // Chromium probes media with HEAD before opening the GET stream. A HEAD request must never
+        // start FFmpeg: doing so used to create a remux that the following GET immediately killed,
+        // truncating the fragmented MP4 and surfacing a generic player Stream Error.
+        if (req.method === 'HEAD') {
+          const contentType = direct && /\.webm$/i.test(name) ? 'video/webm' : 'video/mp4'
+          const headers: Record<string, string | number> = { ...CORS_HEADERS, 'Content-Type': contentType }
+          if (direct) { headers['Accept-Ranges'] = 'bytes'; headers['Content-Length'] = file.length }
+          res.writeHead(200, headers)
+          res.end()
+          return
+        }
+        if (req.method !== 'GET') { res.writeHead(405, { ...CORS_HEADERS, Allow: 'GET, HEAD, OPTIONS' }); res.end(); return }
+        // MP4, M4V, and WebM use WebTorrent's native seekable stream; FFmpeg remuxes other containers.
+        if (direct) serveDirect(file, req, res)
+        else serveTranscoded(file, req, res, startSec, audioLang, audioStreamIndex, totalDur).catch((e) => {
           log(`serveTranscoded failed: ${(e as Error).message}`)
           try { res.destroy() } catch { /* ignore */ }
         })
@@ -542,10 +674,13 @@ async function waitForTorrentStart(file: any, torrent: any): Promise<void> {
 // already-added one), waits for metadata, selects the largest video file for sequential
 // streaming, and returns its served URL (the server remuxes non-MP4 containers on the fly).
 // Throws a user-readable message when the release has no video file or no peers are found.
-async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: string; transcoded: boolean }> {
+async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
+  url: string; transcoded: boolean; audioLang: string; requestedLang: string; audioLangs: string[]
+}> {
   const client = await getClient()
   const hashMatch = /btih:([a-z0-9]+)/i.exec(magnet)
   const infoHash = hashMatch ? hashMatch[1]!.toLowerCase() : ''
+  const requestedFileIdx = Math.max(0, Math.min(10_000, Number.parseInt(new URL(magnet).searchParams.get('x.km-file') ?? '0', 10) || 0))
 
   // Keep only a couple of torrents alive at once so the temp cache doesn't grow unbounded.
   const torrents: any[] = client.torrents ?? []
@@ -589,7 +724,7 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
     const hard = setTimeout(() => finish(() => reject(new Error('No peers found (timed out fetching torrent metadata)'))), 20_000)
   })
 
-  const file = pickFile(torrent.files ?? [], 0)
+  const file = pickFile(torrent.files ?? [], requestedFileIdx)
   if (!file) { throw new Error('This release has no video file') }
   const name: string = file.name ?? file.path ?? ''
 
@@ -603,19 +738,42 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{ url: st
     throw err
   }
 
-  const token = `${torrent.infoHash}-${torrent.files.indexOf(file)}`
-  served.set(token, { file, audioLang })
+  // Ask the file what audio it really carries, then report the language that will ACTUALLY play:
+  // the request if the release genuinely ships it, otherwise whatever `0:a:0?` will fall back to.
+  // An unreadable probe (empty result) leaves the requested language as the answer, exactly as
+  // before — this must never turn a working stream into a failure.
+  const requestedLang = (audioLang || '').toLowerCase().split(/[-_]/)[0] ?? ''
+  const probedTracks = requestedLang ? await probeAudioTracks(file) : []
+  const probedLangs = [...new Set(probedTracks.map((track) => track.lang).filter(Boolean))]
+  let effectiveLang = requestedLang
+  let selectedAudioStreamIndex: number | null = null
+  if (requestedLang) {
+    const selectedTrack = probedTracks.find((track) => track.lang === requestedLang)
+    if (!selectedTrack) {
+      const described = probedTracks.map((track) => track.lang || 'und').join(', ') || 'unreadable'
+      log(`"${name}" has no verified ${requestedLang} audio (streams: ${described})`)
+      try { torrent.destroy() } catch { /* ignore */ }
+      throw new Error('Release does not contain verified ' + (TORRENT_LANG_NAMES[requestedLang] ?? requestedLang.toUpperCase()) + ' audio')
+    }
+    effectiveLang = selectedTrack.lang
+    selectedAudioStreamIndex = selectedTrack.streamIndex
+  }
+
+  const token = `${torrent.infoHash}-${torrent.files.indexOf(file)}-${audioLang || "default"}`
+  served.set(token, { file, audioLang, audioStreamIndex: selectedAudioStreamIndex })
   const port = await ensureServer()
   // MP4/WebM play directly (seekable); other containers are remuxed to MP4 by the server. The
   // .mp4 suffix keeps the player's isDirectVideo (native <video>) path happy either way.
   // Use `localhost` (not 127.0.0.1) so the URL matches the renderer CSP's `media-src
   // http://localhost:*` allowance — CSP treats the two as different origins (DN-048).
   const url = `http://localhost:${port}/t/${token}.mp4`
-  const transcoded = !PLAYABLE_EXT.test(name) || !!audioLang
-  log(`streaming "${name}" (${transcoded ? 'transcode' : 'direct'}) → ${url}`)
+  const transcoded = !PLAYABLE_EXT.test(name) || selectedAudioStreamIndex !== null
+  log(`streaming "${name}" (${transcoded ? 'transcode' : 'direct'}, audio=${effectiveLang || 'default'}) → ${url}`)
   // `transcoded` tells the renderer the stream is a progressive remux (unknown duration), so it
   // can show the TMDB runtime as the total instead of the buffered-end time growing in real time.
-  return { url, transcoded }
+  // `audioLang` is what will really be audible — the renderer labels the Audio menu with THIS, and
+  // a language hunt uses it to reject a release that only advertised the dub it doesn't ship.
+  return { url, transcoded, audioLang: effectiveLang, requestedLang, audioLangs: probedLangs }
 }
 
 export function registerTorrentIpc() {

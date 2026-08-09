@@ -1,8 +1,8 @@
 # KokoMovie Current State
 
-**Audit date:** 2026-08-03
-**Baseline:** v1.5.1 tagged locally, superseding the shipped v1.4.1
-**Rollback SHA:** dd44816b794fe01e35c5b964af6a3bae3bd2f607
+**Audit date:** 2026-08-08
+**Baseline:** v1.5.2 optimization branch based on tagged v1.5.1
+**Rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
 
 ## Runtime
 

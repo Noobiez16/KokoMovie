@@ -248,14 +248,18 @@ export async function extractStream(
     }
     activeExtractionWindows.add(win)
 
-    win.webContents.on('will-navigate', (event, targetUrl) => {
+    const preventOpaqueNavigation = (event: Electron.Event, targetUrl: string) => {
       try {
-        const protocol = new URL(targetUrl).protocol
-        if (protocol !== 'https:' && protocol !== 'http:') event.preventDefault()
+        const parsed = new URL(targetUrl)
+        const allowed = parsed.protocol === 'https:' || parsed.protocol === 'http:' || targetUrl === 'about:blank'
+        if (!allowed) event.preventDefault()
       } catch {
         event.preventDefault()
       }
-    })
+    }
+    win.webContents.on('will-navigate', preventOpaqueNavigation)
+    const frameNavigationEvents = win.webContents as unknown as { on: (event: 'will-frame-navigate', listener: typeof preventOpaqueNavigation) => void }
+    frameNavigationEvents.on('will-frame-navigate', preventOpaqueNavigation)
 
     win.webContents.setWindowOpenHandler((details) => {
       logExtraction(`[Extractor] Blocked popup window: ${details.url}`)
@@ -293,9 +297,13 @@ export async function extractStream(
       try { providerSession.webRequest.onSendHeaders(null as any) } catch { /* ignore */ }
       try { providerSession.webRequest.onHeadersReceived(null as any) } catch { /* ignore */ }
       try { providerSession.webRequest.onBeforeRequest(null as any) } catch { /* ignore */ }
-      try { win.destroy() } catch { /* already destroyed */ }
-      activeExtractionWindows.delete(win)
-      void providerSession.clearStorageData().catch(() => {})
+      // Destroy outside Chromium's navigation/webRequest callback stack. Synchronous teardown
+      // during a failed frame navigation can trip Chromium's opaque-origin SiteInfo checks.
+      setImmediate(() => {
+        try { if (!win.isDestroyed()) win.destroy() } catch { /* already destroyed */ }
+        activeExtractionWindows.delete(win)
+        void providerSession.clearStorageData().catch(() => {})
+      })
       resolve(result)
     }
 

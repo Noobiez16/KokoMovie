@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { userApi, type HistoryItem } from '../api/user'
@@ -60,10 +60,12 @@ export function HistoryPage() {
   // Unify the formerly-split "In Progress" and "Completed" streams into one Viewing History
   // collection, newest first by last-viewed timestamp. Completion is now a per-row badge
   // rather than a separate tab.
-  const items: HistoryItem[] = data?.pages.flatMap((p) => p.data) ?? []
-  const historyItems = [...items].sort(
-    (a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime(),
-  )
+  const historyItems = useMemo(() => {
+    const items: HistoryItem[] = data?.pages.flatMap((page) => page.data) ?? []
+    return [...items].sort(
+      (a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime(),
+    )
+  }, [data?.pages])
 
   const handleItemClick = (item: HistoryItem, forceResume = false) => {
     const pct = item.durationSeconds > 0
