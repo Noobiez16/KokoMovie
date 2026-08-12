@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -12,6 +13,7 @@ import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/Ca
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 
 export function SeriesPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const genre = searchParams.get('genre') || undefined
@@ -63,7 +65,7 @@ export function SeriesPage() {
       return (
         <AppLayout>
           <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-            Could not reach catalog service.
+            {t('catalog.serviceError')}
           </div>
         </AppLayout>
       )
@@ -81,25 +83,25 @@ export function SeriesPage() {
               <button
                 onClick={() => navigate('/series')}
                 className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-all active:scale-95"
-                title="Back to TV Shows"
+                title={t('catalog.backSeries')}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <div>
-                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">TV Shows Category</span>
+                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">{t('catalog.seriesCategory')}</span>
                 <h1 className="text-2xl font-bold text-white mt-1 leading-none">{genreTitle}</h1>
               </div>
             </div>
 
             {totalPages > 1 && (
-              <span className="text-sm text-purple-300/50 font-medium">Page {page} / {totalPages}</span>
+              <span className="text-sm text-purple-300/50 font-medium">{t('catalog.pageLabel', { page, total: totalPages })}</span>
             )}
           </div>
 
           {items.length === 0 ? (
-            <div className="text-purple-300/40 py-32 text-center text-sm">No series found in this category.</div>
+            <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noSeries')}</div>
           ) : (
             <>
               <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
@@ -129,7 +131,7 @@ export function SeriesPage() {
     return (
       <AppLayout>
         <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-          Could not reach catalog service.
+          {t('catalog.serviceError')}
         </div>
       </AppLayout>
     )
@@ -149,7 +151,7 @@ export function SeriesPage() {
       <div className="pt-6 pb-12 animate-fade-in">
         {trending.length > 0 && (
           <ContentRow
-            title="Trending TV Shows"
+            title={t('catalog.trendingSeries')}
             items={trending}
             onViewAll={() => navigate('/series?genre=trending')}
           />
@@ -165,7 +167,7 @@ export function SeriesPage() {
         ))}
 
         {!featured && trending.length === 0 && rows.length === 0 && (
-          <div className="text-purple-300/40 py-32 text-center text-sm">No series available yet.</div>
+          <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noSeriesAvailable')}</div>
         )}
       </div>
     </AppLayout>

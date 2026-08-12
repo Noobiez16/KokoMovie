@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { userApi, type HistoryItem } from '../api/user'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -11,11 +12,8 @@ function formatDuration(secs: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 export function HistoryPage() {
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'history' | 'list'>('history')
 
@@ -25,7 +23,7 @@ export function HistoryPage() {
   const queryClient = useQueryClient()
   const removeMutation = useMutation({
     // Deleting a history entry must also clear the matching resume position, otherwise
-    // the title keeps reappearing in "Continue Watching" (the two are backed by
+    // the title keeps reappearing in the resume row (the two are backed by
     // separate stores). We delete both, then refresh both Home-screen modules.
     mutationFn: async (item: HistoryItem) => {
       await userApi.deleteHistoryItem(item.watchedAtContentId, profileId)
@@ -91,11 +89,11 @@ export function HistoryPage() {
   return (
     <AppLayout>
       <div className="px-6 py-8">
-        <h1 className="text-white text-2xl font-bold mb-6">Viewing History</h1>
+        <h1 className="text-white text-2xl font-bold mb-6">{t('history.title')}</h1>
 
         {/* Glassmorphic Tabs — Viewing History (unified) vs the saved Watchlist */}
         <div className="flex gap-2 mb-6">
-          {([['history', 'Viewing History'], ['list', 'My List']] as const).map(([tab, label]) => (
+          {([['history', t('history.title')], ['list', t('history.myList')]] as const).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -119,13 +117,13 @@ export function HistoryPage() {
             )}
 
             {isError && (
-              <p className="text-white/40 text-center py-16">Failed to load history. Is the user service running?</p>
+              <p className="text-white/40 text-center py-16">{t('history.loadError')}</p>
             )}
 
             {!isLoading && historyItems.length === 0 && (
               <div className="text-center text-white/20 py-16 bg-white/[0.02] backdrop-blur-md rounded-2xl max-w-2xl">
                 <p className="text-5xl mb-4">📺</p>
-                <p className="text-sm font-medium">Nothing here yet — what you watch will show up here.</p>
+                <p className="text-sm font-medium">{t('history.emptyDescription')}</p>
               </div>
             )}
 
@@ -158,7 +156,7 @@ export function HistoryPage() {
                             S{item.seasonNumber}:E{item.episodeNumber} {item.episodeTitle ? `— ${item.episodeTitle}` : ''}
                           </p>
                         )}
-                        <p className="text-white/40 text-xs mt-0.5">{formatDate(item.watchedAt)}</p>
+                        <p className="text-white/40 text-xs mt-0.5">{new Date(item.watchedAt).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
                         {item.durationSeconds > 0 && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <div className="flex-1 max-w-32 h-0.5 bg-white/10 rounded overflow-hidden">
@@ -176,11 +174,11 @@ export function HistoryPage() {
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                             </svg>
-                            Completed
+                            {t('history.completed')}
                           </span>
                         ) : (
                           <span className="inline-flex items-center text-violet-300 text-xs font-semibold px-2 py-0.5 rounded-lg bg-violet-500/15 border border-violet-500/20">
-                            In Progress · {pct}%
+                            {t('history.inProgress', { percent: pct })}
                           </span>
                         )}
                         {!isCompleted && (
@@ -194,7 +192,7 @@ export function HistoryPage() {
                             <svg className="w-2.5 h-2.5 fill-current ml-0.5" viewBox="0 0 24 24">
                               <path d="M8 5v14l11-7z" />
                             </svg>
-                            Continue
+                            {t('history.continue')}
                           </button>
                         )}
                         {item.durationSeconds > 0 && (
@@ -211,7 +209,7 @@ export function HistoryPage() {
                           <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
                             <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
                           </svg>
-                          Remove
+                          {t('common.remove')}
                         </button>
                       </div>
                     </div>
@@ -227,7 +225,7 @@ export function HistoryPage() {
                   disabled={isFetchingNextPage}
                   className="bg-white/5 text-white/70 hover:text-white px-6 py-2.5 rounded-xl text-sm transition-all hover:bg-white/10 disabled:opacity-50"
                 >
-                  {isFetchingNextPage ? 'Loading...' : 'Load more'}
+                  {isFetchingNextPage ? t('common.loading') : t('history.loadMore')}
                 </button>
               </div>
             )}
@@ -241,13 +239,13 @@ export function HistoryPage() {
             )}
 
             {isWatchlistError && (
-              <p className="text-white/40 text-center py-16">Failed to load watchlist. Is the user service running?</p>
+              <p className="text-white/40 text-center py-16">{t('history.watchlistLoadError')}</p>
             )}
 
             {!isWatchlistLoading && !isWatchlistError && watchlistItems.length === 0 && (
               <div className="text-center text-white/20 py-16 bg-white/[0.02] backdrop-blur-md rounded-2xl max-w-2xl">
                 <p className="text-5xl mb-4">⭐</p>
-                <p className="text-sm font-medium">Your list is empty.</p>
+                <p className="text-sm font-medium">{t('history.emptyList')}</p>
               </div>
             )}
 
@@ -268,8 +266,8 @@ export function HistoryPage() {
                     )}
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-white font-medium text-sm truncate">{item.title || 'Unknown Title'}</p>
-                      <p className="text-white/40 text-xs mt-0.5">Added {formatDate(item.addedAt)}</p>
+                      <p className="text-white font-medium text-sm truncate">{item.title || t('history.unknownTitle')}</p>
+                      <p className="text-white/40 text-xs mt-0.5">{t('history.addedOn', { date: new Date(item.addedAt).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric', year: 'numeric' }) })}</p>
                     </div>
 
                     <div className="flex-shrink-0 flex items-center gap-2 pr-2">

@@ -1,8 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { providersApi } from '../api/providers'
 import { AppLayout } from '../components/layout/AppLayout'
 
 export function ProvidersPage() {
+  const { t } = useTranslation()
 
   const qc = useQueryClient()
 
@@ -21,17 +23,15 @@ export function ProvidersPage() {
   return (
     <AppLayout>
       <div className="px-8 py-8 max-w-2xl">
-        <h1 className="text-2xl font-bold text-white mb-2">Stream Providers</h1>
+        <h1 className="text-2xl font-bold text-white mb-2">{t('providers.title')}</h1>
         <p className="text-white/50 text-sm mb-8">
-          Providers are third-party sources that KokoMovie uses to find video streams.
-          Enable or disable them below. When you play content, KokoMovie will try each enabled
-          provider in order until a stream is found.
+          {t('providers.fullDescription')}
         </p>
 
         {isLoading ? (
           <div role="status" aria-live="polite" className="flex items-center gap-3 text-white/40">
             <div className="w-5 h-5 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
-            Loading providers...
+            {t('providers.loading')}
           </div>
         ) : (
           <div className="space-y-3">
@@ -43,10 +43,10 @@ export function ProvidersPage() {
                 <div>
                   <p className="text-white font-medium flex items-center gap-2">
                     {p.name}
-                    {p.circuitOpen && (                      <span className="text-amber-300 text-[10px] font-semibold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 uppercase tracking-wider">                        Temporarily unavailable                      </span>                    )}
+                    {p.circuitOpen && (                      <span className="text-amber-300 text-[10px] font-semibold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 uppercase tracking-wider">                        {t('providers.temporarilyUnavailable')}                      </span>                    )}
                     {['vidbinge', 'vidsrc', 'vidsrc-su'].includes(p.id) && (
                       <span className="text-km-accent text-[10px] font-semibold bg-km-accent/15 px-1.5 py-0.5 rounded border border-km-accent/25 uppercase tracking-wider">
-                        Recommended
+                        {t('providers.recommended')}
                       </span>
                     )}
                   </p>
@@ -75,7 +75,7 @@ export function ProvidersPage() {
                   type="button"
                   role="switch"
                   aria-checked={p.enabled}
-                  aria-label={`${p.enabled ? 'Disable' : 'Enable'} ${p.name}`}
+                  aria-label={t(p.enabled ? 'providers.disableProvider' : 'providers.enableProvider', { name: p.name })}
                   onClick={() => toggleMutation.mutate({ id: p.id, enabled: !p.enabled })}
                   disabled={toggleMutation.isPending}
                   style={{
@@ -115,10 +115,7 @@ export function ProvidersPage() {
 
         <div className="mt-8 p-4 bg-white/5 rounded-lg border border-white/10">
           <p className="text-white/40 text-xs leading-relaxed">
-            <span className="text-white/60 font-medium">Note:</span> Stream extraction opens
-            a hidden browser window that loads the provider's embed page and intercepts
-            the video URL. This is similar to how browser extensions like Stremio work.
-            Streams are found within ~10–20 seconds.
+            <span className="text-white/60 font-medium">{t('providers.noteLabel')}</span> {t('providers.note')}
           </p>
         </div>
       </div>

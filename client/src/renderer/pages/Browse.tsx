@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
 import { playbackApi } from '../api/playback'
@@ -13,6 +14,7 @@ import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/Ca
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 
 export function BrowsePage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const genre = searchParams.get('genre') || undefined
@@ -56,7 +58,7 @@ export function BrowsePage() {
 
   const queryClient = useQueryClient()
 
-  // Remove a title from Continue Watching: drop it from the UI immediately (optimistic), then
+  // Remove a title from the resume row: drop it from the UI immediately (optimistic), then
   // cascade-delete its in-progress records so it also leaves Viewing History's In-Progress.
   const handleRemoveFromHistory = useCallback(async (mediaId: string) => {
     const key = ['continue-watching', profileId, tmdbApiKey]
@@ -91,7 +93,7 @@ export function BrowsePage() {
       return (
         <AppLayout>
           <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-            Could not reach catalog service.
+            {t('catalog.serviceError')}
           </div>
         </AppLayout>
       )
@@ -109,25 +111,25 @@ export function BrowsePage() {
               <button
                 onClick={() => navigate('/browse')}
                 className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-all active:scale-95"
-                title="Back to Home"
+                title={t('catalog.backHome')}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <div>
-                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">Home Row Category</span>
+                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">{t('catalog.homeCategory')}</span>
                 <h1 className="text-2xl font-bold text-white mt-1 leading-none">{genreTitle}</h1>
               </div>
             </div>
 
             {totalPages > 1 && (
-              <span className="text-sm text-purple-300/50 font-medium">Page {page} / {totalPages}</span>
+              <span className="text-sm text-purple-300/50 font-medium">{t('catalog.pageLabel', { page, total: totalPages })}</span>
             )}
           </div>
 
           {items.length === 0 ? (
-            <div className="text-purple-300/40 py-32 text-center text-sm">No items found in this category.</div>
+            <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noItems')}</div>
           ) : (
             <>
               <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
@@ -148,7 +150,7 @@ export function BrowsePage() {
       <div className="min-h-screen bg-km-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-2 border-purple-500/10 border-t-km-accent rounded-full animate-spin" />
-          <p className="text-purple-300/40 text-sm font-medium tracking-wide">Loading...</p>
+          <p className="text-purple-300/40 text-sm font-medium tracking-wide">{t('common.loading')}</p>
         </div>
       </div>
     )
@@ -158,7 +160,7 @@ export function BrowsePage() {
     return (
       <AppLayout>
         <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-          Could not reach catalog service.
+          {t('catalog.serviceError')}
         </div>
       </AppLayout>
     )
@@ -198,9 +200,9 @@ export function BrowsePage() {
               <path d="M6 20.25h12m-7.5-3v3m-4.875-3h16.5a1.125 1.125 0 000-2.25H3.375a1.125 1.125 0 000 2.25zm.375-12.375h15.75" />
             </svg>
           </div>
-          <h2 className="text-white font-bold text-lg">No content yet</h2>
+          <h2 className="text-white font-bold text-lg">{t('catalog.noContent')}</h2>
           <p className="text-purple-300/40 text-sm max-w-sm leading-relaxed">
-            Add your TMDB API key to <code className="text-purple-200 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/10">.env</code> and restart to see movies and TV shows.
+            {t('catalog.addKeyInSettings')}
           </p>
         </div>
       </AppLayout>
@@ -216,7 +218,7 @@ export function BrowsePage() {
       <div className="pt-6 pb-12 animate-fade-in">
         {mappedCw.length > 0 && (
           <ContentRow
-            title="Continue Watching"
+            title={t('catalog.continueWatching')}
             items={mappedCw}
             onRemove={handleRemoveFromHistory}
           />
@@ -224,7 +226,7 @@ export function BrowsePage() {
 
         {trending.length > 0 && (
           <ContentRow
-            title="Trending Now"
+            title={t('catalog.trending')}
             items={trending}
             onViewAll={() => navigate('/browse?genre=trending')}
           />

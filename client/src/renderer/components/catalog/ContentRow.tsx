@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { ContentCard } from './ContentCard'
 import type { ContentSummary } from '../../api/catalog'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   title: string
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: Props) {
+  const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
 
   const scroll = (dir: 'left' | 'right') => {
@@ -30,7 +32,7 @@ export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: P
             onClick={onViewAll}
             className="text-violet-400 text-xs font-semibold hover:text-violet-300 transition-colors flex items-center gap-1 group/btn"
           >
-            See all
+            {t('catalog.seeAll')}
             <svg className="w-3 h-3 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path d="m9 18 6-6-6-6" />
             </svg>

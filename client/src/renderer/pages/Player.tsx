@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useParams, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { usePlayerStore, type CachedStream } from '../store/player'
+import { useTranslation } from 'react-i18next'
 
 /**
  * Thin launcher for the /player route. The actual <VideoPlayer> lives in the global
@@ -9,6 +10,7 @@ import { usePlayerStore, type CachedStream } from '../store/player'
  * playback request on the store, then render a black backdrop while the host paints.
  */
 export function PlayerPage() {
+  const { t } = useTranslation()
   const { contentId, episodeId } = useParams<{ contentId: string; episodeId?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -55,5 +57,5 @@ export function PlayerPage() {
   if (!contentId) return <Navigate to="/browse" replace />
 
   // Backdrop only — PlayerHost renders the fullscreen player on top (z-[60]).
-  return <div className="fixed inset-0 bg-black z-40" />
+  return <div className="fixed inset-0 bg-black z-40" aria-label={t('player.startingPlayback')} />
 }

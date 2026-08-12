@@ -1,5 +1,8 @@
 import { spawnSync } from 'node:child_process'
-const audit = spawnSync('npm', ['audit', '--omit=dev', '--json'], { encoding: 'utf8' })
+import { resolveNpmCliInvocation } from './npm-cli.mjs'
+
+const npm = resolveNpmCliInvocation(['audit', '--omit=dev', '--json'])
+const audit = spawnSync(npm.executable, npm.args, { encoding: 'utf8' })
 let report
 try {
   report = JSON.parse(audit.stdout)

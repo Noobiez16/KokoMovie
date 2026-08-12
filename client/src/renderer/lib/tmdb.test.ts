@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   backdropUrl,
+  createTmdbClient,
   decodeTmdbContentId,
   decodeTmdbEpisodeId,
   episodeRank,
@@ -12,6 +13,8 @@ import {
   tmdbType,
   tmdbYear,
 } from './tmdb'
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('deterministic TMDB identifiers', () => {
   it.each([
@@ -63,5 +66,30 @@ describe('TMDB presentation helpers', () => {
     expect(isV4Token('short-v3-api-key')).toBe(false)
     expect(isV4Token('eyJheader.payload.signature')).toBe(true)
     expect(isV4Token('x'.repeat(41))).toBe(true)
+  })
+})
+
+describe('localized TMDB requests', () => {
+  it('adds the selected locale to every metadata endpoint', async () => {
+    const tmdbRequest = vi.fn(async (_path: string, _params: Record<string, string>) => ({
+      body: JSON.stringify({ results: [], total_results: 0, total_pages: 1 }),
+      source: 'network' as const,
+      stale: false,
+      fetchedAt: new Date().toISOString(),
+    }))
+    vi.stubGlobal('window', { electronAPI: { tmdbRequest } })
+    const client = createTmdbClient('test-api-key', 'es-ES')
+
+    await Promise.all([
+      client.trending(), client.popularMovies(), client.popularTv(), client.topRatedMovies(), client.topRatedTv(),
+      client.discoverMovie(28), client.discoverTv(18), client.searchMulti('matrix'), client.getMovie(603),
+      client.getTv(1399), client.getSeason(1399, 1), client.getMovieVideos(603), client.getTvVideos(1399),
+      client.getSimilarMovies(603), client.getSimilarTv(1399),
+    ])
+
+    expect(tmdbRequest).toHaveBeenCalledTimes(15)
+    for (const [, params] of tmdbRequest.mock.calls) {
+      expect(params).toMatchObject({ language: 'es-ES' })
+    }
   })
 })

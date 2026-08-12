@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cachedTmdbItems, findCachedTmdbItem, mergeTmdbItems, searchCachedTmdb } from '../../main/tmdb-cache-policy'
+import { cachedTmdbItems, findCachedTmdbItem, mergeTmdbItems, searchCachedTmdb, tmdbRequestCacheKey } from '../../main/tmdb-cache-policy'
 
 const rows = [
   {
@@ -18,6 +18,15 @@ const rows = [
 ]
 
 describe('TMDB cache policy', () => {
+  it('keeps localized request caches separate while sorting parameter order', () => {
+    const english = tmdbRequestCacheKey('/movie/603', { language: 'en-US', page: '1' })
+    const reorderedEnglish = tmdbRequestCacheKey('/movie/603', { page: '1', language: 'en-US' })
+    const spanish = tmdbRequestCacheKey('/movie/603', { language: 'es-ES', page: '1' })
+
+    expect(reorderedEnglish).toBe(english)
+    expect(spanish).not.toBe(english)
+  })
+
   it('normalizes page items and ignores corrupt rows', () => {
     expect(cachedTmdbItems(rows)).toMatchObject([
       { id: 10, title: 'Local Movie', media_type: 'movie' },

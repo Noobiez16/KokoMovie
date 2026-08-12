@@ -7,13 +7,11 @@ import { LOCAL_PROFILE } from '../lib/local-identity'
 import { AppLayout } from '../components/layout/AppLayout'
 import tmdbLogo from '../assets/tmdb/tmdb-logo.svg'
 import { ToggleSwitch } from '../components/ui/ToggleSwitch'
-
-const LANGUAGES = [
-  { code: 'en-US', label: 'English (US)' },
-  { code: 'es-ES', label: 'Español' },
-  { code: 'fr-FR', label: 'Français' },
-  { code: 'pt-BR', label: 'Português (BR)' },
-]
+import { LanguageSelect } from '../components/ui/LanguageSelect'
+import { useTranslation } from 'react-i18next'
+import { normalizeLocale, type AppLocale } from '../../main/locales'
+import { applyLocale } from '../i18n/locale-controller'
+import { createBrowserLocaleDependencies } from '../i18n/LocaleBootstrap'
 
 const RATINGS = ['G', 'PG', 'PG-13', 'R', 'TV-MA'] as const
 
@@ -68,6 +66,7 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void 
 }
 
 function SaveToast({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }) {
+  const { t } = useTranslation()
   if (status === 'idle') return null
   return (
     <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-2xl backdrop-blur-lg transition-all duration-300 animate-slide-up flex items-center gap-2.5 ${
@@ -80,7 +79,7 @@ function SaveToast({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }
           <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
-          Settings saved
+          {t('settings.settingsSaved')}
         </>
       )}
       {status === 'error' && (
@@ -88,13 +87,13 @@ function SaveToast({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }
           <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
-          Failed to save. Try again.
+          {t('common.failedToSave')}
         </>
       )}
       {status === 'saving' && (
         <>
           <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
-          Saving...
+          {t('common.saving')}
         </>
       )}
     </div>
@@ -104,6 +103,7 @@ function SaveToast({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }
 // ─── TMDB Instructions Panel ─────────────────────────────────────────────────
 
 function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }) {
+  const { t } = useTranslation()
   return (
     <div className="mt-4">
       <button
@@ -113,27 +113,23 @@ function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
         <svg className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        {isOpen ? 'Hide instructions' : 'How to get a TMDB API Key'}
+        {isOpen ? t('settings.hideInstructions') : t('settings.getTmdbKey')}
       </button>
 
       <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isOpen ? 'max-h-[600px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
         <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-5 space-y-4">
           <p className="text-white/50 text-xs leading-relaxed">
-            TMDB (The Movie Database) provides free API keys for personal use. Follow these steps:
+            {t('settings.tmdbInstructionsIntro')}
           </p>
 
           <ol className="space-y-3">
             {[
-              { step: '1', title: 'Create an account', desc: (
-                <>Go to <a href="https://www.themoviedb.org/signup" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline underline-offset-2 transition-colors">themoviedb.org/signup</a> and create a free account (or log in if you already have one).</>
-              )},
-              { step: '2', title: 'Verify your email', desc: 'Check your inbox and click the verification link.' },
-              { step: '3', title: 'Go to API settings', desc: (
-                <>Navigate to <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline underline-offset-2 transition-colors">Settings → API</a> in your TMDB account.</>
-              )},
-              { step: '4', title: 'Request an API key', desc: 'Click "Create" or "Request an API Key". Select "Developer" as the type. Fill in the application details (you can use "Personal Use" as the description).' },
-              { step: '5', title: 'Copy your API Key', desc: 'Once approved, copy the "API Key (v3 auth)" value. This is typically a 32-character alphanumeric string.' },
-              { step: '6', title: 'Paste it here', desc: 'Paste the key in the field above and click "Validate Key" to confirm it works.' },
+              { step: '1', title: t('settings.tmdbStep1Title'), desc: t('settings.tmdbStep1') },
+              { step: '2', title: t('settings.tmdbStep2Title'), desc: t('settings.tmdbStep2') },
+              { step: '3', title: t('settings.tmdbStep3Title'), desc: t('settings.tmdbStep3') },
+              { step: '4', title: t('settings.tmdbStep4Title'), desc: t('settings.tmdbStep4') },
+              { step: '5', title: t('settings.tmdbStep5Title'), desc: t('settings.tmdbStep5') },
+              { step: '6', title: t('settings.tmdbStep6Title'), desc: t('settings.tmdbStep6') },
             ].map(({ step, title, desc }) => (
               <li key={step} className="flex gap-3">
                 <span className="shrink-0 w-6 h-6 rounded-full bg-violet-500/20 text-violet-400 text-xs font-bold flex items-center justify-center mt-0.5">
@@ -152,7 +148,7 @@ function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="text-white/40 text-[11px] leading-relaxed">
-              Your API key is stored <strong className="text-white/60">locally on this device only</strong> and is never shared with KokoMovie servers. It is sent directly to TMDB's servers to fetch movie/show data.
+              {t('settings.tmdbKeyPrivacy')}
             </p>
           </div>
         </div>
@@ -164,6 +160,7 @@ function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
 // ─── Main Settings Page ──────────────────────────────────────────────────────
 
 export function SettingsPage() {
+  const { t, i18n } = useTranslation()
   const activeProfile = LOCAL_PROFILE
   const { tmdbApiKey, setTmdbApiKey, clearTmdbApiKey } = useSettingsStore()
   const qc = useQueryClient()
@@ -330,6 +327,17 @@ export function SettingsPage() {
     onError: () => setSaveStatus('error'),
   })
 
+  async function handleLanguageChange(locale: AppLocale) {
+    setSaveStatus('saving')
+    try {
+      await applyLocale(locale, createBrowserLocaleDependencies(qc))
+      await qc.invalidateQueries({ queryKey: ['preferences', profileId] })
+      flashSaved()
+    } catch {
+      setSaveStatus('error')
+    }
+  }
+
   async function handleExport() {
     setPortabilityBusy(true)
     try {
@@ -404,8 +412,8 @@ export function SettingsPage() {
       <div className="px-6 py-8 max-w-2xl animate-fade-in flex flex-col h-full overflow-hidden">
         {/* Page Header */}
         <div className="mb-6 shrink-0">
-          <h1 className="text-white text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-white/40 text-sm mt-1">Manage local preferences, privacy, downloads, and API configuration.</p>
+          <h1 className="text-white text-2xl font-bold tracking-tight">{t('settings.title')}</h1>
+          <p className="text-white/40 text-sm mt-1">{t('settings.description')}</p>
         </div>
 
         {/* Tab Navigation */}
@@ -413,7 +421,7 @@ export function SettingsPage() {
           {[
             {
               id: 'preferences',
-              label: 'Preferences',
+              label: t('settings.preferences'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -422,7 +430,7 @@ export function SettingsPage() {
             },
             {
               id: 'api',
-              label: 'API Configuration',
+              label: t('settings.apiConfiguration'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-2 4a5 5 0 110-10 5 5 0 010 10zM19 9h3m-3 3h3m-9 3h-2a2 2 0 00-2 2v3h6v-3a2 2 0 00-2-2z" />
@@ -431,7 +439,7 @@ export function SettingsPage() {
             },
             {
               id: 'downloads',
-              label: 'Downloads',
+              label: t('settings.downloads'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -440,7 +448,7 @@ export function SettingsPage() {
             },
             {
               id: 'privacy',
-              label: 'Privacy',
+              label: t('settings.privacy'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -485,26 +493,22 @@ export function SettingsPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     )}
-                    title="Playback"
-                    description="Language, autoplay, and content filtering"
+                    title={t('settings.playback')}
+                    description={t('settings.playbackDescription')}
                   >
-                    <SettingRow label="Interface Language">
-                      <select
-                        value={prefs.language}
-                        onChange={(e) => updateMutation.mutate({ language: e.target.value })}
-                        className="bg-white/[0.06] border border-white/[0.12] text-white text-sm rounded-lg px-3 py-1.5 min-w-40 focus:border-violet-500 focus:outline-none transition-colors cursor-pointer"
-                      >
-                        {LANGUAGES.map((l) => (
-                          <option key={l.code} value={l.code}>{l.label}</option>
-                        ))}
-                      </select>
+                    <SettingRow label={t('settings.interfaceLanguage')} description={t('settings.languageDescription')}>
+                      <LanguageSelect
+                        value={normalizeLocale(i18n.language || prefs.language)}
+                        disabled={saveStatus === 'saving'}
+                        onChange={(locale) => { void handleLanguageChange(locale) }}
+                      />
                     </SettingRow>
 
-                    <SettingRow label="Autoplay Next Episode" description="Automatically play the next episode when one ends">
+                    <SettingRow label={t('settings.autoplay')} description={t('settings.autoplayDescription')}>
                       <Toggle enabled={prefs.autoplay} onChange={() => updateMutation.mutate({ autoplay: !prefs.autoplay })} />
                     </SettingRow>
 
-                    <SettingRow label="Maximum Maturity Rating" description="Filter content above this rating">
+                    <SettingRow label={t('settings.maturity')} description={t('settings.maturityDescription')}>
                       <select
                         value={prefs.maturityRating}
                         onChange={(e) => updateMutation.mutate({ maturityRating: e.target.value as typeof RATINGS[number] })}
@@ -516,11 +520,11 @@ export function SettingsPage() {
                       </select>
                     </SettingRow>
 
-                    <SettingRow label="Default Subtitle Language" description="Language code (e.g. en, es, fr)">
+                    <SettingRow label={t('settings.subtitleDefault')} description={t('settings.subtitleDescription')}>
                       <input
                         type="text"
                         value={prefs.subtitleDefault ?? ''}
-                        placeholder="Off"
+                        placeholder={t('common.off')}
                         maxLength={10}
                         onChange={(e) => updateMutation.mutate({ subtitleDefault: e.target.value || null })}
                         className="bg-white/[0.06] border border-white/[0.12] text-white text-sm rounded-lg px-3 py-1.5 w-24 text-center focus:border-violet-500 focus:outline-none transition-colors"
@@ -534,19 +538,19 @@ export function SettingsPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                       </svg>
                     )}
-                    title="Application Updates"
-                    description="Keep KokoMovie up to date automatically"
+                    title={t('settings.applicationUpdates')}
+                    description={t('settings.applicationUpdatesDescription')}
                   >
                     <SettingRow
-                      label="Automatic Updates"
-                      description="Download and install new versions."
+                      label={t('settings.automaticUpdates')}
+                      description={t('settings.automaticUpdatesDescription')}
                     >
-                      <ToggleSwitch checked={autoUpdateEnabled} onChange={onToggleAutoUpdate} label="Automatic updates" />
+                      <ToggleSwitch checked={autoUpdateEnabled} onChange={onToggleAutoUpdate} label={t('settings.automaticUpdates')} />
                     </SettingRow>
 
                     <SettingRow
-                      label="Check for Updates"
-                      description="Look for a new version."
+                      label={t('settings.checkForUpdates')}
+                      description={t('settings.checkForUpdatesDescription')}
                     >
                       <div className="flex flex-col items-end gap-1.5">
                         <button
@@ -557,19 +561,19 @@ export function SettingsPage() {
                           {updateCheck.status === 'checking' && (
                             <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                           )}
-                          {updateCheck.status === 'checking' ? 'Checking…' : 'Check Now'}
+                          {updateCheck.status === 'checking' ? t('settings.checkingUpdates') : t('settings.checkNow')}
                         </button>
                         {updateCheck.status === 'up-to-date' && (
-                          <span className="text-[11px] text-emerald-300/80">You&apos;re on the latest version{updateCheck.version ? ` (v${updateCheck.version})` : ''}</span>
+                          <span className="text-[11px] text-emerald-300/80">{t('settings.latestVersion', { version: updateCheck.version ? `v${updateCheck.version}` : '' })}</span>
                         )}
                         {updateCheck.status === 'available' && (
-                          <span className="text-[11px] text-violet-300">Update {updateCheck.version ? `v${updateCheck.version} ` : ''}found — downloading…</span>
+                          <span className="text-[11px] text-violet-300">{t('settings.updateFound', { version: updateCheck.version ? `v${updateCheck.version}` : '' })}</span>
                         )}
                         {updateCheck.status === 'dev' && (
-                          <span className="text-[11px] text-white/40">Available only in the installed app</span>
+                          <span className="text-[11px] text-white/40">{t('settings.installedAppOnly')}</span>
                         )}
                         {updateCheck.status === 'error' && (
-                          <span className="text-[11px] text-red-300/80">{updateCheck.message || 'Check failed'}</span>
+                          <span className="text-[11px] text-red-300/80">{updateCheck.message || t('settings.checkFailed')}</span>
                         )}
                       </div>
                     </SettingRow>
@@ -585,13 +589,13 @@ export function SettingsPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-2 4a5 5 0 110-10 5 5 0 010 10zM19 9h3m-3 3h3m-9 3h-2a2 2 0 00-2 2v3h6v-3a2 2 0 00-2-2z" />
                     </svg>
                   )}
-                  title="API Configuration"
-                  description="Connect your personal TMDB API key to browse movies and shows"
+                  title={t('settings.apiConfiguration')}
+                  description={t('settings.apiDescription')}
                 >
                   <div className="space-y-4">
                     {/* Key input */}
                     <div>
-                      <label className="text-white text-sm font-medium block mb-2">TMDB API Key</label>
+                      <label className="text-white text-sm font-medium block mb-2">{t('settings.tmdbApiKey')}</label>
                       <div className="flex gap-2">
                         <div className="relative flex-1">
                           <input
@@ -601,7 +605,7 @@ export function SettingsPage() {
                               setTmdbKeyInput(e.target.value)
                               if (tmdbValidation !== 'idle') setTmdbValidation('idle')
                             }}
-                            placeholder="Paste your TMDB API key here..."
+                            placeholder={t('settings.tmdbKeyPlaceholder')}
                             spellCheck={false}
                             autoComplete="off"
                             className="w-full bg-white/[0.06] border border-white/[0.12] text-white text-sm rounded-lg pl-3 pr-10 py-2.5 focus:border-violet-500 focus:outline-none transition-colors font-mono tracking-wider"
@@ -609,7 +613,7 @@ export function SettingsPage() {
                           <button
                             onClick={() => setTmdbKeyVisible(!tmdbKeyVisible)}
                             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 transition-colors"
-                            title={tmdbKeyVisible ? 'Hide key' : 'Show key'}
+                            title={tmdbKeyVisible ? t('settings.hideKey') : t('settings.showKey')}
                           >
                             {tmdbKeyVisible ? (
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -636,9 +640,9 @@ export function SettingsPage() {
                         {tmdbValidation === 'validating' ? (
                           <span className="flex items-center gap-2">
                             <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            Validating...
+                            {t('settings.validating')}
                           </span>
-                        ) : 'Validate Key'}
+                        ) : t('settings.validateKey')}
                       </button>
 
                       {tmdbApiKey && (
@@ -646,7 +650,7 @@ export function SettingsPage() {
                           onClick={handleClearTmdbKey}
                           className="text-red-400/80 hover:text-red-300 text-sm font-medium transition-colors"
                         >
-                          Remove Key
+                          {t('settings.removeKey')}
                         </button>
                       )}
 
@@ -656,7 +660,7 @@ export function SettingsPage() {
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
-                          Valid
+                          {t('settings.valid')}
                         </span>
                       )}
                       {tmdbValidation === 'invalid' && (
@@ -664,7 +668,7 @@ export function SettingsPage() {
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                           </svg>
-                          Invalid key
+                          {t('settings.invalidKey')}
                         </span>
                       )}
                     </div>
@@ -681,12 +685,12 @@ export function SettingsPage() {
                         target="_blank"
                         rel="noreferrer"
                         className="shrink-0"
-                        aria-label="Visit The Movie Database"
+                        aria-label={t('settings.visitTmdb')}
                       >
                         <img src={tmdbLogo} alt="The Movie Database" className="h-12 w-12" />
                       </a>
                       <p className="text-xs leading-relaxed text-white/45">
-                        This product uses the TMDB API but is not endorsed or certified by TMDB.
+                        {t('settings.tmdbAttribution')}
                       </p>
                     </div>
                   </div>
@@ -701,12 +705,12 @@ export function SettingsPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
                   )}
-                  title="Downloads"
-                  description="Where downloaded content is saved"
+                  title={t('settings.downloads')}
+                  description={t('settings.downloadsDescription')}
                 >
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
-                      <label className="text-white text-sm">Download Location</label>
+                      <label className="text-white text-sm">{t('settings.downloadLocation')}</label>
                       {downloadPath !== defaultDownloadPath && (
                         <button
                           onClick={() => {
@@ -716,7 +720,7 @@ export function SettingsPage() {
                           }}
                           className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
                         >
-                          Reset to Default
+                          {t('settings.resetDefault')}
                         </button>
                       )}
                     </div>
@@ -726,17 +730,17 @@ export function SettingsPage() {
                         value={downloadPath}
                         onChange={(e) => handleManualPathChange(e.target.value)}
                         className="bg-white/[0.06] border border-white/[0.12] text-white text-sm rounded-lg px-3 py-2 flex-1 focus:border-violet-500 focus:outline-none transition-colors"
-                        placeholder="Default download folder"
+                        placeholder={t('settings.defaultDownloadFolder')}
                       />
                       <button
                         onClick={handleBrowseFolder}
                         className="bg-white/[0.08] hover:bg-white/[0.14] text-white text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.97] border border-white/[0.08]"
                       >
-                        Browse...
+                        {t('settings.browseFolder')}
                       </button>
                     </div>
                     <p className="text-white/30 text-[11px] leading-relaxed">
-                      All downloaded movies/series segments will be saved to this folder.
+                      {t('settings.downloadFolderDescription')}
                     </p>
                   </div>
                 </SectionCard>
@@ -750,16 +754,16 @@ export function SettingsPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                     </svg>
                   )}
-                  title="Privacy"
-                  description="Data export and privacy controls"
+                  title={t('settings.privacy')}
+                  description={t('settings.privacyDescription')}
                 >
                   <div className="space-y-4">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="text-white text-sm">Portable Library</p>
+                          <p className="text-white text-sm">{t('settings.portableLibrary')}</p>
                           <p className="text-white/35 text-xs mt-0.5">
-                            Export or import watchlist, playback history, and preferences. API keys and media files are never included.
+                            {t('settings.portableLibraryDescription')}
                           </p>
                         </div>
                         <div className="flex gap-2 shrink-0">
@@ -768,14 +772,14 @@ export function SettingsPage() {
                             disabled={portabilityBusy}
                             className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                           >
-                            Import
+                            {t('settings.import')}
                           </button>
                           <button
                             onClick={handleExport}
                             disabled={portabilityBusy}
                             className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                           >
-                            Export
+                            {t('settings.export')}
                           </button>
                         </div>
                       </div>
@@ -786,16 +790,16 @@ export function SettingsPage() {
                           onChange={(event) => setIncludeExportArtwork(event.target.checked)}
                           className="accent-violet-500"
                         />
-                        Include bounded cached catalog artwork (larger file)
+                        {t('settings.includeArtwork')}
                       </label>
                       {importSelection?.preview && (
                         <div className="rounded-lg border border-violet-400/20 bg-violet-500/5 p-3">
-                          <p className="text-white/80 text-xs font-semibold">Import preview</p>
+                          <p className="text-white/80 text-xs font-semibold">{t('settings.importPreview')}</p>
                           <p className="text-white/45 text-xs mt-1">
-                            {importSelection.preview.watchlist} watchlist � {importSelection.preview.positions} history � {importSelection.preview.artwork} artwork
+                            {t('settings.importCounts', { watchlist: importSelection.preview.watchlist, history: importSelection.preview.positions, artwork: importSelection.preview.artwork })}
                           </p>
                           <p className="text-white/35 text-[11px] mt-1">
-                            {importSelection.preview.watchlistConflicts + importSelection.preview.positionConflicts} existing records overlap. Merge keeps the newest timestamp; Replace clears current watchlist/history first. A SQLite backup is always created.
+                            {t('settings.importConflicts', { count: importSelection.preview.watchlistConflicts + importSelection.preview.positionConflicts })}
                           </p>
                           <div className="flex gap-2 mt-3">
                             <button
@@ -803,21 +807,21 @@ export function SettingsPage() {
                               disabled={portabilityBusy}
                               className="bg-violet-500/20 text-violet-200 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
                             >
-                              Merge newest
+                              {t('settings.mergeNewest')}
                             </button>
                             <button
                               onClick={() => handleApplyImport('replace')}
                               disabled={portabilityBusy}
                               className="bg-red-500/10 text-red-300 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
                             >
-                              Replace library
+                              {t('settings.replaceLibrary')}
                             </button>
                             <button
                               onClick={() => setImportSelection(null)}
                               disabled={portabilityBusy}
                               className="text-white/40 px-2 py-1.5 text-xs"
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         </div>
@@ -826,9 +830,9 @@ export function SettingsPage() {
                     <div className="border-t border-white/[0.08] pt-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="text-white text-sm">Diagnostic Report</p>
+                          <p className="text-white text-sm">{t('settings.diagnosticReport')}</p>
                           <p className="text-white/35 text-xs mt-0.5">
-                            Prepare a local, redacted report to review before saving. Nothing is sent automatically.
+                            {t('settings.diagnosticDescription')}
                           </p>
                         </div>
                         <button
@@ -836,14 +840,14 @@ export function SettingsPage() {
                           disabled={diagnosticBusy}
                           className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                         >
-                          {diagnosticBusy ? 'Preparing...' : 'Prepare Report'}
+                          {diagnosticBusy ? t('settings.preparing') : t('settings.prepareReport')}
                         </button>
                       </div>
                       {diagnosticPreview && (
                         <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-3">
-                          <p className="text-white/80 text-xs font-semibold">Review before saving</p>
+                          <p className="text-white/80 text-xs font-semibold">{t('settings.reviewBeforeSaving')}</p>
                           <p className="text-white/35 text-[11px] mt-1">
-                            Excludes API keys, content details, history details, filesystem paths, provider URLs, headers, and tokens.
+                            {t('settings.diagnosticExcludes')}
                           </p>
                           <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 text-[10px] text-white/55">
                             {JSON.stringify(diagnosticPreview.report, null, 2)}
@@ -854,14 +858,14 @@ export function SettingsPage() {
                               disabled={diagnosticBusy}
                               className="bg-emerald-500/20 text-emerald-200 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
                             >
-                              Save reviewed report
+                              {t('settings.saveReviewedReport')}
                             </button>
                             <button
                               onClick={() => setDiagnosticPreview(null)}
                               disabled={diagnosticBusy}
                               className="text-white/40 px-2 py-1.5 text-xs"
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         </div>
@@ -869,18 +873,18 @@ export function SettingsPage() {
                     </div>
                     <div className="flex items-center justify-between border-t border-white/[0.08] pt-4">
                       <div>
-                        <p className="text-white text-sm">Catalog Cache</p>
+                        <p className="text-white text-sm">{t('settings.catalogCache')}</p>
                         <p className="text-white/35 text-xs mt-0.5">
-                          {cacheStats ? `${cacheStats.entries} cached items - ${(cacheStats.bytes / 1024 / 1024).toFixed(1)} MB` : 'Loading cache usage...'}
+                          {cacheStats ? t('settings.cacheUsage', { count: cacheStats.entries, size: (cacheStats.bytes / 1024 / 1024).toFixed(1) }) : t('settings.loadingCache')}
                         </p>
-                        <p className="text-white/25 text-[11px] mt-1">Clearing this never removes downloads, watchlist, or playback history.</p>
+                        <p className="text-white/25 text-[11px] mt-1">{t('settings.clearCacheSafety')}</p>
                       </div>
                       <button
                         onClick={handleClearCatalogCache}
                         disabled={clearingCache}
                         className="bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] text-white/80 hover:text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-all"
                       >
-                        {clearingCache ? 'Clearing...' : 'Clear Cache'}
+                        {clearingCache ? t('settings.clearing') : t('settings.clearCache')}
                       </button>
                     </div>
                   </div>

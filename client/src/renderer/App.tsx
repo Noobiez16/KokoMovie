@@ -6,6 +6,7 @@ import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from './api/user'
 import { UpdateNotification } from './components/UpdateNotification'
 import { PlayerHost } from './components/player/PlayerHost'
 import { HelpCenter } from './components/HelpCenter'
+import { useTranslation } from 'react-i18next'
 
 const BrowsePage = lazy(() => import('./pages/Browse').then((m) => ({ default: m.BrowsePage })))
 const MoviesPage = lazy(() => import('./pages/Movies').then((m) => ({ default: m.MoviesPage })))
@@ -19,8 +20,9 @@ const DownloadsPage = lazy(() => import('./pages/Downloads').then((m) => ({ defa
 const ProvidersPage = lazy(() => import('./pages/Providers').then((m) => ({ default: m.ProvidersPage })))
 
 function LoadingScreen() {
+  const { t } = useTranslation()
   return (
-    <div className="min-h-screen bg-km-bg flex items-center justify-center">
+    <div className="min-h-screen bg-km-bg flex items-center justify-center" aria-label={t('common.loading')}>
       <div className="flex flex-col items-center gap-4">
         <h1 className="text-2xl font-bold text-km-accent">KokoMovie</h1>
         <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />

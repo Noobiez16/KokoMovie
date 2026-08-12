@@ -1,6 +1,7 @@
 // Local catalog: talks to TMDB directly using the user's key from Settings.
 // Same exported shapes as before, so pages/components are unchanged.
 import { useSettingsStore } from '../store/settings'
+import i18n from '../i18n'
 import {
   createTmdbClient, GENRES, TMDB_GENRE_MAP,
   posterUrl, backdropUrl, profileUrl, stillUrl,
@@ -114,7 +115,7 @@ export class TmdbKeyMissingError extends Error {
 function client(): TmdbClient {
   const key = useSettingsStore.getState().tmdbApiKey?.trim()
   if (!key) throw new TmdbKeyMissingError()
-  return createTmdbClient(key)
+  return createTmdbClient(key, i18n.language)
 }
 
 function meta() {

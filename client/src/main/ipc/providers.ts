@@ -4,6 +4,7 @@ import { extractStreamWithRetry } from '../stream-extractor/index.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
 import { ProviderCircuitBreaker, getProviderContract, redactProviderDiagnostic, validateProviderEmbedUrl, validateStreamRequest } from '../providers/contracts.js'
 import { isForbiddenProxyHostname, validateProxyTargetUrl } from '../providers/network-policy.js'
+import { SupersedingRequestRegistry } from '../providers/request-lifecycle.js'
 import * as nodeHttp from 'http'
 import * as nodeHttps from 'https'
 import * as zlib from 'zlib'
@@ -89,6 +90,8 @@ const nodeHttpsAgent = new nodeHttps.Agent({
   rejectUnauthorized: false,
 })
 const providerCircuits = new ProviderCircuitBreaker()
+const directProviderRequests = new SupersedingRequestRegistry()
+const DIRECT_PROVIDER_DEADLINE_MS = 20_000
 
 
 function logExtraction(msg: string) {
@@ -1259,42 +1262,53 @@ export function registerProvidersIpc(): void {
   })
 
   // Get stream from a specific provider
-  ipcMain.handle('providers:getStream', async (_e, providerId: string, req: StreamRequest): Promise<ProviderResult> => {
+  ipcMain.handle('providers:getStream', async (e, providerId: string, req: StreamRequest): Promise<ProviderResult> => {
     const p = getProvider(providerId)
     if (!p) {
       return { providerId, providerName: providerId, streams: [], error: 'Provider not found' }
     }
 
-    const validatedRequest = validateStreamRequest(req)
-    if (!providerCircuits.canAttempt(p.id)) {      return { providerId, providerName: p.name, streams: [], error: 'Provider is temporarily unavailable' }    }
-    const embedUrl = validateProviderEmbedUrl(p, validatedRequest)
-    if (!embedUrl) {
-      return {
-        providerId,
-        providerName: p.name,
-        streams: [],
-        error: !req.imdbId && !req.tmdbId
-          ? 'Content has no IMDB or TMDB ID — cannot build stream URL'
-          : 'This provider does not support this content type',
-      }
-    }
-
-    const resolves = await checkDomainResolves(embedUrl)
-    if (!resolves) {
-      providerCircuits.recordFailure(p.id)
-      return {
-        providerId,
-        providerName: p.name,
-        streams: [],
-        error: `Provider domain (${new URL(embedUrl).hostname}) is currently offline or unreachable.`,
-      }
-    }
+    const rendererId = e.sender.id
+    const requestLifecycle = directProviderRequests.begin(rendererId, DIRECT_PROVIDER_DEADLINE_MS)
+    const onRendererDestroyed = () => directProviderRequests.abort(rendererId)
+    e.sender.once('destroyed', onRendererDestroyed)
 
     try {
+      const validatedRequest = validateStreamRequest(req)
+      if (!providerCircuits.canAttempt(p.id)) {
+        return { providerId, providerName: p.name, streams: [], error: 'Provider is temporarily unavailable' }
+      }
+      const embedUrl = validateProviderEmbedUrl(p, validatedRequest)
+      if (!embedUrl) {
+        return {
+          providerId,
+          providerName: p.name,
+          streams: [],
+          error: !req.imdbId && !req.tmdbId
+            ? 'Content has no IMDB or TMDB ID — cannot build stream URL'
+            : 'This provider does not support this content type',
+        }
+      }
+
+      const resolves = await checkDomainResolves(embedUrl)
+      if (requestLifecycle.signal.aborted) {
+        return { providerId, providerName: p.name, streams: [], error: 'Request cancelled' }
+      }
+      if (!resolves) {
+        providerCircuits.recordFailure(p.id)
+        return {
+          providerId,
+          providerName: p.name,
+          streams: [],
+          error: `Provider domain (${new URL(embedUrl).hostname}) is currently offline or unreachable.`,
+        }
+      }
+
       const result = await extractStreamWithRetry(embedUrl, {
         maxAttempts: 2,
         timeoutMs: getProviderContract(p.id)?.timeoutMs ?? 12000,
         sessionName: p.sessionName,
+        signal: requestLifecycle.signal,
       })
 
       if (!result) {
@@ -1324,6 +1338,9 @@ export function registerProvidersIpc(): void {
         streams: [],
         error: `Extraction failed: ${redactProviderDiagnostic(err)}`,
       }
+    } finally {
+      e.sender.removeListener('destroyed', onRendererDestroyed)
+      requestLifecycle.finish()
     }
   })
 

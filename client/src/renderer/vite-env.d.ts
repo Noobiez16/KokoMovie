@@ -70,6 +70,7 @@ interface ElectronAPI {
   // App
   getAppVersion: () => Promise<string>
   getPlatform: () => Promise<string>
+  setApplicationLocale: (locale: 'en-US' | 'es-ES' | 'fr-FR') => Promise<{ locale: 'en-US' | 'es-ES' | 'fr-FR' }>
   onHelpAction: (callback: (action: 'documentation' | 'feedback') => void) => () => void
   onUpdateAvailable: (callback: (version?: string) => void) => () => void
   onUpdateDownloaded: (callback: (version?: string) => void) => () => void

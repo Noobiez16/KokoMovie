@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { LOCAL_PROFILE } from '../lib/local-identity'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type Episode, type Season } from '../api/catalog'
@@ -44,6 +45,7 @@ async function getDownloadSubtitles(
 
 
 export function ContentDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -383,7 +385,7 @@ export function ContentDetailPage() {
           loading: false,
           episode,
           seasonNumber,
-          error: 'No working stream found. The content may be unavailable or all providers are down.',
+        error: t('player.noWorkingStreamDescription'),
           isDownload: true,
         })
         return null
@@ -394,7 +396,7 @@ export function ContentDetailPage() {
         loading: false,
         episode,
         seasonNumber,
-        error: `Automatic search failed: ${String(err)}`,
+        error: t('player.automaticSearchFailed', { error: String(err) }),
         isDownload: true,
       })
       return null
@@ -632,7 +634,7 @@ export function ContentDetailPage() {
     return (
       <AppLayout>
         <div className="min-h-screen flex items-center justify-center text-white/50">
-          Content not found
+          {t('detail.notFound')}
         </div>
       </AppLayout>
     )
@@ -690,13 +692,13 @@ export function ContentDetailPage() {
         {/* Back button — overlays the top-left of the backdrop */}
         <button
           onClick={() => navigate(-1)}
-          aria-label="Go back"
+          aria-label={t('common.back')}
           className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-white/90 hover:text-white px-3 py-2 text-sm font-medium backdrop-blur-md transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
           </svg>
-          Back
+          {t('common.back')}
         </button>
 
         <div className={thumbnail ? 'px-8 -mt-24 relative z-10' : 'px-8 pt-8'}>
@@ -714,7 +716,7 @@ export function ContentDetailPage() {
               <span>{Math.floor(content.durationMins / 60)}h {content.durationMins % 60}m</span>
             )}
             {content.type === 'series' && sortedSeasons.length > 0 && (
-              <span>{sortedSeasons.length} Season{sortedSeasons.length !== 1 ? 's' : ''}</span>
+              <span>{t('detail.seasonCount', { count: sortedSeasons.length })}</span>
             )}
           </div>
 
@@ -737,7 +739,7 @@ export function ContentDetailPage() {
               )}
               className="flex items-center gap-2 bg-white text-black font-semibold px-8 py-3 rounded hover:bg-white/90 active:scale-95 transition-all"
             >
-              <span>▶</span> Watch Now
+              <span>▶</span> {t('detail.watchNow')}
             </button>
 
             {/* Keep Watching — only shown when there is saved progress (5–95% watched) */}
@@ -754,7 +756,7 @@ export function ContentDetailPage() {
               >
                 <span>▶</span>
                 <span>
-                  Keep Watching
+                  {t('detail.keepWatching')}
                   {resumeEpisodeInfo
                     ? ` · S${resumeEpisodeInfo.season.seasonNumber}E${resumeEpisodeInfo.episode.episodeNumber} · ${fmtSecs(resumeItem.positionSeconds)}`
                     : ` · ${fmtSecs(resumeItem.positionSeconds)}`}
@@ -772,7 +774,7 @@ export function ContentDetailPage() {
                   : 'bg-transparent border-white/40 text-white hover:bg-white/10'
               }`}
             >
-              {inWatchlist ? '✓ In My List' : '+ My List'}
+              {inWatchlist ? `✓ ${t('detail.inMyList')}` : `+ ${t('history.myList')}`}
             </button>
 
             {/* 3-dots Actions Dropdown next to + My List */}
@@ -781,7 +783,7 @@ export function ContentDetailPage() {
                 <button
                   onClick={() => setShowActionsDropdown(!showActionsDropdown)}
                   className="flex items-center justify-center w-12 h-12 rounded bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
-                  title="Options"
+                  title={t('detail.options')}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white/70 hover:text-white transition-colors">
                     <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -805,7 +807,7 @@ export function ContentDetailPage() {
                           className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
                         >
                           <span>{downloadDone ? '✓' : '⬇'}</span>
-                          <span>{downloadDone ? 'Queued' : downloading ? 'Queuing...' : 'Download'}</span>
+                          <span>{downloadDone ? t('detail.queued') : downloading ? t('detail.queuing') : t('common.download')}</span>
                         </button>
                       ) : (
                         <button
@@ -817,7 +819,7 @@ export function ContentDetailPage() {
                           className="w-full text-left px-4 py-3 text-sm font-medium text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-2"
                         >
                           <span>{downloadDone ? '✓' : '⬇'}</span>
-                          <span>{downloadDone ? 'Queued' : downloading ? 'Queuing All...' : 'Download All Seasons'}</span>
+                          <span>{downloadDone ? t('detail.queued') : downloading ? t('detail.queuingAll') : t('detail.downloadAllSeasons')}</span>
                         </button>
                       )}
                     </div>
@@ -833,12 +835,12 @@ export function ContentDetailPage() {
 
           {content.cast.length > 0 && (
             <div className="mb-8">
-              <h3 className="text-white/40 text-xs uppercase tracking-widest mb-3">Cast</h3>
+              <h3 className="text-white/40 text-xs uppercase tracking-widest mb-3">{t('detail.cast')}</h3>
               <div className="flex flex-wrap gap-x-6 gap-y-2">
                 {content.cast.slice(0, 10).map((c) => (
                   <div key={c.id} className="text-sm">
                     <span className="text-white">{c.name}</span>
-                    {c.role && <span className="text-white/40"> as {c.role}</span>}
+                    {c.role && <span className="text-white/40"> {t('detail.asRole', { role: c.role })}</span>}
                   </div>
                 ))}
               </div>
@@ -849,7 +851,7 @@ export function ContentDetailPage() {
           {content.type === 'series' && sortedSeasons.length > 0 && (
             <div className="mb-8">
               <div className="flex items-center gap-4 mb-4">
-                <h3 className="text-white font-semibold">Episodes</h3>
+                <h3 className="text-white font-semibold">{t('detail.episodes')}</h3>
                 {sortedSeasons.length > 1 && (
                   <select
                     value={selectedSeason}
@@ -861,7 +863,7 @@ export function ContentDetailPage() {
                       const titleSuffix = s.title && !isRedundant ? ` — ${s.title}` : '';
                       return (
                         <option key={s.id} value={i} className="bg-[#1b1333] text-white">
-                          Season {s.seasonNumber}{titleSuffix}
+                          {t('detail.season', { number: s.seasonNumber })}{titleSuffix}
                         </option>
                       );
                     })}
@@ -905,7 +907,7 @@ export function ContentDetailPage() {
                               setActiveEpisodeDropdownId(activeEpisodeDropdownId === ep.id ? null : ep.id)
                             }}
                             className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-white/50 hover:text-white"
-                            title="Episode Options"
+                            title={t('detail.episodeOptions')}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
                               <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -932,7 +934,7 @@ export function ContentDetailPage() {
                                   className="w-full text-left px-3 py-2 text-xs font-semibold text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
                                 >
                                   <span>{episodeDownloadDoneMap[ep.id] ? '✓' : '⬇'}</span>
-                                  <span>{episodeDownloadDoneMap[ep.id] ? 'Queued' : episodeDownloadingMap[ep.id] ? 'Queuing...' : 'Download'}</span>
+                                  <span>{episodeDownloadDoneMap[ep.id] ? t('detail.queued') : episodeDownloadingMap[ep.id] ? t('detail.queuing') : t('common.download')}</span>
                                 </button>
                               </div>
                             </>
@@ -950,14 +952,14 @@ export function ContentDetailPage() {
 
       {/* More Like This */}
       {similarItems.length > 0 && (
-        <ContentRow title="More Like This" items={similarItems} />
+        <ContentRow title={t('detail.moreLikeThis')} items={similarItems} />
       )}
 
       {downloadPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#120d24] p-5 shadow-2xl">
-            <h2 className="text-white text-lg font-semibold mb-1">Choose Download Source</h2>
-            <p className="text-white/45 text-xs mb-4">Best Stream automatically selects the highest validated 1080p source available.</p>
+            <h2 className="text-white text-lg font-semibold mb-1">{t('detail.chooseDownloadSource')}</h2>
+            <p className="text-white/45 text-xs mb-4">{t('detail.bestStreamDescription')}</p>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {[{ id: "best", name: "Best Stream · 1080p Auto", enabled: true }, ...downloadProviders].map((provider) => (
                 <button
@@ -972,14 +974,14 @@ export function ContentDetailPage() {
                   className="w-full flex items-center justify-between rounded-xl bg-white/5 hover:bg-violet-600/25 border border-white/5 px-4 py-3 text-left transition-colors"
                 >
                   <span className="text-white/85 text-sm font-medium">{provider.name}</span>
-                  <span className="text-violet-300 text-xs">Download</span>
+                  <span className="text-violet-300 text-xs">{t('common.download')}</span>
                 </button>
               ))}
               {downloadTorrentsLoading && (
-                <div className="px-4 py-3 text-xs text-white/45">Finding 1080p torrent languages…</div>
+                <div className="px-4 py-3 text-xs text-white/45">{t('detail.findingTorrentLanguages')}</div>
               )}
               {downloadTorrents.length > 0 && (
-                <div className="px-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">Torrent · choose audio language</div>
+                <div className="px-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">{t('detail.chooseTorrentLanguage')}</div>
               )}
               {downloadTorrents.map((torrent) => (
                 <button
@@ -993,11 +995,11 @@ export function ContentDetailPage() {
                   className="w-full flex items-center justify-between rounded-xl bg-emerald-500/5 hover:bg-emerald-500/15 border border-emerald-400/10 px-4 py-3 text-left transition-colors"
                 >
                   <span className="text-white/85 text-sm font-medium pr-3">{torrent.name}</span>
-                  <span className="text-emerald-300 text-xs flex-shrink-0">Download</span>
+                  <span className="text-emerald-300 text-xs flex-shrink-0">{t('common.download')}</span>
                 </button>
               ))}
             </div>
-            <button onClick={() => setDownloadPicker(null)} className="mt-4 w-full rounded-xl border border-white/10 py-2 text-xs font-semibold text-white/55 hover:text-white hover:bg-white/5 transition-colors">Cancel</button>
+            <button onClick={() => setDownloadPicker(null)} className="mt-4 w-full rounded-xl border border-white/10 py-2 text-xs font-semibold text-white/55 hover:text-white hover:bg-white/5 transition-colors">{t('common.cancel')}</button>
           </div>
         </div>
       )}
@@ -1013,7 +1015,7 @@ export function ContentDetailPage() {
                   <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-km-accent animate-spin" />
                 </div>
                 
-                <h2 className="text-white font-semibold text-xl mb-6">Finding Best Stream</h2>
+                <h2 className="text-white font-semibold text-xl mb-6">{t('player.findingStream')}</h2>
                 
                 <button
                   onClick={() => {
@@ -1022,7 +1024,7 @@ export function ContentDetailPage() {
                   }}
                   className="px-6 py-2 rounded-full border border-white/20 text-white/70 hover:text-white hover:bg-white/10 text-xs transition-colors"
                 >
-                  Cancel Search
+                  {t('player.cancelSearch')}
                 </button>
               </>
             ) : (
@@ -1031,7 +1033,7 @@ export function ContentDetailPage() {
                   !
                 </div>
                 
-                <h2 className="text-white font-semibold text-xl mb-3">No Stream Found</h2>
+                <h2 className="text-white font-semibold text-xl mb-3">{t('player.noStream')}</h2>
                 <p className="text-white/60 text-sm mb-6 leading-relaxed">
                   {autoStreamState.error}
                 </p>
@@ -1054,13 +1056,13 @@ export function ContentDetailPage() {
                     }}
                     className="px-6 py-2 rounded-full bg-white text-black font-semibold hover:bg-white/90 text-xs transition-colors"
                   >
-                    Retry Search
+                    {t('player.retrySearch')}
                   </button>
                   <button
                     onClick={() => setAutoStreamState({ loading: false })}
                     className="px-6 py-2 rounded-full border border-white/20 text-white/70 hover:text-white hover:bg-white/10 text-xs transition-colors"
                   >
-                    Close
+                    {t('common.close')}
                   </button>
                 </div>
               </>

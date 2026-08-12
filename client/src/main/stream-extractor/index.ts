@@ -3,6 +3,8 @@ import { promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { lookup } from 'dns'
 import { reclaimOversizedLog, rotateLogIfNeeded } from '../diagnostics.js'
+import { ExtractionSlotLimiter } from './slot-limiter.js'
+import { teardownExtractionResources } from './resource-lifecycle.js'
 
 // Extraction logging keeps full provider URLs on purpose: it is the only way to diagnose a
 // provider that stops resolving, and it never leaves the machine (the Settings diagnostic report
@@ -84,6 +86,7 @@ const hostResolutionCache = new Map<string, { ok: boolean; expiresAt: number }>(
 const HOST_RESOLUTION_TTL_MS = 3 * 60 * 1000
 const MAX_EXTRACTION_WINDOWS = 8
 const activeExtractionWindows = new Set<BrowserWindow>()
+const extractionSlots = new ExtractionSlotLimiter(MAX_EXTRACTION_WINDOWS)
 
 function isStreamUrl(url: string): boolean {
   try {
@@ -200,17 +203,30 @@ export async function extractStream(
 ): Promise<ExtractedStream | null> {
   const { timeoutMs = 30000, attempt = 0, signal } = options
 
-  return new Promise((resolve) => {
+  const releaseSlot = await extractionSlots.acquire(signal)
+  if (!releaseSlot) return null
+
+  return new Promise<ExtractedStream | null>((resolve) => {
     if (signal?.aborted) {
       resolve(null)
       return
     }
+
+    let setupFailed = false
+    let cleanupSession: ReturnType<typeof session.fromPartition> | null = null
+    let cleanupWindow: BrowserWindow | null = null
+    let cleanupClickInterval: ReturnType<typeof setInterval> | null = null
+    let cleanupTimer: ReturnType<typeof setTimeout> | null = null
+    let cleanupAbort: (() => void) | null = null
+
+    try {
 
     // Always use ephemeral partition for every extraction to avoid cookie/localStorage state pollution
     // (e.g. providers resuming/redirecting to the wrong episode based on previous plays)
     const partition = `providers-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const providerSession = session.fromPartition(partition)
+    cleanupSession = providerSession
     providerSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
     providerSession.on('will-download', (_event, item) => item.cancel())
 
@@ -240,12 +256,8 @@ export async function extractStream(
         backgroundThrottling: false,
       },
     })
+    cleanupWindow = win
 
-    if (activeExtractionWindows.size >= MAX_EXTRACTION_WINDOWS) {
-      win.destroy()
-      resolve(null)
-      return
-    }
     activeExtractionWindows.add(win)
 
     const preventOpaqueNavigation = (event: Electron.Event, targetUrl: string) => {
@@ -276,17 +288,19 @@ export async function extractStream(
         win.webContents.sendInputEvent({ type: 'mouseUp', x: 640, y: 360, button: 'left', clickCount: 1 })
       } catch {}
     }, 2000)
+    cleanupClickInterval = clickInterval
 
     const onAbort = () => {
       finish(null)
     }
+    cleanupAbort = onAbort
 
     if (signal) {
       signal.addEventListener('abort', onAbort)
     }
 
     const finish = (result: ExtractedStream | null) => {
-      if (done) return
+      if (done || setupFailed) return
       done = true
       clearInterval(clickInterval)
       clearTimeout(timer)
@@ -300,11 +314,9 @@ export async function extractStream(
       // Destroy outside Chromium's navigation/webRequest callback stack. Synchronous teardown
       // during a failed frame navigation can trip Chromium's opaque-origin SiteInfo checks.
       setImmediate(() => {
-        try { if (!win.isDestroyed()) win.destroy() } catch { /* already destroyed */ }
-        activeExtractionWindows.delete(win)
-        void providerSession.clearStorageData().catch(() => {})
+        void teardownExtractionResources(win, activeExtractionWindows, providerSession)
+          .finally(() => resolve(result))
       })
-      resolve(result)
     }
 
     // PRIMARY: onSendHeaders gives us URL + request headers simultaneously
@@ -360,6 +372,7 @@ export async function extractStream(
     )
 
     const timer = setTimeout(() => finish(null), timeoutMs)
+    cleanupTimer = timer
 
     win.webContents.setUserAgent(USER_AGENTS[attempt % USER_AGENTS.length]!)
 
@@ -382,7 +395,28 @@ export async function extractStream(
       logExtraction(`[Extractor] Window closed for ${embedUrl}`)
       finish(null)
     })
-  })
+    } catch {
+      setupFailed = true
+      if (cleanupClickInterval) clearInterval(cleanupClickInterval)
+      if (cleanupTimer) clearTimeout(cleanupTimer)
+      if (signal && cleanupAbort) signal.removeEventListener('abort', cleanupAbort)
+      if (cleanupSession) {
+        try { cleanupSession.webRequest.onSendHeaders(null as any) } catch { /* ignore */ }
+        try { cleanupSession.webRequest.onHeadersReceived(null as any) } catch { /* ignore */ }
+        try { cleanupSession.webRequest.onBeforeRequest(null as any) } catch { /* ignore */ }
+      }
+      setImmediate(() => {
+        if (cleanupWindow && cleanupSession) {
+          void teardownExtractionResources(cleanupWindow, activeExtractionWindows, cleanupSession)
+            .finally(() => resolve(null))
+        } else if (cleanupSession) {
+          void cleanupSession.clearStorageData().catch(() => {}).finally(() => resolve(null))
+        } else {
+          resolve(null)
+        }
+      })
+    }
+  }).finally(releaseSlot)
 }
 
 // Try extraction with retries and optional session rotation

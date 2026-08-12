@@ -3,6 +3,11 @@ export interface CachedPayloadRow {
   payload: string
 }
 
+export function tmdbRequestCacheKey(path: string, params: Record<string, string>, schemaVersion = 1): string {
+  const ordered = Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)))
+  return JSON.stringify([schemaVersion, path, ordered])
+}
+
 export interface CachedTmdbItem {
   id: number
   title?: string

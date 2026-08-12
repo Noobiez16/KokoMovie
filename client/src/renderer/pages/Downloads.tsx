@@ -1,17 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { downloadsApi, type DownloadItem } from '../api/downloads'
 import { AppLayout } from '../components/layout/AppLayout'
 import { applyDownloadProgress } from '../lib/download-progress'
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'Queued',
-  paused: 'Paused',
-  downloading: 'Downloading',
-  completed: 'Downloaded',
-  cancelled: 'Cancelled',
-  error: 'Error',
-}
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'text-yellow-400',
@@ -34,6 +26,7 @@ function daysUntil(iso: string): number {
 }
 
 export function DownloadsPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [items, setItems] = useState<DownloadItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,8 +96,8 @@ export function DownloadsPage() {
     <AppLayout>
       <div className="p-8">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-white">Downloads</h1>
-          <button onClick={() => downloadsApi.openFolder()} className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors">Open Downloads Folder</button>
+          <h1 className="text-2xl font-bold text-white">{t('downloads.title')}</h1>
+          <button onClick={() => downloadsApi.openFolder()} className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors">{t('downloads.openDownloadsFolder')}</button>
         </div>
 
         {loading && (
@@ -116,14 +109,14 @@ export function DownloadsPage() {
         {!loading && items.length === 0 && (
           <div className="text-center py-16 text-white/40">
             <div className="text-5xl mb-4">⬇</div>
-            <p className="text-lg">No downloads yet</p>
-            <p className="text-sm mt-2">Browse content and tap the download button to save for offline viewing.</p>
+            <p className="text-lg">{t('downloads.empty')}</p>
+            <p className="text-sm mt-2">{t('downloads.emptyDescription')}</p>
           </div>
         )}
 
         {active.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">In Progress</h2>
+            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.inProgress')}</h2>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {active.map((item) => (
                 <DownloadCard
@@ -140,7 +133,7 @@ export function DownloadsPage() {
 
         {completed.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">Available Offline</h2>
+            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.availableOffline')}</h2>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {completed.map((item) => (
                 <DownloadCard
@@ -157,7 +150,7 @@ export function DownloadsPage() {
 
         {other.length > 0 && (
           <section>
-            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">Cancelled / Failed</h2>
+            <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.cancelledFailed')}</h2>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {other.map((item) => (
                 <DownloadCard
@@ -192,6 +185,7 @@ function DownloadCard({
   onDelete?: () => void
   onOpenFolder?: () => void
 }) {
+  const { t } = useTranslation()
   const days = daysUntil(item.expires_at)
 
   return (
@@ -207,7 +201,7 @@ function DownloadCard({
           <p className="text-white text-sm font-medium line-clamp-2 mb-1 group-hover:text-violet-400 transition-colors">{item.title}</p>
 
           <p className={`text-xs font-semibold mb-2 ${STATUS_COLOR[item.status] ?? 'text-white/40'}`}>
-            {STATUS_LABEL[item.status] ?? item.status}
+            {t(`downloads.status.${item.status}`, { defaultValue: item.status })}
             {item.status === 'error' && item.error_message ? ` — ${item.error_message}` : ''}
           </p>
 
@@ -219,7 +213,7 @@ function DownloadCard({
                   <span>{item.completed_segments}/{item.total_segments}</span>
                 )}
               </div>
-              <p className="text-[10px] text-white/45 mb-1 tabular-nums">{formatBytes(item.downloaded_bytes)} / {item.total_bytes > 0 ? formatBytes(item.total_bytes) : "Calculating…"}</p>
+              <p className="text-[10px] text-white/45 mb-1 tabular-nums">{formatBytes(item.downloaded_bytes)} / {item.total_bytes > 0 ? formatBytes(item.total_bytes) : t('downloads.calculating')}</p>
               <div className="h-1 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300"
@@ -230,7 +224,7 @@ function DownloadCard({
           )}
 
           {item.status === 'completed' && days > 0 && (
-            <p className="text-xs text-white/30 mb-2">Expires in {days}d</p>
+            <p className="text-xs text-white/30 mb-2">{t('downloads.expiresIn', { count: days })}</p>
           )}
         </div>
       </div>
@@ -245,12 +239,12 @@ function DownloadCard({
               <svg className="w-2.5 h-2.5 fill-current ml-0.5" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
-              Play
+              {t('common.play')}
             </button>
           )}
           {onOpenFolder && (
             <button onClick={onOpenFolder} className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95">
-              Folder
+              {t('downloads.folder')}
             </button>
           )}
           {item.status === 'paused' && onResume && (
@@ -258,7 +252,7 @@ function DownloadCard({
               onClick={onResume}
               className="flex-1 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25 text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
-              Resume
+              {t('common.resume')}
             </button>
           )}
           {item.status === 'downloading' && onPause && (
@@ -266,7 +260,7 @@ function DownloadCard({
               onClick={onPause}
               className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
-              Pause
+              {t('common.pause')}
             </button>
           )}
           {(item.status === 'pending' || item.status === 'downloading' || item.status === 'paused') && onCancel && (
@@ -274,7 +268,7 @@ function DownloadCard({
               onClick={onCancel}
               className="flex-1 bg-white/5 text-purple-300/60 hover:bg-white/10 hover:text-white text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           )}
           {onDelete && item.status !== 'pending' && item.status !== 'downloading' && item.status !== 'paused' && (
@@ -282,7 +276,7 @@ function DownloadCard({
               onClick={onDelete}
               className="flex-1 bg-red-500/10 text-red-400/80 hover:bg-red-500/20 hover:text-red-300 text-xs font-bold py-1.5 rounded-xl transition-all duration-300 active:scale-95"
             >
-              Delete
+              {t('common.delete')}
             </button>
           )}
         </div>

@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.5.3] — 2026-08-12 — Stream Reliability & Interface Languages
+
+### Added
+- **Immediate Interface Languages**: Added complete English, Spanish, and French interface resources through i18next/react-i18next. Changing the language in Settings updates the renderer, TMDB catalog requests, document locale, and native Electron menu immediately without restarting. The saved preference is hydrated before the application renders, and a failed save rolls the UI back safely.
+- **Dark Language Selector**: Replaced the native white language dropdown with an accessible dark listbox supporting pointer use, Arrow keys, Enter, Escape, checkmarks, and outside-click dismissal. Only the supported English, Spanish, and French choices are shown; Portuguese remains deferred.
+- **Developer Tools Menu**: Restored View → Toggle Developer Tools in every build so advanced users can inspect console errors in packaged installations. Native File, Edit, View, Window, and Help labels follow the active interface language.
+
+### Changed
+- **Localized Catalog Data**: Every TMDB request now includes the active locale and locale-aware request cache keys prevent English, Spanish, and French catalog responses from overwriting one another.
+- **Whole-App Translation Coverage**: Navigation, catalog states, title details, stream search/recovery, player controls, next-episode UI, downloads, history, providers, Settings, Help, and update notifications now use the shared translation layer.
+
+### Fixed
+- **Fair Provider Coverage**: Replaced reject-at-cap extraction with a FIFO queue that keeps the existing eight-window resource ceiling while giving every enabled provider a bounded opportunity. Queued attempts are removed when their search is cancelled or expires.
+- **Recovered Playback Stays Recovered**: A real `playing` event now synchronously cancels the pending fallback deadline and clears stale loading, fallback, and terminal-error state, preventing Stream Error from covering a movie that is already playing.
+- **Bounded Direct Source Switching**: Direct provider requests now have a main-process deadline that covers both queue waiting and active extraction. A newer request supersedes the previous request from the same renderer, and destroying the renderer aborts its active request.
+- **Extraction Teardown Integrity**: Hidden-window destruction, active-window accounting, ephemeral storage cleanup, and limiter release remain coupled even when Electron setup or cleanup raises an unexpected error.
+- **Vite 8 Source Compatibility**: Re-encoded two legacy Windows-1252 middle-dot bytes in Settings as UTF-8 so the production renderer build works with the dependency versions selected by the security audit fix.
+
+### Verification
+- Added dictionary-parity, locale normalization, plural/interpolation, persistence rollback, language-selector keyboard/accessibility, native-menu, TMDB locale, cache-separation, and interface-coverage tests.
+- Added deterministic coverage for seventeen-provider queue fairness, the eight-window maximum, FIFO ordering, queued cancellation, idempotent release, direct-request supersession/deadlines, cleanup failures, and playback recovery at the fallback deadline boundary.
+- Live Electron smoke tests returned validated manifests and reached `playing` for Demon Slayer: Kimetsu no Yaiba Infinity Castle (2025), Lilo & Stitch (2002), Scary Movie (2026), The Matrix (1999), Monsters, Inc. (2001), Game of Thrones S1E1, and Breaking Bad S1E1. Demon Slayer succeeded through MoviesAPI, a provider that the old reject-at-cap behavior never allowed to run.
+
+---
 ## [1.5.2] — 2026-08-08 — Performance Optimization
 
 ### Changed

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import changelog from '../../../../docs/changelog.md?raw'
 
 type HelpView = 'documentation' | 'feedback'
@@ -50,6 +51,7 @@ function markdownLines(source: string) {
 }
 
 export function HelpCenter() {
+  const { t } = useTranslation()
   const [view, setView] = useState<HelpView | null>(null)
   const [kind, setKind] = useState<FeedbackKind>('Bug')
   const [title, setTitle] = useState('')
@@ -124,21 +126,21 @@ export function HelpCenter() {
       {view && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) setView(null) }}>
         <section className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/15 bg-[#100d1c] shadow-2xl">
           <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-            <div><p className="text-lg font-bold text-white">{view === 'documentation' ? 'Changelog' : 'Send Feedback'}</p><p className="text-xs text-white/45">{view === 'documentation' ? 'What changed in every KokoMovie release' : 'Submit securely through GitHub Issues'}</p></div>
-            <button onClick={() => setView(null)} className="rounded-lg p-2 text-white/50 hover:bg-white/10 hover:text-white" aria-label="Close">✕</button>
+            <div><p className="text-lg font-bold text-white">{view === 'documentation' ? t('help.changelog') : t('help.sendFeedback')}</p><p className="text-xs text-white/45">{view === 'documentation' ? t('help.changelogDescription') : t('help.feedbackDescription')}</p></div>
+            <button onClick={() => setView(null)} className="rounded-lg p-2 text-white/50 hover:bg-white/10 hover:text-white" aria-label={t('common.close')}>✕</button>
           </header>
           {view === 'documentation' ? <div className="overflow-y-auto px-7 pb-8">{renderedChangelog}</div> :
             <div className="space-y-5 overflow-y-auto p-6">
-              <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-4 text-xs leading-5 text-violet-200">GitHub will open in your browser for review and submission. KokoMovie never receives your GitHub password or stores an access token.</div>
-              <label className="block text-sm font-medium text-white/80">Category<select value={kind} onChange={(e) => setKind(e.target.value as FeedbackKind)} className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-violet-500">{['Bug', 'Feature', 'Improvement', 'Other'].map((value) => <option key={value}>{value}</option>)}</select></label>
-              <label className="block text-sm font-medium text-white/80">Title<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="Briefly describe your feedback" className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none placeholder:text-white/25 focus:border-violet-500" /></label>
-              <label className="block text-sm font-medium text-white/80">Details<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={7} placeholder="What happened, what did you expect, and how could KokoMovie improve?" className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none placeholder:text-white/25 focus:border-violet-500" /></label>
-              <div className="flex justify-end gap-3"><button onClick={() => setView(null)} className="rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white">Cancel</button><button onClick={() => void submitFeedback()} disabled={!title.trim() || description.trim().length < 10} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40">Review on GitHub</button></div>
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-4 text-xs leading-5 text-violet-200">{t('help.githubPrivacy')}</div>
+              <label className="block text-sm font-medium text-white/80">{t('help.category')}<select value={kind} onChange={(e) => setKind(e.target.value as FeedbackKind)} className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-violet-500">{(['Bug', 'Feature', 'Improvement', 'Other'] as FeedbackKind[]).map((value) => <option key={value} value={value}>{t(`help.kind.${value.toLowerCase()}`)}</option>)}</select></label>
+              <label className="block text-sm font-medium text-white/80">{t('help.feedbackTitle')}<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder={t('help.titlePlaceholder')} className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none placeholder:text-white/25 focus:border-violet-500" /></label>
+              <label className="block text-sm font-medium text-white/80">{t('help.details')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={7} placeholder={t('help.detailsPlaceholder')} className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none placeholder:text-white/25 focus:border-violet-500" /></label>
+              <div className="flex justify-end gap-3"><button onClick={() => setView(null)} className="rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white">{t('common.cancel')}</button><button onClick={() => void submitFeedback()} disabled={!title.trim() || description.trim().length < 10} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40">{t('help.reviewGithub')}</button></div>
             </div>}
         </section>
       </div>}
       {completion && <div className="fixed bottom-6 right-6 z-[130] w-96 max-w-[calc(100vw-3rem)] rounded-2xl border border-emerald-400/25 bg-[#101b18]/95 p-5 shadow-2xl backdrop-blur-xl">
-        <div className="flex gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">✓</div><div className="min-w-0 flex-1"><p className="font-semibold text-white">Your feedback was completed</p><p className="mt-1 text-sm leading-5 text-white/65">{completion.text}</p>{completion.version && <p className="mt-2 text-xs font-medium text-emerald-300">Documented in changelog v{completion.version}</p>}<div className="mt-3 flex gap-3"><a href={completion.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-violet-300 hover:text-violet-200">View resolution</a><button onClick={() => setCompletion(null)} className="text-xs text-white/45 hover:text-white">Dismiss</button></div></div></div>
+        <div className="flex gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">✓</div><div className="min-w-0 flex-1"><p className="font-semibold text-white">{t('help.feedbackCompleted')}</p><p className="mt-1 text-sm leading-5 text-white/65">{completion.text}</p>{completion.version && <p className="mt-2 text-xs font-medium text-emerald-300">{t('help.documentedVersion', { version: completion.version })}</p>}<div className="mt-3 flex gap-3"><a href={completion.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-violet-300 hover:text-violet-200">{t('help.viewResolution')}</a><button onClick={() => setCompletion(null)} className="text-xs text-white/45 hover:text-white">{t('help.dismiss')}</button></div></div></div>
       </div>}
     </>
   )

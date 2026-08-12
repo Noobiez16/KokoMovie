@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/auth'
 import logoImg from '../../assets/logo.png'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   children: React.ReactNode
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function AppLayout({ children, transparentNav = false }: Props) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const { activeProfile } = useAuthStore()
@@ -36,7 +38,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
 
   const navLinks = [
     {
-      label: 'Home',
+      label: t('nav.home'),
       path: '/browse',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -45,7 +47,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
       ),
     },
     {
-      label: 'Movies',
+      label: t('nav.movies'),
       path: '/movies',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -54,7 +56,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
       ),
     },
     {
-      label: 'Series',
+      label: t('nav.series'),
       path: '/series',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -63,7 +65,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
       ),
     },
     {
-      label: 'Downloads',
+      label: t('nav.downloads'),
       path: '/downloads',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -75,7 +77,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
 
   const settingsLinks = [
     {
-      label: 'Providers',
+      label: t('nav.providers'),
       path: '/providers',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -84,7 +86,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
       ),
     },
     {
-      label: 'Watch History',
+      label: t('nav.watchHistory'),
       path: '/history',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -93,7 +95,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
       ),
     },
     {
-      label: 'Settings',
+      label: t('nav.settings'),
       path: '/settings',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -132,7 +134,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
           >
             <img
               src={logoImg}
-              alt="KokoMovie Logo"
+              alt="KokoMovie"
               className="w-8 h-8 rounded-lg shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform duration-300 object-cover"
             />
             <span className="font-black text-lg tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-violet-300 via-fuchsia-300 to-white group-hover:opacity-90 transition-opacity">
@@ -144,7 +146,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
         {/* Navigation Section */}
         <div className="flex-1 px-4 py-4 space-y-6 overflow-y-auto">
           <div>
-            <p className="px-3 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest mb-2">Discover</p>
+            <p className="px-3 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest mb-2">{t('nav.discover')}</p>
             <nav className="space-y-1">
               {navLinks.map((link) => {
                 const active = isActive(link.path)
@@ -197,7 +199,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
                   <div className="text-left min-w-0">
                     <p className="text-white text-xs font-semibold truncate leading-none">{activeProfile.name}</p>
                     <p className="text-[10px] text-purple-300/50 mt-1 leading-none">
-                      {activeProfile.isKids ? 'Kids Profile' : 'Standard'}
+                      {activeProfile.isKids ? t('nav.kidsProfile') : t('nav.standardProfile')}
                     </p>
                   </div>
                 </div>
@@ -211,7 +213,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
 
               {profileOpen && (
                 <div className="absolute bottom-14 left-0 right-0 bg-[#120d24] border border-km-border/50 rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-xl animate-fade-in overflow-hidden">
-                  <p className="px-4 pt-1.5 pb-2 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest">Library</p>
+                  <p className="px-4 pt-1.5 pb-2 text-[10px] font-bold text-violet-400/50 uppercase tracking-widest">{t('nav.library')}</p>
                   {settingsLinks.map((link) => {
                     const active = isActive(link.path)
                     return (
@@ -250,7 +252,7 @@ export function AppLayout({ children, transparentNav = false }: Props) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search movies, series, genres..."
+              placeholder={t('nav.searchPlaceholder')}
               className="w-full bg-km-surface-2/30 hover:bg-km-surface-2/50 focus:bg-km-surface-2/80 border border-km-border/40 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-purple-300/30 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 backdrop-blur-sm transition-all duration-300"
             />
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-300/35">

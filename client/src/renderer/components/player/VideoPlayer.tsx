@@ -1,5 +1,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react'
 import Hls from 'hls.js'
+import { useTranslation } from 'react-i18next'
+import { PlaybackRecoveryDeadline, getPlaybackRecoveryPatch } from './playback-recovery'
 import type { ContentDetail, Episode } from '../../api/catalog'
 import type { PlaybackSession } from '../../api/playback'
 import { playbackApi } from '../../api/playback'
@@ -265,6 +267,7 @@ export function VideoPlayer({
   content, episode, session, streamHeaders, initialProviderId, allStreams = [], profileId, resumeAtSeconds: initialResumeAt,
   defaultSubtitleLanguage, offlineSubtitles = [], onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
 }: Props) {
+  const { t } = useTranslation()
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -281,6 +284,10 @@ export function VideoPlayer({
   const [switchingSource, setSwitchingSource] = useState(false)
   const [switchingError, setSwitchingError] = useState<string | null>(null)
   const [awaitingFallback, setAwaitingFallback] = useState(false)
+  const playbackRecoveryDeadlineRef = useRef<PlaybackRecoveryDeadline | null>(null)
+  if (!playbackRecoveryDeadlineRef.current) {
+    playbackRecoveryDeadlineRef.current = new PlaybackRecoveryDeadline()
+  }
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
@@ -501,6 +508,7 @@ export function VideoPlayer({
 
   const cancelSourceSwitch = useCallback(() => {
     switchGenRef.current += 1
+    playbackRecoveryDeadlineRef.current?.cancel()
     setSwitchingSource(false)
     setAwaitingFallback(false)
     setSwitchingError(null)
@@ -531,6 +539,7 @@ export function VideoPlayer({
 
   const handleSourceChange = async (providerId: string, isAuto = false) => {
     if (providerId === activeSourceId) return
+    playbackRecoveryDeadlineRef.current?.cancel()
 
     // An explicit pick (e.g. the user choosing the only black-and-white mirror) pins the
     // source so the auto-fallback never silently switches them back to a different one.
@@ -705,6 +714,7 @@ export function VideoPlayer({
         && !triedSourcesRef.current.has(s.providerId) && s.streams.length > 0,
     )
     if (next) {
+      playbackRecoveryDeadlineRef.current?.cancel()
       console.warn(`[auto-fallback] ${reason} — switching to ${next.providerName} (${next.providerId})`)
       networkErrorCountRef.current = 0
       setSwitchingError(null)
@@ -714,6 +724,10 @@ export function VideoPlayer({
       setInitialLoading(false)
       setHlsError(null)
       setAwaitingFallback(true)
+      playbackRecoveryDeadlineRef.current?.start(() => {
+        setAwaitingFallback(false)
+        setHlsError('This title wouldn’t play on any available source. Please try again later or choose a source manually.')
+      }, 8000)
     }
   }
   autoFallbackRef.current = autoFallback
@@ -734,14 +748,7 @@ export function VideoPlayer({
     }
   }, [allStreams, awaitingFallback, switchingSource, activeSourceId])
 
-  useEffect(() => {
-    if (!awaitingFallback) return
-    const timeout = setTimeout(() => {
-      setAwaitingFallback(false)
-      setHlsError('This title wouldn’t play on any available source. Please try again later or choose a source manually.')
-    }, 8000)
-    return () => clearTimeout(timeout)
-  }, [awaitingFallback])
+  useEffect(() => () => playbackRecoveryDeadlineRef.current?.cancel(), [])
 
   // Watchdog: give up on a source only when it's genuinely dead — never when it's just slow.
   useEffect(() => {
@@ -1244,7 +1251,13 @@ export function VideoPlayer({
     // First frame is actually rendering — drop the loading overlays and reset the
     // network-error streak (the source is clearly working now).
     const onPlaying = () => {
-      setIsPlaying(true); setInitialLoading(false); clearBuffering()
+      const recovery = getPlaybackRecoveryPatch('playing')
+      playbackRecoveryDeadlineRef.current?.markPlaying()
+      setIsPlaying(true)
+      setInitialLoading(recovery.initialLoading)
+      setAwaitingFallback(recovery.awaitingFallback)
+      setHlsError(recovery.hlsError)
+      clearBuffering()
       setTorrentSeeking(false)
       networkErrorCountRef.current = 0
     }
@@ -1732,13 +1745,13 @@ export function VideoPlayer({
       <div className={`${embedded ? 'absolute' : 'fixed'} inset-0 bg-black z-50 flex items-center justify-center`}>
         <div className="text-center max-w-md px-6">
           <p className="text-white/50 text-4xl mb-4">⚠</p>
-          <p className="text-white font-semibold mb-2">Stream Error</p>
+          <p className="text-white font-semibold mb-2">{t('player.streamError')}</p>
           <p className="text-white/60 text-sm mb-6">{hlsError}</p>
           <button
             onClick={chooseAnotherSource}
             className="bg-white/10 border border-white/20 text-white px-6 py-2.5 rounded-lg hover:bg-white/20 transition-colors"
           >
-            ← Choose Another Source
+            ← {t('player.chooseAnotherSource')}
           </button>
         </div>
       </div>
@@ -1783,8 +1796,8 @@ export function VideoPlayer({
       {initialLoading && !switchingSource && !hlsError && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black pointer-events-none">
           <div className="w-10 h-10 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin mb-4" />
-          <p className="text-white/80 text-sm font-semibold">Loading video…</p>
-          <p className="text-white/40 text-xs mt-1">Fetching the stream, this can take a few seconds</p>
+          <p className="text-white/80 text-sm font-semibold">{t('player.loadingVideo')}</p>
+          <p className="text-white/40 text-xs mt-1">{t('player.fetchingStream')}</p>
         </div>
       )}
 
@@ -1794,7 +1807,7 @@ export function VideoPlayer({
         <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-3 rounded-2xl bg-black/55 px-8 py-6 backdrop-blur-sm">
             <div className="w-9 h-9 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin" />
-            <p className="text-white/80 text-xs font-medium">Loading…</p>
+            <p className="text-white/80 text-xs font-medium">{t('common.loading')}</p>
           </div>
         </div>
       )}
@@ -1803,12 +1816,12 @@ export function VideoPlayer({
       {(switchingSource || awaitingFallback) && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-40 flex flex-col items-center justify-center pointer-events-auto">
           <div className="w-10 h-10 border-2 border-white/20 border-t-violet-500 rounded-full animate-spin mb-4" />
-          <p className="text-white text-sm font-semibold mb-5">{awaitingFallback ? 'Finding another working source…' : 'Switching server source…'}</p>
+          <p className="text-white text-sm font-semibold mb-5">{awaitingFallback ? t('player.findingAnotherSource') : t('player.switchingSource')}</p>
           <button
             onClick={cancelSourceSwitch}
             className="px-5 py-2 text-xs font-semibold text-white/80 bg-white/10 border border-white/20 rounded-lg hover:bg-white/20 hover:text-white transition-all duration-200"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       )}

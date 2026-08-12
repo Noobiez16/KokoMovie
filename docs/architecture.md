@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.5.2 optimization baseline (Fully Local, Multi-Architecture Linux)
-**Date:** 2026-08-08
+**Version:** 1.5.3 stream-reliability baseline (Fully Local, Multi-Architecture Linux)
+**Date:** 2026-08-12
 **Status:** Current
 
 ---
@@ -138,9 +138,14 @@ Main Process (Node.js)
 Renderer Process (Chromium)
 └── React app (HashRouter)
     ├── Pages: Browse, Search, ContentDetail, Player, Settings, Downloads, ...
+    ├── i18next resources: en-US, es-ES, fr-FR
     ├── API clients → window.electronAPI (contextBridge IPC calls)
     └── Stores: auth (Zustand, seeds local identity), queryClient (TanStack Query)
 ```
+
+The persisted language is read before the renderer mounts. A live change first updates i18next and `document.documentElement.lang`, then persists through the preferences IPC, rebuilds the native Electron menu, and invalidates locale-sensitive TanStack Query data. If persistence fails, the renderer and native menu roll back together. TMDB requests carry the normalized locale and include it in the main-process cache key.
+
+The Electron menu model is build-independent: View always exposes the standard `toggleDevTools` role, while File/Edit/View/Window/Help labels are selected from the same normalized locale family.
 
 ---
 

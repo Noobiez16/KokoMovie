@@ -1,4 +1,8 @@
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
+import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
+import { normalizeLocale, type AppLocale } from './locales'
+import { buildApplicationMenuTemplate } from './app-menu-model'
+
+let currentLocale: AppLocale = 'en-US'
 
 function sendHelpAction(action: 'documentation' | 'feedback'): void {
   const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -9,36 +13,12 @@ function sendHelpAction(action: 'documentation' | 'feedback'): void {
   window.webContents.send('help:action', action)
 }
 
-export function installApplicationMenu(): void {
-  const template: MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin'
-      ? [{ label: app.name, submenu: [{ role: 'about' as const }, { type: 'separator' as const }, { role: 'quit' as const }] }]
-      : []),
-    { label: 'File', submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }] },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' }, { role: 'forceReload' },
-        ...(process.env['NODE_ENV'] === 'development' ? [{ role: 'toggleDevTools' as const }] : []),
-        { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
-        { type: 'separator' }, { role: 'togglefullscreen' },
-      ],
-    },
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, ...(process.platform === 'darwin' ? [{ role: 'front' as const }] : [{ role: 'close' as const }])] },
-    {
-      role: 'help',
-      submenu: [
-        { label: 'Documentation', accelerator: 'F1', click: () => sendHelpAction('documentation') },
-        { label: 'Send Feedback…', click: () => sendHelpAction('feedback') },
-      ],
-    },
-  ]
+export function installApplicationMenu(localeValue: unknown = currentLocale): AppLocale {
+  currentLocale = normalizeLocale(localeValue)
+  const template = buildApplicationMenuTemplate(currentLocale, process.platform, {
+    documentation: () => sendHelpAction('documentation'),
+    feedback: () => sendHelpAction('feedback'),
+  }) as MenuItemConstructorOptions[]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  return currentLocale
 }

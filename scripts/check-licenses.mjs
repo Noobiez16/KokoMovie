@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveNpmCliInvocation } from './npm-cli.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PROJECT_LICENSE = 'GPL-3.0-or-later'
@@ -77,7 +78,8 @@ function declaredLicense(node) {
 }
 
 function productionPackages() {
-  const raw = execFileSync('npm', ['query', '.prod'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const npm = resolveNpmCliInvocation(['query', '.prod'])
+  const raw = execFileSync(npm.executable, npm.args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   return JSON.parse(raw).filter((node) => node.location) // drop the workspace roots
 }
 

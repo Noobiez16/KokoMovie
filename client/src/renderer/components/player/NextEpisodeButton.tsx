@@ -1,4 +1,5 @@
 import type { Episode } from '../../api/catalog'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   /** The episode to advance to, or null when there is no next episode (end of series). */
@@ -33,13 +34,14 @@ const SkipNextIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
  * re-initialising the stream); this component is purely the presentation + click target.
  */
 export function NextEpisodeButton({ nextEpisode, onPlay, variant = 'control', className = '' }: Props) {
+  const { t } = useTranslation()
   if (variant === 'control') {
     if (!nextEpisode) return null
     return (
       <button
         onClick={() => onPlay(nextEpisode)}
-        aria-label="Next episode"
-        title={`Next: ${nextEpisode.title}`}
+        aria-label={t('player.nextEpisode')}
+        title={t('player.nextTitle', { title: nextEpisode.title })}
         className={`text-white/80 hover:text-km-accent transition-colors flex items-center justify-center w-8 h-8 ${className}`}
       >
         <SkipNextIcon />
@@ -51,7 +53,7 @@ export function NextEpisodeButton({ nextEpisode, onPlay, variant = 'control', cl
   if (!nextEpisode) {
     return (
       <div className={`bg-black/70 border border-white/15 text-white/70 text-sm px-4 py-2 rounded-lg backdrop-blur-sm ${className}`}>
-        Final episode — you’re all caught up
+        {t('player.finalEpisode')}
       </div>
     )
   }
@@ -63,7 +65,7 @@ export function NextEpisodeButton({ nextEpisode, onPlay, variant = 'control', cl
       className={`flex items-center gap-2 bg-km-accent text-black font-semibold px-5 py-2 rounded hover:bg-km-accent/90 transition-colors ${className}`}
     >
       <SkipNextIcon className="w-4 h-4" />
-      <span className="truncate max-w-[220px]">Next Episode ›</span>
+      <span className="truncate max-w-[220px]">{t('player.nextEpisode')} ›</span>
     </button>
   )
 }
