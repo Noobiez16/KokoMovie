@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { AppLayout } from '../layout/AppLayout'
+import { useTranslation } from 'react-i18next'
 
 /**
  * Full-screen gate shown on the catalog pages when the signed-in account has no
@@ -10,6 +11,7 @@ import { AppLayout } from '../layout/AppLayout'
  */
 export function ApiKeyRequired() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   return (
     <AppLayout>
@@ -21,11 +23,9 @@ export function ApiKeyRequired() {
         </div>
 
         <div className="max-w-md space-y-2">
-          <h2 className="text-xl font-bold text-white">A TMDB API key is required</h2>
+          <h2 className="text-xl font-bold text-white">{t('catalog.apiKeyRequired')}</h2>
           <p className="text-sm leading-relaxed text-purple-300/70">
-            KokoMovie uses a free <span className="text-purple-200">TMDB</span> key to load the full
-            library of movies and TV shows. Add yours to start browsing — it's free, takes a minute,
-            and is saved securely to this account so you only enter it once.
+            {t('catalog.apiKeyDescription')}
           </p>
         </div>
 
@@ -34,7 +34,7 @@ export function ApiKeyRequired() {
             onClick={() => navigate('/settings')}
             className="rounded-lg bg-km-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-km-accent-hover"
           >
-            Add TMDB API key
+            {t('catalog.addApiKey')}
           </button>
           <a
             href="https://www.themoviedb.org/settings/api"
@@ -42,12 +42,12 @@ export function ApiKeyRequired() {
             rel="noreferrer"
             className="rounded-lg border border-km-border/50 px-5 py-2.5 text-sm font-medium text-purple-200 transition-colors hover:bg-white/5"
           >
-            Get a free key
+            {t('settings.getFreeKey', { defaultValue: 'Get a free key' })}
           </a>
         </div>
 
         <p className="text-xs text-purple-300/40">
-          Already added one on another account? Each account keeps its own key — add it here too.
+          {t('settings.keyLocalNote', { defaultValue: 'Your key is stored locally on this device.' })}
         </p>
       </div>
     </AppLayout>

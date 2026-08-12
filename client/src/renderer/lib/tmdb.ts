@@ -2,6 +2,7 @@
 // TMDB directly (via the main-process fetch proxy) using the user's own key from
 // Settings — there is no backend catalog service. Ported from the former
 // services/catalog/src/lib/tmdb.ts so content shapes stay identical.
+import { normalizeLocale, tmdbLocale, type AppLocale } from '../../main/locales'
 
 const BASE = 'https://api.themoviedb.org/3'
 export const TMDB_IMG = 'https://image.tmdb.org/t/p'
@@ -213,9 +214,10 @@ async function tmdbFetch<T>(path: string, apiKey: string, params: Record<string,
   return withTmdbSource(await response.json() as T, 'network', false)
 }
 
-export function createTmdbClient(apiKey: string) {
+export function createTmdbClient(apiKey: string, locale: AppLocale | string = 'en-US') {
+  const language = tmdbLocale(normalizeLocale(locale))
   const get = <T>(path: string, params?: Record<string, string>) =>
-    tmdbFetch<T>(path, apiKey, params)
+    tmdbFetch<T>(path, apiKey, { ...params, language })
 
   return {
     trending: (type: 'all' | 'movie' | 'tv' = 'all', page = 1) =>

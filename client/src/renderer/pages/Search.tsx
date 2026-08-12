@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -16,6 +17,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function SearchPage() {
+  const { t } = useTranslation()
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const location = useLocation()
   const initialQuery = new URLSearchParams(location.search).get('q') ?? ''
@@ -51,7 +53,7 @@ export function SearchPage() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search movies, series, cast..."
+            placeholder={t('catalog.searchPlaceholder')}
             className="w-full bg-km-surface-2/40 border border-km-border/30 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-purple-300/30 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-base transition-all"
             autoFocus
           />
@@ -61,20 +63,20 @@ export function SearchPage() {
         </div>
 
         {isError && debouncedQuery.length >= 2 && (
-          <p className="text-purple-300/40 text-sm text-center py-8">Search failed — is the catalog service running?</p>
+          <p className="text-purple-300/40 text-sm text-center py-8">{t('catalog.searchFailed')}</p>
         )}
 
         {!isFetching && debouncedQuery.length >= 2 && results.length === 0 && !isError && (
           <div className="text-center py-16">
             <p className="text-purple-300/20 text-4xl mb-3">¯\_(ツ)_/¯</p>
-            <p className="text-purple-300/40 text-sm">No results for "<span className="text-white font-medium">{debouncedQuery}</span>"</p>
+            <p className="text-purple-300/40 text-sm">{t('catalog.noResultsFor', { query: debouncedQuery })}</p>
           </div>
         )}
 
         {results.length > 0 && (
           <>
             <p className="text-purple-300/40 text-sm mb-6">
-              {results.length} result{results.length !== 1 ? 's' : ''} for "<span className="text-white font-semibold">{debouncedQuery}</span>"
+              {t('catalog.resultCount', { count: results.length, query: debouncedQuery })}
             </p>
             <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
               {results.map((item) => (
@@ -89,7 +91,7 @@ export function SearchPage() {
             <svg className="w-12 h-12 text-purple-300/10" fill="none" stroke="currentColor" strokeWidth={1} viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
             </svg>
-            <p className="text-purple-300/30 text-sm font-medium">Search for movies, TV shows, or cast</p>
+            <p className="text-purple-300/30 text-sm font-medium">{t('catalog.searchPrompt')}</p>
           </div>
         )}
       </div>

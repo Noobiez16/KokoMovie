@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 type UpdateState = 'idle' | 'available' | 'downloaded'
 
@@ -10,6 +11,7 @@ type UpdateState = 'idle' | 'available' | 'downloaded'
  * "Restart & Install" prompt when it's ready.
  */
 export function UpdateNotification() {
+  const { t } = useTranslation()
   const [state, setState] = useState<UpdateState>('idle')
   const [version, setVersion] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
@@ -74,10 +76,10 @@ export function UpdateNotification() {
             {isReady ? (
               <>
                 <p className="text-sm font-semibold text-white">
-                  {version ? `Version ${version} is ready` : 'Update ready to install'}
+                  {version ? t('updates.versionReady', { version }) : t('updates.downloaded')}
                 </p>
                 <p className="mt-0.5 text-xs text-purple-300">
-                  A new version of KokoMovie is ready. Restart to update — your place is saved.
+                  {t('updates.readyDescription')}
                 </p>
                 <a
                   href={changelogUrl}
@@ -88,7 +90,7 @@ export function UpdateNotification() {
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                   </svg>
-                  What's new
+                  {t('updates.whatsNew')}
                 </a>
                 <div className="mt-3 flex items-center gap-2">
                   <button
@@ -96,23 +98,23 @@ export function UpdateNotification() {
                     disabled={installing}
                     className="rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-violet-600/20 transition-all hover:from-violet-500 hover:to-fuchsia-500 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
                   >
-                    {installing ? 'Restarting…' : 'Install Update'}
+                    {installing ? t('updates.restarting') : t('updates.install')}
                   </button>
                   <button
                     onClick={() => setDismissed(true)}
                     className="rounded-lg px-3 py-1.5 text-xs font-medium text-purple-300 transition-colors hover:text-white"
                   >
-                    Later
+                    {t('updates.later')}
                   </button>
                 </div>
               </>
             ) : (
               <>
                 <p className="text-sm font-semibold text-white">
-                  {version ? `Downloading version ${version}…` : 'Downloading update…'}
+                  {version ? t('updates.downloadingVersion', { version }) : t('updates.downloading')}
                 </p>
                 <p className="mt-0.5 text-xs text-purple-300">
-                  A newer version is downloading in the background. We'll let you know when it's ready.
+                  {t('updates.downloadingDescription')}
                 </p>
                 <a
                   href={changelogUrl}
@@ -123,7 +125,7 @@ export function UpdateNotification() {
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                   </svg>
-                  What's new
+                  {t('updates.whatsNew')}
                 </a>
               </>
             )}
@@ -132,7 +134,7 @@ export function UpdateNotification() {
           {!isReady && (
             <button
               onClick={() => setDismissed(true)}
-              aria-label="Dismiss"
+              aria-label={t('updates.dismiss')}
               className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-purple-300 transition-colors hover:text-white"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

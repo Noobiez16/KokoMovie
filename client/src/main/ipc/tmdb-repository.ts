@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { getDb } from '../db/sqlite'
 import { getTmdbCredential, storeTmdbCredential } from './auth'
 import { assertTrustedRenderer, tmdbCredentialSchema } from './security'
-import { findCachedTmdbItem, mergeTmdbItems, downloadedRowsToTmdbItem, type DownloadedMetadataRow, searchCachedTmdb, type CachedPayloadRow, type CachedTmdbItem } from '../tmdb-cache-policy'
+import { findCachedTmdbItem, mergeTmdbItems, downloadedRowsToTmdbItem, tmdbRequestCacheKey, type DownloadedMetadataRow, searchCachedTmdb, type CachedPayloadRow, type CachedTmdbItem } from '../tmdb-cache-policy'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const CACHE_SCHEMA_VERSION = 1
@@ -16,7 +16,7 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/multi|configuration)$/
 const paramsSchema = z.record(z.string().max(500)).default({}).refine((params) =>
   Object.keys(params).length <= 12 &&
-  Object.keys(params).every((key) => ['page', 'sort_by', 'with_genres', 'primary_release_year', 'first_air_date_year', 'query', 'append_to_response'].includes(key)),
+  Object.keys(params).every((key) => ['page', 'sort_by', 'with_genres', 'primary_release_year', 'first_air_date_year', 'query', 'append_to_response', 'language'].includes(key)),
   'TMDB query parameter is not allowed',
 )
 const downloadSearchSchema = z.string().trim().min(2).max(200)
@@ -29,11 +29,6 @@ interface CacheRow {
   payload: string
   fetched_at: string
   expires_at: string
-}
-
-function cacheKey(path: string, params: Record<string, string>): string {
-  const ordered = Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)))
-  return JSON.stringify([CACHE_SCHEMA_VERSION, path, ordered])
 }
 
 function readCache(key: string): CacheRow | undefined {
@@ -128,7 +123,7 @@ function mergeSearchBody(body: string, query: string): string {
 
 async function requestTmdb(path: string, params: Record<string, string>) {
   purgeExpiredCache()
-  const key = cacheKey(path, params)
+  const key = tmdbRequestCacheKey(path, params, CACHE_SCHEMA_VERSION)
   const cached = readCache(key)
   const fallback = localFallback(path, params)
   const fetchedAt = cached ? Date.parse(cached.fetched_at) : 0

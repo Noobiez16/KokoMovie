@@ -1,6 +1,6 @@
 {
   "name": "kokomovie-pc",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "private": true,
   "license": "GPL-3.0-or-later",
   "workspaces": [
@@ -33,6 +33,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.5.4"
   },
   "engines": {

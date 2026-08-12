@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import type { CatalogSource } from '../../api/catalog'
+import { useTranslation } from 'react-i18next'
 
 /**
  * Shown when the catalog service answered from its small local database instead
@@ -10,6 +11,7 @@ import type { CatalogSource } from '../../api/catalog'
  */
 export function CatalogFallbackBanner({ source }: { source?: CatalogSource }) {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   if (source !== 'local' && source !== 'cache') return null
 
   return (
@@ -20,16 +22,16 @@ export function CatalogFallbackBanner({ source }: { source?: CatalogSource }) {
         <line x1="12" y1="17" x2="12.01" y2="17" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">{source === 'cache' ? 'Showing saved catalog data' : "You're viewing a limited offline catalog"}</p>
+        <p className="text-sm font-semibold">{source === 'cache' ? t('catalog.showingSaved') : t('catalog.limitedOffline')}</p>
         <p className="text-xs text-amber-200/70">
-          {source === 'cache' ? 'Some information may be out of date. KokoMovie will refresh it when TMDB is reachable.' : 'Add your free TMDB API key to unlock the full library of movies and shows.'}
+          {source === 'cache' ? t('catalog.cachedNotice') : t('catalog.localNotice')}
         </p>
       </div>
       {source === 'local' && <button
         onClick={() => navigate('/settings')}
         className="shrink-0 rounded-lg bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-50 transition-colors hover:bg-amber-400/30"
       >
-        Add TMDB key
+        {t('catalog.addApiKey')}
       </button>}
     </div>
   )

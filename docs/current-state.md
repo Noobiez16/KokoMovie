@@ -1,7 +1,7 @@
 # KokoMovie Current State
 
-**Audit date:** 2026-08-08
-**Baseline:** v1.5.2 optimization branch based on tagged v1.5.1
+**Audit date:** 2026-08-12
+**Baseline:** v1.5.3 stream-reliability and localization branch based on tagged v1.5.2
 **Rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
 
 ## Runtime
@@ -19,6 +19,12 @@ The database is userData/kokomovie.db. Startup enables WAL and foreign keys. Tab
 - tmdb_cache: schema-versioned structured TMDB response JSON with request keys, fetch time, and 90-day retention.
 
 Additional userData files include provider-prefs.json, update-prefs.json, extraction.log, versioned catalog artwork, and download media sidecars. TMDB credentials are stored only by keytar under the local account ID; a legacy plaintext credential is migrated once and deleted after a successful keychain write.
+
+## Interface localization
+
+The renderer bundles English (`en-US`), Spanish (`es-ES`), and French (`fr-FR`) resources through i18next/react-i18next. Startup hydrates the persisted preference before rendering, and Settings applies a new locale immediately across the React interface, HTML document locale, native Electron menu, and TMDB query cache. Locale-specific TMDB cache keys keep translated catalog responses isolated. The custom language listbox uses the application’s dark palette and supports keyboard and assistive-technology navigation. Portuguese is intentionally not exposed yet.
+
+The native View menu always includes Toggle Developer Tools, including packaged builds, so users can inspect renderer console errors without a special development build.
 
 ## IPC boundary
 

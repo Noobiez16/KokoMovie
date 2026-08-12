@@ -79,7 +79,7 @@ describe('pagination controls', () => {
   })
 
   it('is reachable as a labelled navigation landmark', () => {
-    expect(component).toContain('aria-label="Category pages"')
+    expect(component).toContain("aria-label={t('catalog.categoryPages')}")
   })
 })
 

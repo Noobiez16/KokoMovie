@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react'
 import type Hls from 'hls.js'
 import type { Episode } from '../../api/catalog'
 import { NextEpisodeButton } from './NextEpisodeButton'
+import { useTranslation } from 'react-i18next'
 
 // Premium player exposes only the meaningful tiers: AUTO, 720p, 1080p.
 // Lower tiers (240/360/480/540p) are still picked by AUTO when bandwidth requires,
@@ -110,6 +111,7 @@ export function PlayerControls({
   onPip, openSettingsSignal = 0,
   onInteractionStart, onInteractionEnd,
 }: Props) {
+  const { t } = useTranslation()
   // One gear button opens a single settings panel. It uses a drill-down layout
   // (home list → category) like mainstream players, instead of dumping every option
   // on screen at once.
@@ -174,11 +176,11 @@ export function PlayerControls({
   const hasQuality = !!hls && levels.length > 0
   const hasSources = sources.length > 1
   const activeSubtitleName = currentSubtitle >= 0
-    ? subtitleTracks.find((t) => t.id === currentSubtitle)?.name || 'On'
-    : 'Off'
-  const activeSourceName = sources.find((s) => s.id === activeSourceId)?.name || 'Server'
-  const activeQualityName = currentLevel === -1 ? 'Auto' : `${levels[currentLevel]?.height ?? ''}p`
-  const activeAudioName = audioTracks.find((t) => t.id === currentAudioTrack)?.name || 'Original'
+    ? subtitleTracks.find((track) => track.id === currentSubtitle)?.name || t('common.on')
+    : t('common.off')
+  const activeSourceName = sources.find((source) => source.id === activeSourceId)?.name || t('player.server')
+  const activeQualityName = currentLevel === -1 ? t('player.auto') : `${levels[currentLevel]?.height ?? ''}p`
+  const activeAudioName = audioTracks.find((track) => track.id === currentAudioTrack)?.name || t('player.original')
 
   // Reusable bits ----------------------------------------------------------------
   const BackHeader = ({ title }: { title: string }) => (
@@ -220,7 +222,7 @@ export function PlayerControls({
             onClick={() => onSeek(introEndSecs!)}
             className="bg-white/20 border border-white/40 text-white font-medium px-5 py-2 rounded hover:bg-white/30 transition-colors backdrop-blur-sm"
           >
-            Skip Intro ›
+            {t('player.skipIntro')} ›
           </button>
         </div>
       )}
@@ -317,8 +319,8 @@ export function PlayerControls({
             <div className="relative">
               <button
                 onClick={openSettings}
-                aria-label="Playback settings"
-                title="Settings"
+                aria-label={t('player.playbackSettings')}
+                title={t('common.settings')}
                 className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 ${
                   showSettings ? 'bg-white/15 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'
                 }`}
@@ -344,18 +346,18 @@ export function PlayerControls({
                     {/* ── Home: category list ──────────────────────────────────── */}
                     {menuView === 'home' && (
                       <div className="py-0.5">
-                        <p className="px-4 pt-1 pb-2 text-[10px] font-bold text-white/35 uppercase tracking-wider">Settings</p>
-                        {hasSources && <HomeRow label="Source" value={activeSourceName} onClick={() => setMenuView('source')} />}
-                        <HomeRow label="Audio" value={activeAudioName} onClick={() => setMenuView('audio')} />
-                        <HomeRow label="Subtitles" value={activeSubtitleName} onClick={() => setMenuView('subtitles')} />
-                        {hasQuality && <HomeRow label="Quality" value={activeQualityName} onClick={() => setMenuView('quality')} />}
+                        <p className="px-4 pt-1 pb-2 text-[10px] font-bold text-white/35 uppercase tracking-wider">{t('common.settings')}</p>
+                        {hasSources && <HomeRow label={t('player.source')} value={activeSourceName} onClick={() => setMenuView('source')} />}
+                        <HomeRow label={t('player.audio')} value={activeAudioName} onClick={() => setMenuView('audio')} />
+                        <HomeRow label={t('player.subtitles')} value={activeSubtitleName} onClick={() => setMenuView('subtitles')} />
+                        {hasQuality && <HomeRow label={t('player.quality')} value={activeQualityName} onClick={() => setMenuView('quality')} />}
                       </div>
                     )}
 
                     {/* ── Source ───────────────────────────────────────────────── */}
                     {menuView === 'source' && (
                       <div>
-                        <BackHeader title="Source" />
+                        <BackHeader title={t('player.source')} />
                         {availableSources.map((s) => (
                           <button
                             key={s.id}
@@ -367,7 +369,7 @@ export function PlayerControls({
                               <span className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex-shrink-0">A</span>
                               <span className="truncate">{s.name}</span>
                               {(audioLangsBySource?.[s.id]?.length ?? 0) >= 2 && (
-                                <span className="flex items-center gap-0.5 flex-shrink-0" title="Audio dub languages">
+                                <span className="flex items-center gap-0.5 flex-shrink-0" title={t('player.dubLanguages')}>
                                   {audioLangsBySource![s.id]!.slice(0, 5).map((lang) => (
                                     <span key={lang} className="inline-flex items-center justify-center px-1 h-3.5 rounded-sm text-[8px] font-bold uppercase bg-sky-500/15 text-sky-300 border border-sky-500/25">{lang}</span>
                                   ))}
@@ -400,9 +402,9 @@ export function PlayerControls({
                     {/* ── Subtitles ────────────────────────────────────────────── */}
                     {menuView === 'subtitles' && (
                       <div>
-                        <BackHeader title="Subtitles" />
+                        <BackHeader title={t('player.subtitles')} />
                         <button onClick={() => onSubtitleChange(-1)} className={optionClass(currentSubtitle < 0)}>
-                          <span>Off</span>
+                          <span>{t('common.off')}</span>
                           {currentSubtitle < 0 && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
                         </button>
                         {subtitleTracks.map((t) => (
@@ -412,13 +414,13 @@ export function PlayerControls({
                           </button>
                         ))}
                         {subtitleTracks.length === 0 && (
-                          <div className="px-3 py-3 text-[11px] text-white/40 italic text-center">No subtitles found for this title</div>
+                          <div className="px-3 py-3 text-[11px] text-white/40 italic text-center">{t('player.noSubtitles')}</div>
                         )}
 
                         {/* Subtitle size — global preference, remembered across titles */}
                         {subtitleTracks.length > 0 && (
                           <div className="mt-1 px-3 pt-1.5 pb-1 border-t border-white/10">
-                            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 font-semibold">Size</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 font-semibold">{t('player.size')}</p>
                             <div className="flex items-center gap-1">
                               {(['small', 'medium', 'large'] as const).map((size) => (
                                 <button
@@ -457,13 +459,13 @@ export function PlayerControls({
                                 <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                               )}
                               <span>
-                                {autoSyncState === 'running' ? 'Listening & syncing…'
-                                  : autoSyncState === 'done' ? 'Synced ✓'
-                                  : autoSyncState === 'fail' ? "Couldn't auto-sync — nudge below"
-                                  : 'Auto-sync subtitles'}
+                                {autoSyncState === 'running' ? t('player.syncing')
+                                  : autoSyncState === 'done' ? t('player.synced')
+                                  : autoSyncState === 'fail' ? t('player.syncFailed')
+                                  : t('player.autoSync')}
                               </span>
                             </button>
-                            <p className="text-[9px] text-white/30 mt-1 leading-tight">Keep playing for a few seconds while it matches subtitles to the dialogue.</p>
+                            <p className="text-[9px] text-white/30 mt-1 leading-tight">{t('player.autoSyncDescription')}</p>
                           </div>
                         )}
 
@@ -471,10 +473,10 @@ export function PlayerControls({
                         {currentSubtitle >= 1000 && (
                           <div className="mt-1 px-3 pt-1.5 pb-1 border-t border-white/10">
                             <div className="flex items-center justify-between mb-1.5">
-                              <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold">Manual delay</p>
+                              <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold">{t('player.manualDelay')}</p>
                               {subtitleOffset !== 0 && (
-                                <button onClick={() => onSubtitleOffsetChange(0)} className="text-[10px] text-white/40 hover:text-white transition-colors" title="Reset to 0">
-                                  Reset
+                                <button onClick={() => onSubtitleOffsetChange(0)} className="text-[10px] text-white/40 hover:text-white transition-colors" title={t('player.resetDelay')}>
+                                  {t('player.reset')}
                                 </button>
                               )}
                             </div>
@@ -482,7 +484,7 @@ export function PlayerControls({
                               <button
                                 onClick={() => onSubtitleOffsetChange(Math.round((subtitleOffset - 0.5) * 10) / 10)}
                                 className="w-5 h-5 rounded hover:bg-white/10 flex items-center justify-center text-white text-xs font-bold transition-all active:scale-90"
-                                title="Show subtitles 0.5s earlier (they're lagging behind)"
+                                title={t('player.subtitlesEarlier')}
                               >
                                 −
                               </button>
@@ -492,12 +494,12 @@ export function PlayerControls({
                               <button
                                 onClick={() => onSubtitleOffsetChange(Math.round((subtitleOffset + 0.5) * 10) / 10)}
                                 className="w-5 h-5 rounded hover:bg-white/10 flex items-center justify-center text-white text-xs font-bold transition-all active:scale-90"
-                                title="Show subtitles 0.5s later (they're appearing too early)"
+                                title={t('player.subtitlesLater')}
                               >
                                 +
                               </button>
                             </div>
-                            <p className="text-[9px] text-white/30 mt-1 leading-tight">− earlier if subtitles lag · + later if they're ahead</p>
+                            <p className="text-[9px] text-white/30 mt-1 leading-tight">{t('player.delayHint')}</p>
                           </div>
                         )}
                       </div>
@@ -506,7 +508,7 @@ export function PlayerControls({
                     {/* ── Audio language (scaffold — no real tracks wired yet) ──── */}
                     {menuView === 'audio' && (
                       <div>
-                        <BackHeader title="Audio" />
+                        <BackHeader title={t('player.audio')} />
                         {audioTracks.length > 0 ? (
                           // Multi-track manifest: one rendition is always active, so list the
                           // real tracks (no separate "Original" pseudo-option to confuse things).
@@ -519,7 +521,7 @@ export function PlayerControls({
                         ) : (
                           // Single-audio current source: only its original track is selectable here.
                           <button onClick={() => setMenuView('home')} className={optionClass(true)}>
-                            <span>Original</span>
+                            <span>{t('player.original')}</span>
                             <span className="text-violet-400 text-[10px] font-bold">✓</span>
                           </button>
                         )}
@@ -529,7 +531,7 @@ export function PlayerControls({
                         {crossSourceAudio.length > 0 && (
                           <>
                             <div className="border-t border-white/8 my-1" />
-                            <p className="px-3 pt-1 pb-1 text-[10px] text-white/40 uppercase tracking-wider font-semibold">More languages · other sources</p>
+                            <p className="px-3 pt-1 pb-1 text-[10px] text-white/40 uppercase tracking-wider font-semibold">{t('player.otherSources')}</p>
                             {crossSourceAudio.map((c) => (
                               <button
                                 key={`${c.sourceId}:${c.lang}`}
@@ -545,7 +547,7 @@ export function PlayerControls({
 
                         {audioTracks.length === 0 && crossSourceAudio.length === 0 && (
                           <div className="px-3 py-2 text-[11px] text-white/40 italic text-center">
-                            No additional audio tracks for this title
+                            {t('player.noAdditionalAudio')}
                           </div>
                         )}
                       </div>
@@ -554,9 +556,9 @@ export function PlayerControls({
                     {/* ── Quality ──────────────────────────────────────────────── */}
                     {menuView === 'quality' && (
                       <div>
-                        <BackHeader title="Quality" />
+                        <BackHeader title={t('player.quality')} />
                         <button onClick={() => { onLevelChange(-1); setMenuView('home') }} className={optionClass(currentLevel === -1)}>
-                          <span>Auto</span>
+                          <span>{t('player.auto')}</span>
                           {currentLevel === -1 && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
                         </button>
                         {visibleLevels.map(({ height, idx }) => (
@@ -574,7 +576,7 @@ export function PlayerControls({
 
             {/* Picture-in-Picture (minimise) */}
             {onPip && (
-              <button onClick={onPip} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center w-8 h-8" title="Picture-in-Picture" aria-label="Picture-in-Picture">
+              <button onClick={onPip} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center w-8 h-8" title={t('player.pictureInPicture')} aria-label={t('player.pictureInPicture')}>
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
                   <rect x="3" y="4" width="18" height="15" rx="2" />
                   <rect x="12.5" y="11" width="7" height="5.5" rx="1" fill="currentColor" stroke="none" />
@@ -583,7 +585,7 @@ export function PlayerControls({
             )}
 
             {/* Fullscreen */}
-            <button onClick={onFullscreen} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center" title="Fullscreen">
+            <button onClick={onFullscreen} className="text-white/60 hover:text-km-accent transition-colors flex items-center justify-center" title={t('player.fullscreen')}>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
                 <polyline points="15 3 21 3 21 9" />
                 <polyline points="9 21 3 21 3 15" />

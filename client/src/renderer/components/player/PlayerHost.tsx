@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { catalogApi, type Episode } from '../../api/catalog'
 import { playbackApi, type PlaybackSession } from '../../api/playback'
 import { downloadsApi } from '../../api/downloads'
@@ -37,6 +38,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * next-episode extraction) driven entirely by the `usePlayerStore` request.
  */
 export function PlayerHost() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { activeProfile } = useAuthStore()
   const profileId = activeProfile?.id ?? LOCAL_PROFILE_ID
@@ -189,7 +191,7 @@ export function PlayerHost() {
       downloadsApi.getManifest(request.offlineId)
         .then((res) => {
           setOfflineSubtitles(res?.subtitles ?? [])
-          if (!res) { setSessionError('Offline download not found'); return }
+          if (!res) { setSessionError(t('player.offlineNotFound')); return }
           if (res.manifestContent.startsWith('direct:')) {
             setSession({ sessionId: request.offlineId!, manifestUrl: res.manifestContent.substring(7), drmKeyId: res.drmKeyId, expiresIn: 14400 })
           } else {
@@ -198,7 +200,7 @@ export function PlayerHost() {
             setSession({ sessionId: request.offlineId!, manifestUrl: url, drmKeyId: res.drmKeyId, expiresIn: 14400 })
           }
         })
-        .catch((err: Error) => setSessionError(err.message ?? 'Failed to load offline manifest'))
+        .catch((err: Error) => setSessionError(err.message ?? t('player.offlineLoadFailed')))
       return
     }
 
@@ -215,7 +217,7 @@ export function PlayerHost() {
 
     playbackApi.createSession({ contentId: sortedContent.id, episodeId, s3HlsKey, drmKeyId: sortedContent.drmKeyId ?? undefined, durationSeconds }, profileId)
       .then((res) => setSession(res.data))
-      .catch((err: Error) => setSessionError(err.message ?? 'Failed to create playback session'))
+      .catch((err: Error) => setSessionError(err.message ?? t('player.sessionFailed')))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedContent?.id, episodeId, request?.streamUrl, request?.offlineId, launchToken, profileId])
 
@@ -255,14 +257,14 @@ export function PlayerHost() {
           searchId,
         })
       } else {
-        setSessionError('No working stream found for the next episode.')
+        setSessionError(t('player.nextEpisodeNoStream'))
       }
     } catch {
-      setSessionError('Could not load the next episode.')
+      setSessionError(t('player.nextEpisodeLoadFailed'))
     } finally {
       setNextEpisodeLoading(false)
     }
-  }, [sortedContent, patchRequest])
+  }, [sortedContent, patchRequest, t])
 
   const handleClose = useCallback(() => {
     const wasFull = mode === 'full'
@@ -369,12 +371,12 @@ export function PlayerHost() {
     ? { right: pipOffset.right, bottom: pipOffset.bottom, width: pipSize.w, height: pipSize.h }
     : undefined
 
-  const title = sortedContent?.title ?? 'Loading…'
+  const title = sortedContent?.title ?? t('common.loading')
   const spinner = (
     <div className="absolute inset-0 flex items-center justify-center bg-black">
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
-        <p className="text-white/40 text-xs">{nextEpisodeLoading ? 'Loading next episode…' : 'Starting playback…'}</p>
+        <p className="text-white/40 text-xs">{nextEpisodeLoading ? t('player.loadingNextEpisode') : t('player.startingPlayback')}</p>
       </div>
     </div>
   )
@@ -386,7 +388,7 @@ export function PlayerHost() {
           <div>
             <p className="text-white/60 text-sm mb-3">{sessionError}</p>
             <button onClick={handleClose} className="bg-white/10 text-white px-4 py-2 rounded text-sm hover:bg-white/20 transition-colors">
-              Go Back
+              {t('common.back')}
             </button>
           </div>
         </div>
@@ -422,8 +424,8 @@ export function PlayerHost() {
         <button
           key="km-pip-expand"
           onClick={handleExpand}
-          title="Back to fullscreen"
-          aria-label="Back to fullscreen"
+          title={t('player.backToFullscreen')}
+          aria-label={t('player.backToFullscreen')}
           className="absolute inset-0 z-[55] cursor-pointer"
         />
       )}
@@ -434,7 +436,7 @@ export function PlayerHost() {
         <div
           key="km-pip-resize"
           onPointerDown={onResizeStart}
-          title="Resize"
+          title={t('player.resize')}
           className="absolute top-0 left-0 z-[80] w-5 h-5 p-1 cursor-nwse-resize opacity-0 group-hover:opacity-100 transition-opacity duration-200"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
@@ -458,7 +460,7 @@ export function PlayerHost() {
             <button
               onClick={(e) => { e.stopPropagation(); handleExpand() }}
               onPointerDown={(e) => e.stopPropagation()}
-              title="Expand"
+              title={t('player.expand')}
               className="w-6 h-6 flex items-center justify-center rounded text-white/80 hover:text-white hover:bg-white/15 transition-colors"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
@@ -469,7 +471,7 @@ export function PlayerHost() {
             <button
               onClick={(e) => { e.stopPropagation(); handleClose() }}
               onPointerDown={(e) => e.stopPropagation()}
-              title="Close"
+              title={t('common.close')}
               className="w-6 h-6 flex items-center justify-center rounded text-white/80 hover:text-white hover:bg-red-500/40 transition-colors"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">

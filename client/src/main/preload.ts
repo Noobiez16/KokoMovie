@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── App ──────────────────────────────────────────────────────────────────
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   getPlatform: () => ipcRenderer.invoke('app:platform'),
+  setApplicationLocale: (locale: 'en-US' | 'es-ES' | 'fr-FR') => ipcRenderer.invoke('app:set-locale', locale),
   onHelpAction: (callback: (action: 'documentation' | 'feedback') => void) => {
     const handler = (_: Electron.IpcRendererEvent, action: 'documentation' | 'feedback') => callback(action)
     ipcRenderer.on('help:action', handler)

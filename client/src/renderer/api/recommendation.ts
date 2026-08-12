@@ -3,6 +3,7 @@ import type { ContentSummary } from './catalog'
 import { catalogApi, tmdbItemsToSummaries } from './catalog'
 import { createTmdbClient, decodeTmdbContentId } from '../lib/tmdb'
 import { useSettingsStore } from '../store/settings'
+import i18n from '../i18n'
 
 export interface RecommendationRow {
   id: string
@@ -24,7 +25,7 @@ export const recommendationApi = {
     const decoded = decodeTmdbContentId(contentId)
     const key = useSettingsStore.getState().tmdbApiKey?.trim()
     if (!decoded || !key) return { success: true as const, data: [] as ContentSummary[] }
-    const c = createTmdbClient(key)
+    const c = createTmdbClient(key, i18n.language)
     const res = decoded.type === 'movie'
       ? await c.getSimilarMovies(decoded.tmdbId)
       : await c.getSimilarTv(decoded.tmdbId)

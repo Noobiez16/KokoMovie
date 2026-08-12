@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Episode } from '../../api/catalog'
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function NextEpisodeOverlay({ nextEpisode, onPlay, onDismiss, autoplayDelaySecs = 10 }: Props) {
+  const { t } = useTranslation()
   const [remaining, setRemaining] = useState(autoplayDelaySecs)
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export function NextEpisodeOverlay({ nextEpisode, onPlay, onDismiss, autoplayDel
 
   return (
     <div className="absolute bottom-24 right-6 z-20 bg-black/80 border border-white/20 rounded-lg p-4 w-72 backdrop-blur-sm">
-      <p className="text-white/60 text-xs mb-2">Next Episode</p>
+      <p className="text-white/60 text-xs mb-2">{t('player.nextEpisode')}</p>
       <p className="text-white font-medium text-sm mb-3 line-clamp-2">{nextEpisode.title}</p>
 
       <div className="flex gap-2">
@@ -35,7 +37,7 @@ export function NextEpisodeOverlay({ nextEpisode, onPlay, onDismiss, autoplayDel
           onClick={onPlay}
           className="flex-1 bg-km-accent text-black font-semibold text-sm py-2 rounded hover:bg-km-accent/90 transition-colors"
         >
-          ▶ Play ({remaining}s)
+          ▶ {t('common.play')} ({remaining}s)
         </button>
         <button
           onClick={onDismiss}

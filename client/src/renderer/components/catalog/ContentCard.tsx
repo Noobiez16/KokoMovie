@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ContentSummary } from '../../api/catalog'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   content: ContentSummary
   size?: 'sm' | 'md' | 'lg'
-  /** When provided, shows a hover "remove" (×) button — used by the Continue Watching row. */
+  /** When provided, shows a hover "remove" (×) button — used by the resume row. */
   onRemove?: (id: string) => void
 }
 
 export function ContentCard({ content, size = 'md', onRemove }: Props) {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [imgError, setImgError] = useState(false)
 
   const widths = { sm: 'w-28', md: 'w-36', lg: 'w-48' }
@@ -69,13 +71,13 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
           </div>
         </div>
 
-        {/* Remove from Continue Watching (× on hover). Stops the click from reaching the
+        {/* Remove from the resume row (× on hover). Stops the click from reaching the
             card so it deletes the record instead of starting playback. */}
         {onRemove && (
           <button
             type="button"
-            aria-label="Remove from Continue Watching"
-            title="Remove from Continue Watching"
+            aria-label={t('catalog.removeContinue')}
+            title={t('catalog.removeContinue')}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(content.id) }}
             className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm"
           >
@@ -90,7 +92,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
             content.type === 'movie' ? 'bg-violet-600/80 text-white' : 'bg-fuchsia-600/80 text-white'
           }`}>
-            {content.type === 'movie' ? 'Movie' : 'Series'}
+            {content.type === 'movie' ? t('common.movie') : t('common.series')}
           </span>
         </div>
 
@@ -102,7 +104,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
           </div>
         )}
 
-        {/* Progress Bar for Continue Watching */}
+        {/* Resume progress bar */}
         {hasProgress && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
             <div

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ContentDetail } from '../../api/catalog'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   content: ContentDetail
@@ -8,6 +9,7 @@ interface Props {
 
 export function HeroBanner({ content }: Props) {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [muted, setMuted] = useState(true)
   const [showTrailer, setShowTrailer] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -104,7 +106,7 @@ export function HeroBanner({ content }: Props) {
             }}
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-[1.15] transition-opacity duration-1000"
             allow="autoplay; encrypted-media"
-            title="Trailer"
+            title={t('catalog.trailer')}
           />
           {/* Transparent click/hover interception shield */}
           <div className="absolute inset-0 bg-transparent pointer-events-auto z-10" />
@@ -124,7 +126,7 @@ export function HeroBanner({ content }: Props) {
               ? 'text-violet-400 bg-violet-500/10 border-violet-500/20'
               : 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/20'
           }`}>
-            {content.type === 'movie' ? '🎬 Movie' : '📺 Series'}
+            {content.type === 'movie' ? `🎬 ${t('common.movie')}` : `📺 ${t('common.series')}`}
           </span>
           {content.releaseYear && (
             <span className="text-purple-200/50 text-sm">{content.releaseYear}</span>
@@ -178,7 +180,7 @@ export function HeroBanner({ content }: Props) {
             <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
-            Play
+            {t('common.play')}
           </button>
           <button
             onClick={go}
@@ -188,12 +190,12 @@ export function HeroBanner({ content }: Props) {
               <circle cx="12" cy="12" r="10" />
               <path d="M12 16v-4M12 8h.01" />
             </svg>
-            More Info
+            {t('catalog.moreInfo')}
           </button>
           <button
             onClick={toggleMute}
             className="w-10 h-10 rounded-full border border-purple-500/20 bg-purple-950/20 flex items-center justify-center text-purple-300/70 hover:text-white hover:border-purple-500/40 hover:bg-purple-950/40 transition-all ml-auto"
-            title={muted ? 'Unmute' : 'Mute'}
+            title={muted ? t('common.unmute') : t('common.mute')}
           >
             {muted ? (
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

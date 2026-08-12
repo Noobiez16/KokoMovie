@@ -6,15 +6,15 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.5.2-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
-[![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#-download)
-[![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#-automatic-updates)
+[![Version](https://img.shields.io/badge/version-1.5.3-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
+[![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#automatic-updates)
 
 </div>
 
 ---
 
-## 📥 Download
+## Download
 
 Pick your system and click to grab the latest version from the
 **[Releases page](https://github.com/Noobiez16/KokoMovie/releases/latest)**:
@@ -33,37 +33,39 @@ artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` �
 </div>
 
 > **On macOS?** A ready-made installer isn't published yet. You can build the app
-> yourself — see [For Developers](#-for-developers) below.
+> yourself — see [For Developers](#for-developers) below.
 
 ---
 
-## ✨ What is KokoMovie?
+## What is KokoMovie?
 
 KokoMovie is a desktop app that brings movies and TV shows together in one place,
 with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
 working stream for you automatically — no juggling websites, pop-ups, or sign-ups.
 
-- 🎬 **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
-- ▶️ **One-click play** — KokoMovie finds a working stream and starts playing
-- 📺 **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
-- 💾 **On-device storage** — watchlists, history, and preferences are stored locally on your machine
-- ⬇️ **Watch offline** — save portable 1080p MP4 files, including language-selected torrent dubs, for when you are without internet
-- 🔄 **Always up to date** — the app updates itself in the background
+- **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
+- **One-click play** — KokoMovie finds a working stream and starts playing
+- **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
+- **On-device storage** — watchlists, history, and preferences are stored locally on your machine
+- **Watch offline** — save portable 1080p MP4 files, including language-selected torrent dubs, for when you are without internet
+- **Always up to date** — the app updates itself in the background
+- **English, Español, Français** — switch the complete interface instantly in Settings, with no restart
+- **Built-in diagnostics** — advanced users can open Developer Tools from the View menu to inspect console errors
 
 ---
 
-## 🔄 Automatic Updates
+## Automatic Updates
 
 You only download KokoMovie once. After that, it **checks for new versions on its own**
 and installs them quietly in the background — the next time you open the app, you're
 already on the latest version. No re-downloading, no reinstalling.
 
-> 💡 On Linux, automatic updates work with the **AppImage** version. The `.deb` package
+> On Linux, automatic updates work with the **AppImage** version. The `.deb` package
 > is updated like other system apps when you reinstall it.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 1. **Download and install** KokoMovie for your system (buttons above).
 2. **Add a free TMDB key** so the catalog fills with movies and shows
@@ -84,7 +86,7 @@ many popular apps) to show posters, titles, and details. It's free and takes a m
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Is it free?** Yes. There are no subscriptions or accounts to pay for.
 
@@ -118,7 +120,7 @@ are checked; no watch history, API keys, or other local library data are transmi
 ---
 
 <details>
-<summary><h2>🛠️ For Developers</h2></summary>
+<summary><h2>For Developers</h2></summary>
 
 KokoMovie is a fully local Electron + React desktop application. All state (watchlists, settings, playback positions) is managed on-device via SQLite. Metadata is fetched directly from TMDB; streams are located by loading third-party embed pages in a sandboxed hidden window and intercepting the video URL.
 
@@ -194,8 +196,8 @@ Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) 
 `latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
-git tag v1.5.2
-git push origin v1.5.2
+git tag v1.5.3
+git push origin v1.5.3
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
@@ -209,7 +211,7 @@ each `client/electron-builder.*.yml`.
 
 ---
 
-## ⚖️ Legal Notice
+## Legal Notice
 
 KokoMovie does not host, store, or distribute any video content. All streams are located
 by loading third-party embed pages in a sandboxed browser context, at the user's explicit
