@@ -1,12 +1,25 @@
 export interface StreamSource {
   url: string
   quality: string
+  qualityInfo?: StreamQuality
   headers?: Record<string, string>
   subtitles?: SubtitleTrack[]
   // Alternate audio (dub) languages declared in the HLS master, as 2-letter codes in manifest
   // order (e.g. ['en','it']). Empty for single/muxed-audio streams. Used to label sources in
   // the player's source switcher so users can find which provider carries a given dub.
   audioLangs?: string[]
+}
+
+export type StreamReleaseType = 'standard' | 'cam' | 'telesync' | 'unknown'
+export type StreamQualityConfidence = 'verified' | 'declared' | 'inferred' | 'unknown'
+
+export interface StreamQuality {
+  resolution: number
+  resolutionLabel: string
+  releaseType: StreamReleaseType
+  confidence: StreamQualityConfidence
+  displayLabel: string
+  mediaValidated: boolean
 }
 
 export interface SubtitleTrack {

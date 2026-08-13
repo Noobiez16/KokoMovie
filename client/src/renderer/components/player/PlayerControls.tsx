@@ -53,6 +53,7 @@ interface Props {
   creditsStartSecs: number | null
   sources?: Array<{ id: string; name: string; enabled: boolean }>
   availableSourceIds?: string[]
+  sourceStatuses?: ProviderSourceStatus[]
   /** providerId → available audio dub languages (2-letter codes), for the source switcher. */
   audioLangsBySource?: Record<string, string[]>
   activeSourceId?: string | null
@@ -104,7 +105,7 @@ export function PlayerControls({
   onPlayPause, onMute, onVolumeChange, onSeek, onLevelChange, onSubtitleChange, onSubtitleSizeChange, onSubtitleOffsetChange,
   onAutoSync, autoSyncState = 'idle',
   onFullscreen, introEndSecs, creditsStartSecs,
-  sources = [], availableSourceIds, audioLangsBySource, activeSourceId = null, onSourceChange, switchingSource = false,
+  sources = [], availableSourceIds, sourceStatuses = [], audioLangsBySource, activeSourceId = null, onSourceChange, switchingSource = false,
   nextEpisode = null, onNextEpisode,
   audioTracks = AUDIO_TRACKS_PLACEHOLDER, currentAudioTrack = -1, onAudioTrackChange,
   crossSourceAudio = [], onCrossSourceAudio,
@@ -148,17 +149,21 @@ export function PlayerControls({
     onSeek(pct * duration)
   }, [duration, onSeek])
 
-  // Split sources into confirmed-available and unconfirmed (shut down for this content).
-  // Available = provider returned a stream during the initial race (fast-switch).
-  // Shut down = not in allStreams; may still work via fresh extraction.
-  const { availableSources, shutDownSources } = useMemo(() => {
-    if (!availableSourceIds) return { availableSources: sources, shutDownSources: [] }
+  const sourceEntries = useMemo(() => {
     const avSet = new Set(availableSourceIds)
-    return {
-      availableSources: sources.filter((s) => avSet.has(s.id)),
-      shutDownSources: sources.filter((s) => !avSet.has(s.id)),
-    }
-  }, [sources, availableSourceIds])
+    const byId = new Map(sourceStatuses.map((status) => [status.providerId, status]))
+    const order = new Map(sourceStatuses.map((status, index) => [status.providerId, index]))
+    return sources
+      .map((source) => ({
+        ...source,
+        status: byId.get(source.id) ?? {
+          providerId: source.id,
+          providerName: source.name,
+          state: avSet.has(source.id) ? 'available' as const : 'unavailable' as const,
+        },
+      }))
+      .sort((a, b) => (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+  }, [sources, availableSourceIds, sourceStatuses])
 
   // Map the allowed tiers to actual HLS level indices for this stream.
   const visibleLevels = useMemo(() => {
@@ -174,7 +179,7 @@ export function PlayerControls({
   const bufferedPct = duration ? (buffered / duration) * 100 : 0
 
   const hasQuality = !!hls && levels.length > 0
-  const hasSources = sources.length > 1
+  const hasSources = sources.length > 0
   const activeSubtitleName = currentSubtitle >= 0
     ? subtitleTracks.find((track) => track.id === currentSubtitle)?.name || t('common.on')
     : t('common.off')
@@ -358,15 +363,28 @@ export function PlayerControls({
                     {menuView === 'source' && (
                       <div>
                         <BackHeader title={t('player.source')} />
-                        {availableSources.map((s) => (
+                        {sourceEntries.map((s) => {
+                          const status = s.status
+                          const isSearching = status.state === 'searching'
+                          const isCam = status.qualityInfo?.releaseType === 'cam' || status.qualityInfo?.releaseType === 'telesync'
+                          const stateLabel = status.state === 'available'
+                            ? status.qualityInfo?.displayLabel ?? t('player.sourceAvailable')
+                            : status.state === 'searching'
+                              ? t('player.sourceSearching')
+                              : status.state === 'timed-out'
+                                ? t('player.sourceTimedOut')
+                                : t('player.sourceUnavailable')
+                          return (
                           <button
                             key={s.id}
-                            disabled={switchingSource}
+                            disabled={switchingSource || isSearching}
                             onClick={() => { onSourceChange?.(s.id); closeSettings() }}
-                            className={optionClass(activeSourceId === s.id)}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition-colors ${
+                              activeSourceId === s.id ? 'text-violet-300 bg-violet-500/10 font-semibold' : isCam ? 'text-amber-300 hover:bg-amber-500/10' : isSearching ? 'text-white/35 cursor-wait' : 'text-white/70 hover:bg-white/5 hover:text-white'
+                            }`}
                           >
                             <span className="flex items-center gap-2 min-w-0">
-                              <span className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex-shrink-0">A</span>
+                              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${status.state === 'available' ? isCam ? 'bg-amber-400' : 'bg-emerald-400' : status.state === 'searching' ? 'bg-sky-400 animate-pulse' : 'bg-white/25'}`} />
                               <span className="truncate">{s.name}</span>
                               {(audioLangsBySource?.[s.id]?.length ?? 0) >= 2 && (
                                 <span className="flex items-center gap-0.5 flex-shrink-0" title={t('player.dubLanguages')}>
@@ -376,26 +394,10 @@ export function PlayerControls({
                                 </span>
                               )}
                             </span>
-                            {activeSourceId === s.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
+                            <span className={`text-[9px] flex-shrink-0 ${isCam ? 'font-bold text-amber-300' : 'text-white/40'}`}>{stateLabel}</span>
                           </button>
-                        ))}
-                        {shutDownSources.length > 0 && availableSources.length > 0 && <div className="border-t border-white/8 my-1" />}
-                        {shutDownSources.map((s) => (
-                          <button
-                            key={s.id}
-                            disabled={switchingSource}
-                            onClick={() => { onSourceChange?.(s.id); closeSettings() }}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition-colors hover:bg-white/5 ${
-                              activeSourceId === s.id ? 'text-violet-400 bg-violet-500/10 font-semibold' : 'text-white/35 hover:text-white/55'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2 min-w-0">
-                              <span className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold bg-red-500/10 text-red-400/60 border border-red-500/20 flex-shrink-0">S</span>
-                              <span className="truncate">{s.name}</span>
-                            </span>
-                            {activeSourceId === s.id && <span className="text-violet-400 text-[10px] font-bold flex-shrink-0">✓</span>}
-                          </button>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
 

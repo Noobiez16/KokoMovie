@@ -25,6 +25,7 @@ export function PlayerPage() {
       streamHeaders?: Record<string, string>
       providerId?: string
       allStreams?: CachedStream[]
+      sourceStatuses?: ProviderSourceStatus[]
       resumeAtSeconds?: number
       searchId?: string
     } | null
@@ -46,6 +47,7 @@ export function PlayerPage() {
       streamHeaders: state?.streamHeaders,
       providerId: state?.providerId,
       allStreams: state?.allStreams,
+      sourceStatuses: state?.sourceStatuses,
       resumeAtSeconds: state?.resumeAtSeconds,
       offlineId,
       searchId: state?.searchId,

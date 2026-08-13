@@ -24,7 +24,16 @@ const payload = {
 
 describe('library portability format', () => {
   it('validates a versioned export and rejects unknown fields/versions', () => {
-    expect(libraryExportSchema.parse(payload).schemaVersion).toBe(1)
+    const parsed = libraryExportSchema.parse(payload)
+    expect(parsed.schemaVersion).toBe(1)
+    expect(parsed.library.preferences.source_discovery_mode).toBe('progressive')
+    expect(libraryExportSchema.parse({
+      ...payload,
+      library: {
+        ...payload.library,
+        preferences: { ...payload.library.preferences, source_discovery_mode: 'complete' },
+      },
+    }).library.preferences.source_discovery_mode).toBe('complete')
     expect(() => libraryExportSchema.parse({ ...payload, schemaVersion: 2 })).toThrow()
     expect(() => libraryExportSchema.parse({ ...payload, credential: 'secret' })).toThrow()
   })

@@ -70,7 +70,7 @@ export function buildPayload(includeArtwork: boolean): LibraryExportPayload {
       watchlist: db.prepare('SELECT * FROM watchlist ORDER BY added_at').all() as WatchlistRow[],
       positions: db.prepare('SELECT * FROM playback_positions ORDER BY updated_at').all() as PositionRow[],
       preferences: db.prepare(
-        'SELECT language, subtitle_default, autoplay, maturity_rating FROM preferences WHERE id = 1',
+        'SELECT language, subtitle_default, autoplay, maturity_rating, source_discovery_mode FROM preferences WHERE id = 1',
       ).get() as PreferencesRow,
     },
     artwork: includeArtwork ? collectArtwork() : undefined,
@@ -189,13 +189,14 @@ export function applyPayload(payload: LibraryExportPayload, mode: 'merge' | 'rep
 
     const preferences = payload.library.preferences
     db.prepare(
-      `UPDATE preferences SET language = ?, subtitle_default = ?, autoplay = ?, maturity_rating = ?
+      `UPDATE preferences SET language = ?, subtitle_default = ?, autoplay = ?, maturity_rating = ?, source_discovery_mode = ?
        WHERE id = 1`,
     ).run(
       preferences.language,
       preferences.subtitle_default,
       preferences.autoplay,
       preferences.maturity_rating,
+      preferences.source_discovery_mode,
     )
     return { watchlist, positions }
   })

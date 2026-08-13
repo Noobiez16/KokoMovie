@@ -1,6 +1,6 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.5.3 stream-reliability baseline (Fully Local, Multi-Architecture Linux)
+**Version:** 1.5.4 source-discovery baseline (Fully Local, Multi-Architecture Linux)
 **Date:** 2026-08-12
 **Status:** Current
 
@@ -153,7 +153,7 @@ The Electron menu model is build-independent: View always exposes the standard `
 
 The main process ships a fixed, verified provider registry. Provider definitions remain simple deterministic embed-URL builders and are retained as the rollback/reference implementation. A separate runtime contract declares each provider's allowed HTTPS host, bounded extraction policy, request schema, health state, and diagnostics behavior.
 
-Enabled providers retain their registry order and run through the existing staggered quality-aware race. Cancellation tears down ephemeral extraction windows, provider sessions deny permissions/popups/downloads, and repeated infrastructure failures temporarily open an in-memory circuit without affecting catalog, library, or offline features. Installable packs and remote registries remain deferred until signing, revocation, isolated execution, permission confirmation, and last-known-good rollback are proven.
+Enabled providers run through a staggered quality-aware race and publish live per-provider states (`searching`, `available`, `unavailable`, or `timed-out`) to the source menu. Fast & Progressive mode starts from the best acceptable result while the remaining bounded workers continue; Complete Scan waits for every worker or the firm 40-second deadline. Quality labels combine manifest resolution with explicit or inferred release evidence, leave uncertain release type visibly unverified, and rank CAM/telesync last. Cancellation tears down ephemeral extraction windows, provider sessions deny permissions/popups/downloads, and repeated infrastructure failures temporarily open an in-memory circuit without affecting catalog, library, or offline features. Installable packs and remote registries remain deferred until signing, revocation, isolated execution, permission confirmation, and last-known-good rollback are proven.
 
 The HLS proxy listens only on loopback. Initial targets and every redirect reject credentials, unsafe protocols, localhost, private/LAN, link-local, carrier-grade NAT, benchmark, and multicast addresses. Downloads may use only public HTTP(S) targets or the exact active KokoMovie proxy port.
 
@@ -215,7 +215,8 @@ CREATE TABLE preferences (
   language         TEXT NOT NULL DEFAULT 'en',
   subtitle_default TEXT,
   autoplay         INTEGER NOT NULL DEFAULT 1,
-  maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA'
+  maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA',
+  source_discovery_mode TEXT NOT NULL DEFAULT 'progressive'
 );
 ```
 

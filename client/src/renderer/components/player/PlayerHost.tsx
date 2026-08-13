@@ -7,7 +7,7 @@ import { playbackApi, type PlaybackSession } from '../../api/playback'
 import { downloadsApi } from '../../api/downloads'
 import { providersApi, torrentApi } from '../../api/providers'
 import { useAuthStore } from '../../store/auth'
-import { usePlayerStore, type CachedStream } from '../../store/player'
+import { usePlayerStore, type CachedStream, type PlaybackRequest } from '../../store/player'
 import { LOCAL_PROFILE_ID } from '../../lib/local-identity'
 import { userApi } from '../../api/user'
 
@@ -24,6 +24,20 @@ const PIP_MAX_W = 960
 const PIP_ASPECT = 9 / 16 // height / width
 const pipHeight = (w: number) => Math.round(w * PIP_ASPECT)
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+type SourceSnapshot = { allStreams: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }
+
+function applySourceSnapshot(current: PlaybackRequest, snapshot: SourceSnapshot): void {
+  const patch: Partial<PlaybackRequest> = {}
+  if (snapshot.sourceStatuses) patch.sourceStatuses = snapshot.sourceStatuses
+  if (Array.isArray(snapshot.allStreams) && snapshot.allStreams.length > 0) {
+    const existing = current.allStreams ?? []
+    const ids = new Set(snapshot.allStreams.map((source) => source.providerId))
+    const torrentKept = existing.filter((source) => source.providerId.startsWith('p2p-') && !ids.has(source.providerId))
+    patch.allStreams = [...snapshot.allStreams, ...torrentKept] as unknown as CachedStream[]
+  }
+  usePlayerStore.getState().patchRequest(patch)
+}
 
 /**
  * Global, always-mounted host for the one and only VideoPlayer instance.
@@ -44,6 +58,7 @@ export function PlayerHost() {
   const profileId = activeProfile?.id ?? LOCAL_PROFILE_ID
 
   const request = usePlayerStore((s) => s.request)
+  const pendingSourceSnapshotsRef = useRef<Map<string, SourceSnapshot>>(new Map())
   const mode = usePlayerStore((s) => s.mode)
   const launchToken = usePlayerStore((s) => s.launchToken)
   const patchRequest = usePlayerStore((s) => s.patchRequest)
@@ -126,19 +141,28 @@ export function PlayerHost() {
   // the source-switcher / auto-fallback get every working mirror. Patching `allStreams` does
   // NOT remount the <video> (it isn't a session/HLS-init dependency — see DN-039).
   useEffect(() => {
-    const unsub = providersApi.onStreamsCollected(({ searchId, allStreams }) => {
+    const unsub = providersApi.onStreamsCollected(({ searchId, allStreams, sourceStatuses }) => {
       const cur = usePlayerStore.getState().request
-      if (!cur?.searchId || cur.searchId !== searchId) return
-      if (!Array.isArray(allStreams) || allStreams.length === 0) return
-      // Preserve any already-merged P2P torrent sources (id 'p2p-*') so the embed list arriving
-      // here doesn't wipe them — torrent discovery runs on its own (slower) timeline.
-      const existing = cur.allStreams ?? []
-      const ids = new Set(allStreams.map((s) => (s as { providerId: string }).providerId))
-      const torrentKept = existing.filter((s) => s.providerId.startsWith('p2p-') && !ids.has(s.providerId))
-      usePlayerStore.getState().patchRequest({ allStreams: [...allStreams, ...torrentKept] as unknown as CachedStream[] })
+      if (!cur?.searchId || cur.searchId !== searchId) {
+        pendingSourceSnapshotsRef.current.set(searchId, { allStreams, sourceStatuses })
+        if (pendingSourceSnapshotsRef.current.size > 20) {
+          const oldest = pendingSourceSnapshotsRef.current.keys().next().value
+          if (oldest) pendingSourceSnapshotsRef.current.delete(oldest)
+        }
+        return
+      }
+      applySourceSnapshot(cur, { allStreams, sourceStatuses })
     })
     return unsub
   }, [])
+
+  useEffect(() => {
+    if (!request?.searchId) return
+    const pending = pendingSourceSnapshotsRef.current.get(request.searchId)
+    if (!pending) return
+    pendingSourceSnapshotsRef.current.delete(request.searchId)
+    applySourceSnapshot(request, pending)
+  }, [request])
 
   // Free P2P torrent-sourced dubs (e.g. Spanish/Latino). Runs in the background once a title
   // launches; discovers dubbed releases via Torrentio and folds them into allStreams as
@@ -246,12 +270,15 @@ export function PlayerHost() {
         new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 50000)),
       ])
       if (result && result.streams.length > 0) {
+        const releaseType = result.streams[0]!.qualityInfo?.releaseType
+        if ((releaseType === 'cam' || releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) return
         patchRequest({
           episodeId: ep.id,
           streamUrl: result.streams[0]!.url,
           streamHeaders: result.streams[0]!.headers,
           providerId: result.providerId,
           allStreams: result.allStreams || [],
+          sourceStatuses: result.sourceStatuses || [],
           resumeAtSeconds: 0,
           offlineId: undefined,
           searchId,
@@ -405,6 +432,7 @@ export function PlayerHost() {
             streamHeaders={request.streamHeaders}
             initialProviderId={request.providerId}
             allStreams={request.allStreams ?? []}
+            sourceStatuses={request.sourceStatuses ?? []}
             profileId={profileId}
             resumeAtSeconds={request.resumeAtSeconds}
             defaultSubtitleLanguage={preferencesData?.data.subtitleDefault}

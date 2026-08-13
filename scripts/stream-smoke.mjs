@@ -16,7 +16,8 @@ const viteBin = resolve(dirname(require.resolve('vite')), '../../bin/vite.js')
 const hlsModuleUrl = '/@fs/' + resolve(ROOT, 'node_modules/hls.js/dist/hls.mjs').replaceAll('\\', '/')
 const smokeProfile = mkdtempSync(join(tmpdir(), 'kokomovie-stream-smoke-'))
 
-const cases = [
+const allCases = [
+  { title: 'Spider-Man: Brand New Day (2026)', req: { type: 'movie', tmdbId: 969681 } },
   { title: 'Demon Slayer: Kimetsu no Yaiba Infinity Castle (2025)', req: { type: 'movie', tmdbId: 1311031, imdbId: 'tt32820897' } },
   { title: 'Lilo & Stitch (2002)', req: { type: 'movie', tmdbId: 11544, imdbId: 'tt0275847' } },
   { title: 'Scary Movie (2026)', req: { type: 'movie', tmdbId: 1273221, imdbId: 'tt32093575' } },
@@ -25,6 +26,12 @@ const cases = [
   { title: 'Game of Thrones S1E1', req: { type: 'tv', tmdbId: 1399, imdbId: 'tt0944947', season: 1, episode: 1 } },
   { title: 'Breaking Bad S1E1', req: { type: 'tv', tmdbId: 1396, imdbId: 'tt0903747', season: 1, episode: 1 } },
 ]
+const caseFilter = process.env.KOKOMOVIE_SMOKE_CASE?.trim().toLowerCase()
+const discoveryMode = process.env.KOKOMOVIE_SMOKE_MODE === 'complete' ? 'complete' : 'progressive'
+const cases = caseFilter
+  ? allCases.filter(({ title }) => title.toLowerCase().includes(caseFilter))
+  : allCases
+if (cases.length === 0) throw new Error(`No smoke case matched: ${caseFilter}`)
 
 async function waitForRenderer(timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
@@ -53,23 +60,43 @@ async function findMainWindow(electronApp) {
 async function runCase(page, testCase) {
   const startedAt = Date.now()
   const outcome = await page.evaluate(async ({ req, hlsUrl }) => {
+    const searchId = crypto.randomUUID()
+    let latestSnapshot
+    let finishCollection
+    const collectionFinished = new Promise((resolve) => { finishCollection = resolve })
+    const unsubscribe = window.electronAPI.onStreamsCollected((payload) => {
+      if (payload.searchId !== searchId) return
+      latestSnapshot = payload
+      if (payload.sourceStatuses?.length > 0 && payload.sourceStatuses.every((status) => status.state !== 'searching')) {
+        finishCollection()
+      }
+    })
     const result = await Promise.race([
-      window.electronAPI.getFirstStream(req, crypto.randomUUID()),
+      window.electronAPI.getFirstStream(req, searchId),
       new Promise((_, reject) => setTimeout(() => reject(new Error('provider search exceeded 45 seconds')), 45_000)),
     ])
-    if (!result?.streams?.[0]?.url) return { status: 'no_stream' }
+    if (!result?.streams?.[0]?.url) {
+      unsubscribe()
+      return { status: 'no_stream' }
+    }
 
     const stream = result.streams[0]
     const isDirect = /\.(?:mp4|webm|mkv)(?:$|[?#])/i.test(stream.url)
     let manifestValid = false
     let responseStatus = 0
+    let responseContentType = ''
+    let responseContentRange = ''
+    let firstBytesHex = ''
     try {
       const response = await fetch(stream.url, isDirect ? { headers: { Range: 'bytes=0-1023' } } : undefined)
       responseStatus = response.status
+      responseContentType = response.headers.get('content-type') ?? ''
+      responseContentRange = response.headers.get('content-range') ?? ''
       if (response.ok) {
         if (isDirect) {
           const prefix = new Uint8Array(await response.arrayBuffer())
           manifestValid = prefix.length > 0
+          firstBytesHex = [...prefix.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
         } else {
           manifestValid = (await response.text()).includes('#EXTM3U')
         }
@@ -122,13 +149,28 @@ async function runCase(page, testCase) {
       }
     })
 
+    await Promise.race([
+      collectionFinished,
+      new Promise((resolve) => setTimeout(resolve, 35_000)),
+    ])
+    unsubscribe()
+
     return {
       status: 'stream',
       providerId: result.providerId,
       providerName: result.providerName,
-      alternatives: result.allStreams?.length ?? 0,
+      alternatives: latestSnapshot?.allStreams?.length ?? result.allStreams?.length ?? 0,
+      sourceStates: latestSnapshot?.sourceStatuses?.reduce((counts, source) => {
+        counts[source.state] = (counts[source.state] ?? 0) + 1
+        return counts
+      }, {}) ?? {},
       manifestValid,
       responseStatus,
+      responseContentType,
+      responseContentRange,
+      firstBytesHex,
+      streamKind: isDirect ? 'direct' : 'hls',
+      qualityInfo: stream.qualityInfo,
       playback,
     }
   }, { req: testCase.req, hlsUrl: hlsModuleUrl })
@@ -159,6 +201,7 @@ try {
   // longer reload the automation context in the middle of a 40-second provider race.
   await page.setContent('<!doctype html><html><body><p>KokoMovie stream smoke test</p></body></html>')
   await page.waitForFunction(() => Boolean(window.electronAPI?.getFirstStream), undefined, { timeout: 5_000 })
+  await page.evaluate((mode) => window.electronAPI.prefsSet({ sourceDiscoveryMode: mode }), discoveryMode)
 
   for (const testCase of cases) {
     const outcome = await runCase(page, testCase)

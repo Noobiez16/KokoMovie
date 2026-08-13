@@ -96,8 +96,8 @@ interface ElectronAPI {
   positionList: () => Promise<Array<{ content_id: string; episode_id: string; content_type: string; position_seconds: number; duration_seconds: number; completed_at: string | null; updated_at: string }>>
   positionDelete: (contentId: string, episodeId?: string | null) => Promise<{ ok: boolean }>
   positionDeleteContent: (contentId: string) => Promise<{ ok: boolean }>
-  prefsGet: () => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
-  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string }>
+  prefsGet: () => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string; source_discovery_mode: 'progressive' | 'complete' }>
+  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string; sourceDiscoveryMode?: 'progressive' | 'complete' }) => Promise<{ language: string; subtitle_default: string | null; autoplay: number; maturity_rating: string; source_discovery_mode: 'progressive' | 'complete' }>
   exportLibraryFile: (input: { includeArtwork: boolean }) => Promise<{ cancelled: boolean; path?: string; counts?: { watchlist: number; positions: number; artwork: number } }>
   selectLibraryImport: () => Promise<{ cancelled: boolean; token?: string; preview?: LibraryImportPreview }>
   applyLibraryImport: (input: { token: string; mode: 'merge' | 'replace' }) => Promise<{ ok: boolean; mode: 'merge' | 'replace'; backupPath: string; watchlist: number; positions: number; artwork: number }>
@@ -110,7 +110,7 @@ interface ElectronAPI {
   getStream: (providerId: string, req: StreamRequest) => Promise<ProviderResult>
   getFirstStream: (req: StreamRequest, searchId?: string) => Promise<ProviderResult | null>
   onStreamsCollected: (
-    callback: (payload: { searchId: string; allStreams: ProviderResult[] }) => void
+    callback: (payload: { searchId: string; allStreams: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) => void
   ) => () => void
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) => Promise<{ ok: boolean }>
   getProxyPort: () => Promise<number>
@@ -137,6 +137,7 @@ interface StreamRequest {
 interface StreamSource {
   url: string
   quality: string
+  qualityInfo?: StreamQuality
   headers?: Record<string, string>
   audioLangs?: string[]
 }
@@ -147,6 +148,24 @@ interface ProviderResult {
   streams: StreamSource[]
   error?: string
   allStreams?: ProviderResult[]
+  sourceStatuses?: ProviderSourceStatus[]
+}
+
+interface StreamQuality {
+  resolution: number
+  resolutionLabel: string
+  releaseType: 'standard' | 'cam' | 'telesync' | 'unknown'
+  confidence: 'verified' | 'declared' | 'inferred' | 'unknown'
+  displayLabel: string
+  mediaValidated: boolean
+}
+
+interface ProviderSourceStatus {
+  providerId: string
+  providerName: string
+  state: 'searching' | 'available' | 'unavailable' | 'timed-out'
+  qualityInfo?: StreamQuality
+  error?: string
 }
 
 interface Window {

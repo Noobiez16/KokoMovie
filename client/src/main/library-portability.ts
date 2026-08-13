@@ -24,6 +24,7 @@ export const portablePreferencesSchema = z.object({
   subtitle_default: z.string().trim().max(35).nullable(),
   autoplay: z.union([z.literal(0), z.literal(1)]),
   maturity_rating: z.string().trim().min(1).max(35),
+  source_discovery_mode: z.enum(['progressive', 'complete']).default('progressive'),
 }).strict()
 
 export const libraryExportSchema = z.object({

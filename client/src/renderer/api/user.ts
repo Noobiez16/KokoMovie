@@ -72,6 +72,7 @@ export interface Preferences {
   autoplay: boolean
   maturityRating: string
   isKids: boolean
+  sourceDiscoveryMode: 'progressive' | 'complete'
 }
 
 const api = () => window.electronAPI!
@@ -164,6 +165,7 @@ export const userApi = {
         autoplay: !!p.autoplay,
         maturityRating: p.maturity_rating,
         isKids: false,
+        sourceDiscoveryMode: p.source_discovery_mode,
       } as Preferences,
     }
   },
@@ -174,6 +176,7 @@ export const userApi = {
       subtitleDefault: payload.subtitleDefault,
       autoplay: payload.autoplay,
       maturityRating: payload.maturityRating,
+      sourceDiscoveryMode: payload.sourceDiscoveryMode,
     })
     return {
       success: true as const,
@@ -183,6 +186,7 @@ export const userApi = {
         autoplay: !!p.autoplay,
         maturityRating: p.maturity_rating,
         isKids: false,
+        sourceDiscoveryMode: p.source_discovery_mode,
       } as Preferences,
     }
   },

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/sqlite'
+import { normalizeSourceDiscoveryMode, type SourceDiscoveryMode } from '../providers/source-discovery'
 
 // Fully-local library: watchlist, resume positions / continue-watching, and
 // preferences. Stores only ids + positions; the renderer enriches titles and
@@ -26,6 +27,7 @@ export interface PreferencesRow {
   subtitle_default: string | null
   autoplay: number
   maturity_rating: string
+  source_discovery_mode: SourceDiscoveryMode
 }
 
 export function registerLibraryIpc(): void {
@@ -110,22 +112,23 @@ export function registerLibraryIpc(): void {
 
   // ─── Preferences ─────────────────────────────────────────────────────────
   ipcMain.handle('library:prefs:get', () =>
-    db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating FROM preferences WHERE id = 1').get() as PreferencesRow,
+    db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating, source_discovery_mode FROM preferences WHERE id = 1').get() as PreferencesRow,
   )
 
   ipcMain.handle(
     'library:prefs:set',
-    (_e, p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) => {
-      const current = db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating FROM preferences WHERE id = 1').get() as PreferencesRow
+    (_e, p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string; sourceDiscoveryMode?: SourceDiscoveryMode }) => {
+      const current = db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating, source_discovery_mode FROM preferences WHERE id = 1').get() as PreferencesRow
       db.prepare(
-        `UPDATE preferences SET language = ?, subtitle_default = ?, autoplay = ?, maturity_rating = ? WHERE id = 1`,
+        `UPDATE preferences SET language = ?, subtitle_default = ?, autoplay = ?, maturity_rating = ?, source_discovery_mode = ? WHERE id = 1`,
       ).run(
         p.language ?? current.language,
         p.subtitleDefault !== undefined ? p.subtitleDefault : current.subtitle_default,
         p.autoplay !== undefined ? (p.autoplay ? 1 : 0) : current.autoplay,
         p.maturityRating ?? current.maturity_rating,
+        normalizeSourceDiscoveryMode(p.sourceDiscoveryMode ?? current.source_discovery_mode),
       )
-      return db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating FROM preferences WHERE id = 1').get() as PreferencesRow
+      return db.prepare('SELECT language, subtitle_default, autoplay, maturity_rating, source_discovery_mode FROM preferences WHERE id = 1').get() as PreferencesRow
     },
   )
 }

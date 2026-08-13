@@ -6,7 +6,7 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.5.3-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-1.5.4-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#automatic-updates)
 
@@ -196,8 +196,8 @@ Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) 
 `latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
-git tag v1.5.3
-git push origin v1.5.3
+git tag v1.5.4
+git push origin v1.5.4
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of

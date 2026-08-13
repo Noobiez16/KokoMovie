@@ -4,7 +4,7 @@ export const providersApi = {
   getStream: (providerId: string, req: StreamRequest) => window.electronAPI!.getStream(providerId, req),
   getFirstStream: (req: StreamRequest, searchId?: string) => window.electronAPI!.getFirstStream(req, searchId),
   onStreamsCollected: (
-    callback: (payload: { searchId: string; allStreams: ProviderResult[] }) => void
+    callback: (payload: { searchId: string; allStreams: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) => void
   ) => window.electronAPI!.onStreamsCollected(callback),
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) =>
     window.electronAPI!.registerStreamHeaders(streamUrl, headers),

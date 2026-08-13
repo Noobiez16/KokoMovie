@@ -102,38 +102,6 @@ function isStreamUrl(url: string): boolean {
   }
 }
 
-function isCamStream(url: string): boolean {
-  try {
-    const u = new URL(url.toLowerCase())
-    const pathAndSearch = u.pathname + u.search
-    
-    if (u.searchParams.get('quality') === 'cam' || u.searchParams.get('quality') === 'ts') {
-      return true
-    }
-    
-    const camPatterns = [
-      /\/cam\b/,
-      /\/camrip\b/,
-      /\/hdcam\b/,
-      /\/hd-cam\b/,
-      /\/telesync\b/,
-      /\/hdts\b/,
-      /\/screener\b/,
-      /\bcamrip\b/,
-      /\bhdcam\b/,
-      /\bhdts\b/,
-      /\btsv\b/,
-      /\btsrip\b/,
-      /\/tsrip\//,
-      /\/hdts\//,
-    ]
-    
-    return camPatterns.some((p) => p.test(pathAndSearch))
-  } catch {
-    return false
-  }
-}
-
 function isStreamContentType(contentType: string): boolean {
   return (
     contentType.includes('application/x-mpegurl') ||
@@ -325,9 +293,6 @@ export async function extractStream(
       (details) => {
         if (done) return
         if (isStreamUrl(details.url)) {
-          if (isCamStream(details.url)) {
-            return
-          }
           finish({
             url: details.url,
             headers: cleanHeaders(details.requestHeaders),
@@ -351,10 +316,6 @@ export async function extractStream(
                 return
               }
             } catch {}
-            if (isCamStream(details.url)) {
-              callback({ responseHeaders: details.responseHeaders })
-              return
-            }
             finish({ url: details.url, headers: {} })
           }
         }

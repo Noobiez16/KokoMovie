@@ -375,6 +375,11 @@ export function ContentDetailPage() {
       if (cancelled) return null
 
       if (result && result.streams.length > 0) {
+        const releaseType = result.streams[0]!.qualityInfo?.releaseType
+        if ((releaseType === 'cam' || releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) {
+          setAutoStreamState({ loading: false })
+          return null
+        }
         setAutoStreamState({ loading: false })
         return {
           url: result.streams[0].url,
@@ -576,6 +581,11 @@ export function ContentDetailPage() {
       if (cancelled) return
 
       if (result && result.streams.length > 0) {
+        const releaseType = result.streams[0]!.qualityInfo?.releaseType
+        if ((releaseType === 'cam' || releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) {
+          setAutoStreamState({ loading: false })
+          return
+        }
         // Surface the winning provider in the console — if the wrong episode plays, the
         // user can identify which provider returned bad content and disable it in
         // Settings → Providers. (The provider's embed page sometimes ignores the
@@ -595,6 +605,7 @@ export function ContentDetailPage() {
             streamHeaders: result.streams[0]!.headers,
             providerId: result.providerId,
             allStreams: result.allStreams || [],
+            sourceStatuses: result.sourceStatuses || [],
             resumeAtSeconds,
             searchId,
           },

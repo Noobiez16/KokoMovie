@@ -315,6 +315,7 @@ export function SettingsPage() {
     autoplay: true,
     maturityRating: 'TV-MA',
     isKids: false,
+    sourceDiscoveryMode: 'progressive',
   }
 
   const updateMutation = useMutation({
@@ -506,6 +507,22 @@ export function SettingsPage() {
 
                     <SettingRow label={t('settings.autoplay')} description={t('settings.autoplayDescription')}>
                       <Toggle enabled={prefs.autoplay} onChange={() => updateMutation.mutate({ autoplay: !prefs.autoplay })} />
+                    </SettingRow>
+
+                    <SettingRow label={t('settings.sourceDiscovery')} description={t('settings.sourceDiscoveryDescription')}>
+                      <div className="flex rounded-lg border border-white/[0.12] bg-black/25 p-1 text-xs">
+                        {(['progressive', 'complete'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => updateMutation.mutate({ sourceDiscoveryMode: mode })}
+                            className={`rounded-md px-3 py-1.5 transition-colors ${prefs.sourceDiscoveryMode === mode ? 'bg-violet-500 text-white' : 'text-white/55 hover:bg-white/[0.06] hover:text-white'}`}
+                          >
+                            {mode === 'progressive' ? t('settings.sourceDiscoveryProgressive') : t('settings.sourceDiscoveryComplete')}
+                            {mode === 'progressive' && <span className="ml-1 text-[9px] uppercase opacity-75">{t('settings.recommended')}</span>}
+                          </button>
+                        ))}
+                      </div>
                     </SettingRow>
 
                     <SettingRow label={t('settings.maturity')} description={t('settings.maturityDescription')}>

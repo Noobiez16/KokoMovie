@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.5.4] — 2026-08-12 — Source Discovery & Playback Transport
+
+### Added
+- **Live Source Discovery**: The player source menu now shows every enabled provider with live Searching, Available, Unavailable, or Timed out status instead of ambiguous A/S badges.
+- **Detected Quality Labels**: Available sources show manifest resolution and release evidence. Sources without trustworthy release metadata remain explicitly Unverified rather than being presented as confirmed HD releases.
+- **User-Selected Discovery Mode**: Added a saved Fast & Progressive mode (Recommended) that starts playback quickly and continues updating the source menu, plus Complete Scan, which waits for every provider or a firm 40-second deadline. The setting applies to the next search without restarting and is translated in English, Spanish, and French.
+- **CAM/Telesync Safeguard**: Suspected CAM and telesync sources remain visible but rank last, are selected automatically only when no better source is found, and require confirmation before playback.
+
+### Changed
+- **Complete Provider Collection**: Progressive playback no longer stops provider collection after a six-second background window; bounded workers continue so slower sources such as MoviesAPI can appear after playback starts.
+- **Quality-Aware Ranking**: Automatic selection ranks release type, validated media response, and resolution instead of choosing solely by the first reported pixel height.
+
+### Fixed
+- **HLS Response Lifecycle**: The loopback proxy no longer mistakes a normal incoming-request `close` event for player cancellation. Outgoing segment responses remain alive until completion, preserving existing incomplete-segment Range recovery and preventing false `ERR_CONTENT_LENGTH_MISMATCH` truncation.
+
+### Verification
+- Added deterministic tests for quality classification/ranking, CAM-last fallback ordering, explicit CAM/TS extraction, discovery-mode policy, provider status ordering, portable preference persistence and translations, source-menu labels, and proxy response lifecycle.
+- Passed the complete automated test suite plus strict Electron main-process and production renderer builds.
+- Live Electron playback checks reached `playing` for Spider-Man: Brand New Day (2026), Demon Slayer: Kimetsu no Yaiba Infinity Castle (2025), Lilo & Stitch (2002), Scary Movie (2026), and The Matrix (1999). Each completed all 17 provider states; the runs exposed one to three available sources. Demon Slayer selected MoviesAPI, and The Matrix verified the opt-in Complete Scan path.
+
+---
 ## [1.5.3] — 2026-08-12 — Stream Reliability & Interface Languages
 
 ### Added

@@ -2,6 +2,16 @@ import { ipcMain, session } from 'electron'
 import { listProviders, getEnabledProviders, toggleProvider, getProvider } from '../providers/registry.js'
 import { extractStreamWithRetry } from '../stream-extractor/index.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
+import { classifySourceQuality, rankProviderResults } from '../providers/source-quality.js'
+import {
+  createInitialSourceStatuses,
+  normalizeSourceDiscoveryMode,
+  shouldResolveAutomaticSource,
+  updateSourceStatus,
+  type ProviderSourceStatus,
+} from '../providers/source-discovery.js'
+import { getDb } from '../db/sqlite.js'
+import { bindProxyResponseLifecycle } from '../providers/proxy-response-lifecycle.js'
 import { ProviderCircuitBreaker, getProviderContract, redactProviderDiagnostic, validateProviderEmbedUrl, validateStreamRequest } from '../providers/contracts.js'
 import { isForbiddenProxyHostname, validateProxyTargetUrl } from '../providers/network-policy.js'
 import { SupersedingRequestRegistry } from '../providers/request-lifecycle.js'
@@ -318,6 +328,7 @@ function streamSegment(
   let pendingStatus = 502
   let pendingHeaders: Record<string, string> = { 'Access-Control-Allow-Origin': '*' }
   let bodyExpected = true
+  let cleanupClientLifecycle = () => {}
 
   // Headers are sent only once the first body byte actually arrives — this lets us
   // retry an empty/early-failed response without having committed a status line.
@@ -330,6 +341,7 @@ function streamSegment(
   const finish = (ok: boolean) => {
     if (done) return
     done = true
+    cleanupClientLifecycle()
     try { currentClientReq?.destroy() } catch { /* noop */ }
     if (ok) {
       res.end()
@@ -528,9 +540,10 @@ function streamSegment(
 
   // Tear everything down if the player (client) goes away. Attached once so resumes
   // don't pile up listeners on `req`.
-  const onClientGone = () => { done = true; try { currentClientReq?.destroy() } catch { /* noop */ } }
-  req.on('close', onClientGone)
-  req.on('aborted', onClientGone)
+  cleanupClientLifecycle = bindProxyResponseLifecycle(req, res, () => {
+    done = true
+    try { currentClientReq?.destroy() } catch { /* noop */ }
+  })
 
   makeRequest(initialUrl, undefined, 0)
 }
@@ -1088,7 +1101,7 @@ function probeDirectVideo(url: string, headers: Record<string, string>): Promise
   })
 }
 
-async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[] }> {
+async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[]; manifestText: string; mediaValidated: boolean }> {
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
     if (isDirect) {
@@ -1104,32 +1117,32 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
       } catch { /* validation elsewhere reports malformed URLs */ }
       if (/(?:^|[\/_?&=.-])(?:h\.?265|hevc|x265)(?:[\/_?&=.-]|$)/i.test(directUrlHint)) {
         logExtraction('Rejected HEVC/H.265 direct video: ' + url.slice(0, 140))
-        return { resolution: 0, audioLangs: [] }
+        return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
       }
       try {
         const probe = await probeDirectVideo(url, headers)
         if (probe.status !== 200 && probe.status !== 206) {
           logExtraction("Rejected direct video with HTTP " + probe.status + ": " + url.slice(0, 140))
-          return { resolution: 0, audioLangs: [] }
+          return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
         }
         const contentType = (probe.headers["content-type"] ?? "").toLowerCase()
         const prefix = probe.firstBytes.toString("utf8").trimStart().toLowerCase()
         if (probe.firstBytes.length === 0 || contentType.includes("text/html") || prefix.includes("forbidden") || prefix.startsWith("<!doctype") || prefix.startsWith("<html")) {
           logExtraction("Rejected direct-video error payload (" + (contentType || "unknown type") + ")")
-          return { resolution: 0, audioLangs: [] }
+          return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
         }
         const contentRange = probe.headers["content-range"] ?? ""
         const totalMatch = contentRange.match(/\/(\d+)$/)
         const totalSize = totalMatch ? Number(totalMatch[1]) : probe.status === 200 ? Number(probe.headers["content-length"] ?? 0) : 0
         if (totalSize > 0 && totalSize < 5 * 1024 * 1024) {
           logExtraction("Rejected undersized direct-video placeholder: " + totalSize + " bytes")
-          return { resolution: 0, audioLangs: [] }
+          return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
         }
       } catch (error) {
         logExtraction("Rejected unprobeable direct video: " + (error instanceof Error ? error.message : String(error)))
-        return { resolution: 0, audioLangs: [] }
+        return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
       }
-      return { resolution: 1080, audioLangs: [] }
+      return { resolution: 1080, audioLangs: [], manifestText: '', mediaValidated: true }
     }
 
     const proxyUrl = toProxyUrl(url)
@@ -1141,17 +1154,17 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
 
     if (response.status < 200 || response.status >= 300) {
       logExtraction(`getMaxResolution got non-ok status ${response.status} for ${url}`)
-      return { resolution: 720, audioLangs: [] } // fallback if resolution check fails
+      return { resolution: 720, audioLangs: [], manifestText: '', mediaValidated: false } // fallback if resolution check fails
     }
     const text = response.buffer.toString('utf8')
 
     if (text.includes('<html') || text.includes('<!DOCTYPE html')) {
       logExtraction(`getMaxResolution got HTML page instead of playlist for ${url}`)
-      return { resolution: 0, audioLangs: [] } // Invalid stream
+      return { resolution: 0, audioLangs: [], manifestText: text, mediaValidated: false } // Invalid stream
     }
 
     if (!text.includes('#EXTM3U')) {
-      return { resolution: 1080, audioLangs: [] } // Assume direct stream (like mp4)
+      return { resolution: 1080, audioLangs: [], manifestText: text, mediaValidated: true } // Assume direct stream (like mp4)
     }
 
     const audioLangs = parseAudioLangs(text)
@@ -1159,14 +1172,14 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
     if (text.includes('#EXT-X-MEDIA-SEQUENCE') || text.includes('#EXTINF')) {
       if (!isLikelyFullLengthPlaylist(text)) {
         logExtraction('Rejected short HLS placeholder playlist')
-        return { resolution: 0, audioLangs }
+        return { resolution: 0, audioLangs, manifestText: text, mediaValidated: false }
       }
-      return { resolution: 1080, audioLangs }
+      return { resolution: 1080, audioLangs, manifestText: text, mediaValidated: true }
     }
 
     const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
     if (matches.length === 0) {
-      return { resolution: 720, audioLangs } // default guess
+      return { resolution: 720, audioLangs, manifestText: text, mediaValidated: true } // default guess
     }
 
     const masterLines = text.split(/\r?\n/)
@@ -1179,7 +1192,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
         const variantText = variantResponse.buffer.toString("utf8")
         if (variantText.includes("#EXTINF") && !isLikelyFullLengthPlaylist(variantText)) {
           logExtraction("Rejected short HLS placeholder master")
-          return { resolution: 0, audioLangs }
+          return { resolution: 0, audioLangs, manifestText: text, mediaValidated: false }
         }
       } catch { /* the player retry/fallback path remains authoritative */ }
     }
@@ -1190,10 +1203,10 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
       return getStandardHeight(w, h)
     }).filter((h) => !isNaN(h))
 
-    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 720, audioLangs }
+    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 720, audioLangs, manifestText: text, mediaValidated: true }
   } catch (err) {
     logExtraction(`Failed to check resolution for ${url}: ${err}`)
-    return { resolution: 720, audioLangs: [] } // default fallback
+    return { resolution: 720, audioLangs: [], manifestText: '', mediaValidated: false } // default fallback
   }
 }
 
@@ -1325,10 +1338,18 @@ export function registerProvidersIpc(): void {
       autoRegisterHeaders(result.url, result.headers, p.sessionName)
       providerCircuits.recordSuccess(p.id)
 
+      const probe = await getMaxResolution(result.url, result.headers)
+      const qualityInfo = classifySourceQuality({
+        url: result.url,
+        resolution: probe.resolution,
+        manifestText: probe.manifestText,
+        mediaValidated: probe.mediaValidated,
+      })
+
       return {
         providerId,
         providerName: p.name,
-        streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers }],
+        streams: [{ url: toProxyUrl(result.url), quality: qualityInfo.resolutionLabel, qualityInfo, headers: result.headers, audioLangs: probe.audioLangs }],
       }
     } catch (err) {
       providerCircuits.recordFailure(p.id)
@@ -1356,13 +1377,17 @@ export function registerProvidersIpc(): void {
   //                finish can still win, but we never sit idle for long.
   //   3. <720p   → kept only as a last resort; we keep waiting for a ≥720p stream and only
   //                fall back to sub-720p if nothing better arrives (quality MUST be 720p/1080p).
-  // After the caller is resolved we keep the remaining workers running in the BACKGROUND to
-  // gather alternative sources for the source-switcher / auto-fallback, and push the full
-  // list to the renderer via the `providers:streamsCollected` event (correlated by searchId).
-  ipcMain.handle('providers:getFirstStream', async (e, req: StreamRequest, searchId?: string): Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null> => {
+  // Fast & Progressive resolves once the ranked acceptable choice is ready, then keeps every
+  // bounded worker running in the background. Complete Scan resolves only after every worker
+  // finishes or the hard deadline. Both modes publish live source/status snapshots through the
+  // correlated `providers:streamsCollected` event.
+  ipcMain.handle('providers:getFirstStream', async (e, req: StreamRequest, searchId?: string): Promise<(ProviderResult & { allStreams?: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) | null> => {
     logExtraction(`New stream search requested (${req.type})`)
     const validatedRequest = validateStreamRequest(req)
-    const enabled = getEnabledProviders().filter((provider) => providerCircuits.canAttempt(provider.id))
+    const allEnabled = getEnabledProviders()
+    const enabled = allEnabled.filter((provider) => providerCircuits.canAttempt(provider.id))
+    const preference = getDb().prepare('SELECT source_discovery_mode FROM preferences WHERE id = 1').get() as { source_discovery_mode?: string } | undefined
+    const discoveryMode = normalizeSourceDiscoveryMode(preference?.source_discovery_mode)
     if (enabled.length === 0) {
       logExtraction('WARNING: No providers are enabled in settings')
       return null
@@ -1379,25 +1404,46 @@ export function registerProvidersIpc(): void {
     const ACCEPTABLE_RES = 720
     // How long to keep waiting for a 1080p after an acceptable (≥720p) stream is in hand.
     const QUALITY_WAIT_MS = 3500
-    // How long to keep collecting alternatives in the background after the caller resolves.
-    const COLLECT_WINDOW_MS = 6000
-
     let bestResult: ProviderResult | null = null
     let bestResolution = 0
     const collectedStreams: ProviderResult[] = []
+    let sourceStatuses = createInitialSourceStatuses(allEnabled)
+    for (const provider of allEnabled) {
+      if (!providerCircuits.canAttempt(provider.id)) {
+        sourceStatuses = updateSourceStatus(sourceStatuses, {
+          providerId: provider.id,
+          providerName: provider.name,
+          state: 'unavailable',
+          error: 'Temporarily unavailable',
+        })
+      }
+    }
 
     const batchSize = 4
     const staggerMs = 400
     const timeoutMs = 12000
 
-    return new Promise<(ProviderResult & { allStreams?: ProviderResult[] }) | null>((resolve) => {
+    return new Promise<(ProviderResult & { allStreams?: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) | null>((resolve) => {
       let activeWorkers = 0
       let totalStarted = 0
       let callerResolved = false
       let collectionDone = false
       const timers: NodeJS.Timeout[] = []
       let qualityWaitTimer: NodeJS.Timeout | null = null
-      let collectWindowTimer: NodeJS.Timeout | null = null
+
+      const publishSnapshot = () => {
+        if (!searchId) return
+        try {
+          e.sender.send('providers:streamsCollected', { searchId, allStreams: [...collectedStreams], sourceStatuses: [...sourceStatuses] })
+        } catch { /* webContents may be gone */ }
+      }
+
+      const setProviderStatus = (next: ProviderSourceStatus) => {
+        sourceStatuses = updateSourceStatus(sourceStatuses, next)
+        publishSnapshot()
+      }
+
+      publishSnapshot()
 
       // Push the full collected source list to the renderer so the source-switcher /
       // auto-fallback get every working mirror, then tear the race down. Safe to call
@@ -1406,27 +1452,20 @@ export function registerProvidersIpc(): void {
         if (collectionDone) return
         collectionDone = true
         if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
-        if (collectWindowTimer) clearTimeout(collectWindowTimer)
         timers.forEach(clearTimeout)
         controller.abort()
         logExtraction(`COLLECTION DONE: ${collectedStreams.length} total streams collected`)
-        if (searchId && callerResolved) {
-          try {
-            e.sender.send('providers:streamsCollected', { searchId, allStreams: collectedStreams })
-          } catch { /* webContents may be gone */ }
-        }
+        publishSnapshot()
       }
 
-      // Hand the chosen stream back to the caller right away, then keep collecting
-      // alternatives in the background for a short window.
+      // Hand the chosen stream back when the active discovery mode permits it; remaining
+      // workers continue publishing alternatives until they finish or reach the hard cap.
       const resolveCaller = () => {
         if (callerResolved || !bestResult) return
         callerResolved = true
         if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
         logExtraction(`RESOLVING CALLER NOW with ${bestResolution}p (${collectedStreams.length} stream(s) so far) — collecting alternatives in background`)
-        resolve({ ...bestResult, allStreams: collectedStreams })
-        // Keep gathering more mirrors briefly so source-switching/fallback has options.
-        collectWindowTimer = setTimeout(finishCollecting, COLLECT_WINDOW_MS)
+        resolve({ ...bestResult, allStreams: [...collectedStreams], sourceStatuses: [...sourceStatuses] })
       }
 
       const checkFinish = () => {
@@ -1442,6 +1481,7 @@ export function registerProvidersIpc(): void {
               collectionDone = true
               timers.forEach(clearTimeout)
               controller.abort()
+              publishSnapshot()
               resolve(null)
             }
           }
@@ -1458,6 +1498,7 @@ export function registerProvidersIpc(): void {
           const embedUrl = validateProviderEmbedUrl(provider, validatedRequest)
           if (!embedUrl) {
             logExtraction(`Provider ${provider.name} skipped: failed to build embed URL.`)
+            setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'Unsupported for this title' })
             return
           }
 
@@ -1465,6 +1506,7 @@ export function registerProvidersIpc(): void {
           if (!resolves) {
             providerCircuits.recordFailure(provider.id)
             logExtraction(`Provider ${provider.name} skipped: host ${new URL(embedUrl).hostname} did not resolve.`)
+            setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'Provider host is unreachable' })
             return
           }
 
@@ -1486,36 +1528,45 @@ export function registerProvidersIpc(): void {
             providerCircuits.recordSuccess(provider.id)
 
             // Check resolution + alternate audio (dub) languages of the found stream
-            const { resolution, audioLangs } = await getMaxResolution(result.url, result.headers)
+            const { resolution, audioLangs, manifestText, mediaValidated } = await getMaxResolution(result.url, result.headers)
             logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | Audio: [${audioLangs.join(',')}] | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
             if (resolution <= 0) {
               logExtraction(`REJECTED: ${provider.name} returned a non-playable stream`)
+              setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'Stream validation failed' })
               return
             }
+
+            const qualityInfo = classifySourceQuality({
+              url: result.url,
+              resolution,
+              manifestText,
+              mediaValidated,
+            })
 
             const currentResult: ProviderResult = {
               providerId: provider.id,
               providerName: provider.name,
-              streams: [{ url: toProxyUrl(result.url), quality: 'auto', headers: result.headers, audioLangs }],
+              streams: [{ url: toProxyUrl(result.url), quality: qualityInfo.resolutionLabel, qualityInfo, headers: result.headers, audioLangs }],
             }
 
             // Always collect this stream for the source switcher
             collectedStreams.push(currentResult)
-
-            // Track the best stream regardless of whether the caller has resolved (a better
-            // mirror found during the background window is still worth surfacing first).
-            if (resolution > bestResolution) {
-              bestResolution = resolution
-              bestResult = currentResult
-            }
+            const ranked = rankProviderResults(collectedStreams)
+            collectedStreams.splice(0, collectedStreams.length, ...ranked)
+            bestResult = collectedStreams[0] ?? null
+            bestResolution = bestResult?.streams[0]?.qualityInfo?.resolution ?? 0
+            // Publish ranked snapshots so renderer fallback also treats CAM/TS as a last resort.
+            setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'available', qualityInfo })
 
             if (!callerResolved) {
-              if (resolution >= ACCEPTABLE_RES) {
+              if (resolution >= ACCEPTABLE_RES && shouldResolveAutomaticSource(discoveryMode, qualityInfo, sourceStatuses)) {
                 // Good enough (≥720p). Give a 1080p a brief chance to finish, then resolve.
                 if (!qualityWaitTimer) {
                   logExtraction(`Acceptable ${resolution}p stream in hand — ${QUALITY_WAIT_MS}ms quality-wait for a 1080p…`)
                   qualityWaitTimer = setTimeout(() => {
-                    if (!callerResolved && bestResult) {
+                    qualityWaitTimer = null
+                    const bestQuality = bestResult?.streams[0]?.qualityInfo
+                    if (!callerResolved && bestResult && bestQuality && shouldResolveAutomaticSource(discoveryMode, bestQuality, sourceStatuses)) {
                       logExtraction(`Quality-wait expired. Returning best stream found (${bestResolution}p)`)
                       resolveCaller()
                     }
@@ -1528,12 +1579,14 @@ export function registerProvidersIpc(): void {
               }
             }
           } else {
+            if (!signal.aborted) setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'No stream found' })
             if (!callerResolved) {
               logExtraction(`FAIL: ${provider.name} returned no stream in ${duration}ms.`)
             }
           }
         } catch (err) {
           providerCircuits.recordFailure(provider.id)
+          if (!signal.aborted) setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: redactProviderDiagnostic(err) })
           if (!callerResolved) {
             logExtraction(`ERROR: ${provider.name} failed with error: ${redactProviderDiagnostic(err)}`)
           }
@@ -1549,6 +1602,12 @@ export function registerProvidersIpc(): void {
       const HARD_CAP_MS = 40000
       const hardTimer = setTimeout(() => {
         if (collectionDone) return
+        for (const status of sourceStatuses) {
+          if (status.state === 'searching') {
+            sourceStatuses = updateSourceStatus(sourceStatuses, { ...status, state: 'timed-out', error: 'Search timed out' })
+          }
+        }
+        publishSnapshot()
         if (!callerResolved) {
           logExtraction(`HARD TIMEOUT after ${HARD_CAP_MS}ms — resolving with best-so-far (${bestResult ? bestResolution + 'p' : 'none'})`)
           if (bestResult) {

@@ -4,7 +4,7 @@ import { create } from 'zustand'
 export interface CachedStream {
   providerId: string
   providerName: string
-  streams: Array<{ url: string; quality: string; headers?: Record<string, string>; audioLangs?: string[] }>
+  streams: Array<{ url: string; quality: string; qualityInfo?: StreamQuality; headers?: Record<string, string>; audioLangs?: string[] }>
 }
 
 // Everything the global PlayerHost needs to render playback. This is the single source of
@@ -17,6 +17,7 @@ export interface PlaybackRequest {
   streamHeaders?: Record<string, string>
   providerId?: string
   allStreams?: CachedStream[]
+  sourceStatuses?: ProviderSourceStatus[]
   resumeAtSeconds?: number
   offlineId?: string
   // Correlates this playback with its background source-collection event

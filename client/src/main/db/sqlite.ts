@@ -70,7 +70,8 @@ function migrate(db: Database.Database): void {
       language         TEXT NOT NULL DEFAULT 'en',
       subtitle_default TEXT,
       autoplay         INTEGER NOT NULL DEFAULT 1,
-      maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA'
+      maturity_rating  TEXT NOT NULL DEFAULT 'TV-MA',
+      source_discovery_mode TEXT NOT NULL DEFAULT 'progressive'
     );
     INSERT OR IGNORE INTO preferences (id) VALUES (1);
     CREATE TABLE IF NOT EXISTS tmdb_cache (
@@ -96,6 +97,11 @@ function migrate(db: Database.Database): void {
 
   if (!hasHeaders) {
     db.exec(`ALTER TABLE downloads ADD COLUMN headers TEXT;`)
+  }
+
+  const preferenceInfo = db.prepare("PRAGMA table_info(preferences)").all() as Array<{ name: string }>
+  if (!preferenceInfo.some((col) => col.name === 'source_discovery_mode')) {
+    db.exec(`ALTER TABLE preferences ADD COLUMN source_discovery_mode TEXT NOT NULL DEFAULT 'progressive';`)
   }
 }
 

@@ -107,7 +107,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   positionDelete: (contentId: string, episodeId?: string | null) => ipcRenderer.invoke('library:position:delete', contentId, episodeId),
   positionDeleteContent: (contentId: string) => ipcRenderer.invoke('library:position:delete-content', contentId),
   prefsGet: () => ipcRenderer.invoke('library:prefs:get'),
-  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string }) =>
+  prefsSet: (p: { language?: string; subtitleDefault?: string | null; autoplay?: boolean; maturityRating?: string; sourceDiscoveryMode?: 'progressive' | 'complete' }) =>
     ipcRenderer.invoke('library:prefs:set', p),
   exportLibraryFile: (input: { includeArtwork: boolean }) =>
     ipcRenderer.invoke('library:export-file', input),
@@ -129,11 +129,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // searchId. Fires after the caller has already received the first playable stream so
   // playback can start fast while the source-switcher fills in.
   onStreamsCollected: (
-    callback: (payload: { searchId: string; allStreams: unknown[] }) => void
+    callback: (payload: { searchId: string; allStreams: unknown[]; sourceStatuses?: unknown[] }) => void
   ) => {
     const handler = (
       _: Electron.IpcRendererEvent,
-      payload: { searchId: string; allStreams: unknown[] }
+      payload: { searchId: string; allStreams: unknown[]; sourceStatuses?: unknown[] }
     ) => callback(payload)
     ipcRenderer.on('providers:streamsCollected', handler)
     return () => ipcRenderer.removeListener('providers:streamsCollected', handler)

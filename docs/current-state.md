@@ -1,7 +1,7 @@
 # KokoMovie Current State
 
 **Audit date:** 2026-08-12
-**Baseline:** v1.5.3 stream-reliability and localization branch based on tagged v1.5.2
+**Baseline:** v1.5.4 source-discovery branch based on tagged v1.5.3
 **Rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
 
 ## Runtime
@@ -15,7 +15,7 @@ The database is userData/kokomovie.db. Startup enables WAL and foreign keys. Tab
 - downloads: identity, content/episode metadata, status/progress/bytes, paths, expiry, error, and serialized headers. Indexed by content, status, and expiry.
 - watchlist: content ID/type and added timestamp.
 - playback_positions: content/episode key, type, position, duration, completion, update time. Indexed by update time.
-- preferences: the singleton language, subtitle default, autoplay, and maturity rating record.
+- preferences: the singleton language, subtitle default, autoplay, maturity rating, and source-discovery mode record.
 - tmdb_cache: schema-versioned structured TMDB response JSON with request keys, fetch time, and 90-day retention.
 
 Additional userData files include provider-prefs.json, update-prefs.json, extraction.log, versioned catalog artwork, and download media sidecars. TMDB credentials are stored only by keytar under the local account ID; a legacy plaintext credential is migrated once and deleted after a successful keychain write.
@@ -68,6 +68,8 @@ Phase 5 adds a 90-day versioned TMDB response cache and constrained catalog-cach
 ## Provider and download resilience
 
 Phase 6 keeps all bundled providers as the rollback/reference set. Main-process contracts validate renderer requests and each provider's declared HTTPS embed host. Extraction remains bounded and cancellable; infrastructure failures feed an in-memory circuit breaker and diagnostics are centrally redacted. The stream proxy binds to loopback and rejects private-network, local, credentialed, non-HTTP, and undeclared redirect targets.
+
+The v1.5.4 discovery flow exposes every enabled provider with live search status and honest detected quality. Fast & Progressive is the default and continues filling the menu after playback begins; Complete Scan waits for every bounded provider attempt or 40 seconds. Automatic selection ranks known CAM/telesync sources last and warns before playing one. The local HLS proxy keeps incomplete-segment Range recovery and now follows the outgoing response lifecycle, avoiding false cancellation when Node closes a completed incoming request message.
 
 Phase 7 validates download IPC payloads and transfer targets, persists the full download lifecycle, and offers Pause/Resume only for segment-based HLS jobs that can recover safely. Startup creates a dated SQLite backup before reconciliation, requeues interrupted transfers, validates/decrypts the contiguous saved HLS prefix, and migrates legacy v1.4.1 segment caches before starting the queue. Orphan detection is report-only and limited to KokoMovie's app-owned directory; user-selected folders are never scanned or altered.
 

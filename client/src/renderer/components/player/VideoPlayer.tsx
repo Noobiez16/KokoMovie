@@ -10,11 +10,14 @@ import { PlayerControls } from './PlayerControls'
 import { NextEpisodeOverlay } from './NextEpisodeOverlay'
 import { autoSyncSubtitles, type SubCue } from '../../lib/subtitleAutoSync'
 import { resolveSubtitleTrackUrl } from '../../../main/download-offline-policy'
+import { usePlayerStore } from '../../store/player'
+import { rankSourceStatuses } from '../../../main/providers/source-discovery'
+import { selectAutomaticFallback } from '../../../main/providers/source-quality'
 
 interface CachedStream {
   providerId: string
   providerName: string
-  streams: Array<{ url: string; quality: string; headers?: Record<string, string>; audioLangs?: string[] }>
+  streams: Array<{ url: string; quality: string; qualityInfo?: StreamQuality; headers?: Record<string, string>; audioLangs?: string[] }>
 }
 
 interface Props {
@@ -24,6 +27,7 @@ interface Props {
   streamHeaders?: Record<string, string>
   initialProviderId?: string
   allStreams?: CachedStream[]
+  sourceStatuses?: ProviderSourceStatus[]
   profileId: string
   resumeAtSeconds?: number
   defaultSubtitleLanguage?: string | null
@@ -264,7 +268,7 @@ SubtitleTracks.displayName = 'SubtitleTracks'
 
 
 export function VideoPlayer({
-  content, episode, session, streamHeaders, initialProviderId, allStreams = [], profileId, resumeAtSeconds: initialResumeAt,
+  content, episode, session, streamHeaders, initialProviderId, allStreams = [], sourceStatuses = [], profileId, resumeAtSeconds: initialResumeAt,
   defaultSubtitleLanguage, offlineSubtitles = [], onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
 }: Props) {
   const { t } = useTranslation()
@@ -539,7 +543,10 @@ export function VideoPlayer({
 
   const handleSourceChange = async (providerId: string, isAuto = false) => {
     if (providerId === activeSourceId) return
+    const selectedQuality = allStreams.find((source) => source.providerId === providerId)?.streams[0]?.qualityInfo
+    if ((selectedQuality?.releaseType === 'cam' || selectedQuality?.releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) return
     playbackRecoveryDeadlineRef.current?.cancel()
+    const previouslyPinned = userPinnedSourceRef.current
 
     // An explicit pick (e.g. the user choosing the only black-and-white mirror) pins the
     // source so the auto-fallback never silently switches them back to a different one.
@@ -655,6 +662,34 @@ export function VideoPlayer({
 
       if (result.streams && result.streams.length > 0) {
         const winningStream = result.streams[0]
+        const freshReleaseType = winningStream.qualityInfo?.releaseType
+        if ((freshReleaseType === 'cam' || freshReleaseType === 'telesync') && !window.confirm(t('player.camWarning'))) {
+          userPinnedSourceRef.current = previouslyPinned
+          void videoRef.current?.play().catch(() => {})
+          return
+        }
+        const currentRequest = usePlayerStore.getState().request
+        if (currentRequest) {
+          const statusBase = currentRequest.sourceStatuses ?? sourceStatuses
+          const availableStatus: ProviderSourceStatus = {
+            providerId,
+            providerName: result.providerName,
+            state: 'available',
+            qualityInfo: winningStream.qualityInfo,
+          }
+          const freshSourceStatuses = statusBase.some((status) => status.providerId === providerId)
+            ? statusBase.map((status) => status.providerId === providerId ? availableStatus : status)
+            : [...statusBase, availableStatus]
+          const freshStream: CachedStream = {
+            providerId: result.providerId,
+            providerName: result.providerName,
+            streams: result.streams,
+          }
+          usePlayerStore.getState().patchRequest({
+            allStreams: [...(currentRequest.allStreams ?? []).filter((source) => source.providerId !== providerId), freshStream],
+            sourceStatuses: rankSourceStatuses(freshSourceStatuses),
+          })
+        }
         if (winningStream.headers && Object.keys(winningStream.headers).length > 0) {
           await providersApi.registerStreamHeaders(winningStream.url, winningStream.headers).catch(() => {})
         }
@@ -709,10 +744,7 @@ export function VideoPlayer({
     // P2P torrent (`p2p-*`): they take up to ~25s of peer discovery and frequently have no peers,
     // so cycling into them is exactly the "keeps switching server source, loads forever, then
     // 'no peers found'" symptom. Torrent dubs are an explicit user choice only.
-    const next = allStreams.find(
-      (s) => s.providerId !== activeSourceId && !s.providerId.startsWith('p2p-')
-        && !triedSourcesRef.current.has(s.providerId) && s.streams.length > 0,
-    )
+    const next = selectAutomaticFallback(allStreams, activeSourceId ?? null, triedSourcesRef.current)
     if (next) {
       playbackRecoveryDeadlineRef.current?.cancel()
       console.warn(`[auto-fallback] ${reason} — switching to ${next.providerName} (${next.providerId})`)
@@ -1897,6 +1929,7 @@ export function VideoPlayer({
           creditsStartSecs={episode?.creditsStartSecs ?? content.creditsStartSecs ?? null}
           sources={mergedSources}
           availableSourceIds={allStreams.filter((s) => !s.providerId.startsWith('p2p-')).map((s) => s.providerId)}
+          sourceStatuses={sourceStatuses}
           audioLangsBySource={Object.fromEntries(
             allStreams
               .filter((s) => !s.providerId.startsWith('p2p-'))
