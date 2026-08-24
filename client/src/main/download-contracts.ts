@@ -44,7 +44,7 @@ export const downloadStartSchema = z.object({
   subtitles: z.array(z.object({
     lang: z.string().trim().min(1).max(35),
     url: webUrl,
-  })).max(8).optional(),
-})
+  }).strict()).max(8).optional(),
+}).strict()
 
 export type DownloadStartInput = z.infer<typeof downloadStartSchema>

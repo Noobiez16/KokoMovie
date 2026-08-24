@@ -40,9 +40,14 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
 
   return (
     <div
-      className={`${widths[size]} flex-shrink-0 cursor-pointer group`}
-      onClick={go}
+      className={`${widths[size]} flex-shrink-0 group relative`}
     >
+      <button
+        type="button"
+        aria-label={content.title}
+        onClick={go}
+        className="block w-full text-left cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
+      >
       {/* Poster */}
       <div className="relative w-full aspect-[2/3] rounded-xl overflow-hidden bg-km-surface-2 border border-km-border/30 mb-2 shadow-md transition-all duration-300 group-hover:border-violet-500/50 group-hover:shadow-violet-500/10">
         {content.s3Thumbnail && !imgError ? (
@@ -70,22 +75,6 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
             </svg>
           </div>
         </div>
-
-        {/* Remove from the resume row (× on hover). Stops the click from reaching the
-            card so it deletes the record instead of starting playback. */}
-        {onRemove && (
-          <button
-            type="button"
-            aria-label={t('catalog.removeContinue')}
-            title={t('catalog.removeContinue')}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(content.id) }}
-            className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        )}
 
         {/* Type badge */}
         <div className="absolute top-1.5 left-1.5">
@@ -120,6 +109,22 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
         {content.title}
       </p>
       <p className="text-purple-300/40 text-[10px] mt-0.5 font-medium">{content.releaseYear}</p>
+      </button>
+
+      {/* Separate sibling action prevents nested interactive controls. */}
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={t('catalog.removeContinue')}
+          title={t('catalog.removeContinue')}
+          onClick={() => onRemove(content.id)}
+          className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

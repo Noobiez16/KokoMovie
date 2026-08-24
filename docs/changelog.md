@@ -5,6 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.5.5] — 2026-08-24 — Reliability, Security & Offline Playback
+
+### Added
+- **Authenticated Local Media Access**: Added a random per-process capability to KokoMovie's localhost HLS, subtitle, torrent, and `offline://` services so unrelated local pages and processes cannot read active or saved media URLs.
+- **Standards-Aware HLS Download Planning**: Added typed master/media playlist planning with fixture coverage for relative URLs, redirected manifests, MPEG-TS, fMP4 initialization maps, AES-128 keys and IVs, byte ranges, discontinuities, and alternate audio renditions.
+- **Localized Offline Compatibility Errors**: Unsupported DRM and playlist formats are rejected before a queue row is created and shown through the existing interface in English, Spanish, or French.
+- **Regional Certification Policy**: Added explicit US, Spanish, and French movie/TV certification ranks. Unrated or unknown content remains available at the unrestricted TV-MA setting and is hidden at lower maximums.
+- **Bounded TMDB Request Scheduling**: Added identical-request coalescing, a six-request concurrency ceiling, and bounded retry delays that honor TMDB's `Retry-After` response.
+- **Behavioral Electron Boundary Suite**: Added real-app coverage for Electron/window isolation, malformed and untrusted-renderer IPC rejection, temporary SQLite preference persistence, loopback capability enforcement, and self-signed TLS rejection.
+- **Production Fuse Verification**: Added an after-pack hardening hook and executable-level verification for disabling `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, and command-line inspector switches in distributed builds.
+
+### Changed
+- **Verified Outbound Transport**: Provider and download requests now use shared authenticated keep-alive agents with TLS certificate verification, validated redirects, and complete DNS-answer checks on every outbound hop.
+- **Exact-Origin Stream Headers**: Stream and download headers are registered against the full normalized origin; stored source headers are never reused after an origin change.
+- **Central Privileged IPC Boundary**: Every main-process handler now verifies the exact primary renderer and main frame, parses bounded runtime schemas, and sanitizes unexpected synchronous or asynchronous errors before they cross the preload bridge.
+- **Portable HLS Finalization**: Offline HLS downloads now let FFmpeg detect MPEG-TS or fragmented MP4 inputs and combine a selected alternate-audio track without re-encoding.
+- **Preference-Controlled Next Episode**: The existing next-episode overlay counts down only when Autoplay Next Episode is enabled; when disabled, the same manual Play and dismiss actions remain available without an automatic transition.
+- **Certification-Aware Catalog**: TMDB movie release certifications and TV content ratings are cached through the existing repository and applied to home, browse, search, trending, recommendations, watchlist/history enrichment, and detail access.
+- **On-Demand TV Seasons**: Series details load season metadata plus the default season first, fetch a selected season only when needed, and prefetch at most its immediate neighbors. Playback loads only the requested and following season so next-episode behavior remains intact.
+- **Consolidated TMDB Details**: Movie and TV detail requests use TMDB's appended videos, external IDs, and regional rating data, replacing three top-level detail calls with one before the default season is loaded.
+- **Keyboard-Equivalent Catalog Actions**: Catalog cards, viewing-history entries, watchlist entries, episode rows, row navigation, and action menus now expose native keyboard controls, visible focus, accessible names, selected-tab state, and expanded-menu state without changing their visual design.
+- **Supported Electron Patch Line**: Updated the application, native rebuild target, lockfile, and all platform packaging configurations from Electron 43.2.0 to 43.4.1 while keeping the existing major version.
+- **Contained Provider Browser Traffic**: Hidden extraction windows now keep Chromium web security unconditionally enabled and route HTTP(S) through a filtering proxy that rejects loopback, private, link-local, metadata, multicast, documentation/reserved, or DNS-rebound destinations while connecting to a validated pinned address.
+- **v1.5.5 Release Metadata**: Aligned root, client, lockfile, native rebuild, and packaging metadata on version 1.5.5 and Electron 43.4.1.
+
+### Fixed
+- **Linux Electron Boundary Runner**: The release security-boundary job now uses Ubuntu 22.04 so Chromium's real process sandbox remains available instead of being blocked by Ubuntu 24.04's AppArmor user-namespace policy. Linux release builds remain on Ubuntu 24.04, `--no-sandbox` remains forbidden, and Playwright browser-startup diagnostics are retained in failed workflow logs.
+- **Durable FFmpeg Release Source**: The release workflow no longer pins an ordinary BtbN daily autobuild that expires after fourteen days. The same audited FFmpeg 8.1 revision is now sourced from BtbN's retained July monthly build, with all Linux x64, Linux ARM64, and Windows x64 archive digests repinned to their official SHA-256 values.
+- **Secret-Scanner-Safe Test Fixtures**: Credential-boundary tests now construct synthetic userinfo URLs, authorization values, cookies, and API-key values at runtime instead of committing credential-shaped plaintext examples. A static regression test prevents these literal patterns from returning without weakening the underlying rejection and exact-origin coverage.
+- **HLS Offline Format Coverage**: Downloads no longer treat every non-comment playlist line as a media segment, which previously omitted initialization sections, keys, byte ranges, and alternate audio from otherwise playable streams.
+- **Redirect-Relative Playlist URLs**: Child playlists and media objects now resolve relative to the final validated manifest URL after redirects.
+- **Source Listener Lifecycle**: Source-specific `loadedmetadata`, `canplay`, and error callbacks are registered by name and completely removed before a new media source attaches, preventing stale callbacks during rapid source changes.
+- **Series Download Completeness**: Downloading a full series now resolves every unloaded season at the explicit download step instead of silently queuing only the initially populated season.
+- **Complete Offline Assets**: Rolling live HLS windows without `EXT-X-ENDLIST` are rejected before queueing instead of being saved as incomplete programs; HTTP artwork and subtitle sidecars now share the guarded, size-bounded downloader transport.
+- **Immediate Maturity Changes**: Lowering the saved maximum now clears every maturity-dependent catalog cache and removes restricted watchlist, history, and Continue Watching rows without hiding unknown offline entries.
+- **Stable Autoplay Countdown**: Parent rerenders no longer reset the next-episode countdown, and icon-only dismiss controls now expose localized accessible names.
+
+### Verification
+- Added behavior-first transport, localhost capability, IPC boundary, HLS fixture, byte-range, encryption, redirect, alternate-audio, and localized-error regression tests.
+- Added autoplay-on/off countdown, rapid-source-listener cleanup, regional certification ranking, unrated policy, TMDB certification endpoint, and catalog integration tests.
+- Added request-coalescing, concurrency, retry-delay, season-demand/prefetch, native-card keyboard, separated-action, tab-state, and menu-state regression tests.
+- Phase C, Phase D, and Phase E each pass the complete unit suite, zero-warning lint, renderer/main type checks, and the production renderer build. The Phase E gate covers 265 tests across 48 files.
+- Phase F adds provider-egress, runtime-version, packaging-schema, fuse-configuration, origin-bound download, offline capability, live-playlist, retained-FFmpeg-pin, and secret-fixture-hygiene tests. The complete deterministic gate passes 309 tests across 54 files, and the real Electron 43.4.1 suite covers five boundary scenarios, including an untrusted preload window and a self-signed TLS endpoint; production dependencies have no high/critical advisories, 227 shipped packages pass the GPL-3.0-or-later licence gate, and all three retained monthly FFmpeg archives pass checksum and embedded LGPL-configuration verification.
+- The v1.5.5 release repair re-passed zero-warning lint, renderer/main typechecks, all 309 deterministic tests, the production audit and licence gates, the production build, Electron fuse verification, and all five real-app boundary scenarios. A workflow regression guard keeps the boundary job on the sandbox-compatible runner, forbids `--no-sandbox`, and requires browser-startup diagnostics.
+
+---
 ## [1.5.4] — 2026-08-12 — Source Discovery & Playback Transport
 
 ### Added

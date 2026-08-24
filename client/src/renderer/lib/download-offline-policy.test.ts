@@ -18,9 +18,10 @@ describe('offline byte ranges', () => {
 
   it('keeps local subtitle URLs direct and proxies remote tracks', async () => {
     const { resolveSubtitleTrackUrl } = await import('../../main/download-offline-policy')
-    expect(resolveSubtitleTrackUrl('offline://id/subtitle/0-en.vtt', '8080')).toBe('offline://id/subtitle/0-en.vtt')
-    expect(resolveSubtitleTrackUrl('https://subs.example/file.vtt', '8080')).toBe('http://localhost:8080/proxy/subs.example/file.vtt?format=vtt')
-    expect(resolveSubtitleTrackUrl('https://subs.example/file.vtt', '')).toBe('')
+    expect(resolveSubtitleTrackUrl('offline://id/subtitle/0-en.vtt?kmc=capability', '8080', 'capability')).toBe('offline://id/subtitle/0-en.vtt?kmc=capability')
+    expect(resolveSubtitleTrackUrl('https://subs.example/file.vtt', '8080', 'capability')).toBe('http://localhost:8080/proxy/subs.example/file.vtt?format=vtt&kmc=capability')
+    expect(resolveSubtitleTrackUrl('https://subs.example/file.vtt', '', 'capability')).toBe('')
+    expect(resolveSubtitleTrackUrl('https://subs.example/file.vtt', '8080', '')).toBe('')
   })
 
 describe('offline subtitle normalization', () => {

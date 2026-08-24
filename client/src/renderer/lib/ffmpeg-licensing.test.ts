@@ -35,6 +35,20 @@ describe('FFmpeg licensing policy', () => {
     expect(FFMPEG_RELEASE).toMatch(/^autobuild-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}$/)
   })
 
+  it('pins a retained monthly autobuild rather than an expiring daily build', () => {
+    // BtbN retains the final successful autobuild of each month. Keep this curated rather than
+    // inferring retention from the calendar date: an ordinary build on the 28th can still expire.
+    const verifiedRetainedReleases = ['autobuild-2026-07-31-14-10']
+    expect(verifiedRetainedReleases).toContain(FFMPEG_RELEASE)
+  })
+
+  it('keeps distribution and legal documentation aligned with the pinned build', () => {
+    for (const document of ['docs/current-state.md', 'docs/LEGAL.md', 'THIRD-PARTY-NOTICES.md']) {
+      expect(readFileSync(resolve(process.cwd(), '..', document), 'utf8'), document)
+        .toContain(FFMPEG_RELEASE)
+    }
+  })
+
   it('rejects GPL and non-free builds by inspecting the binary configure string', () => {
     for (const flag of ['--enable-gpl', '--enable-nonfree', '--enable-libx264', '--enable-libx265', '--enable-libxvid']) {
       expect(fetchScript).toContain(flag)

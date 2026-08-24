@@ -16,7 +16,7 @@ process; it is never linked into the application.
 |---|---|
 | Version | `n8.1.2-34-g9b6c8969e0` (FFmpeg 8.1 release branch) |
 | Licence | LGPL-3.0-or-later (`--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`) |
-| Source of build | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), release `autobuild-2026-08-03-14-02` |
+| Source of build | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), release `autobuild-2026-07-31-14-10` |
 | Targets | `linux-x64`, `linux-arm64`, `win32-x64` |
 | Verification | SHA-256 pinned in `scripts/fetch-ffmpeg.mjs`; the configure string is read back out of the binary and rejected if it contains `--enable-gpl`, `--enable-nonfree`, `--enable-libx264`, `--enable-libx265`, or `--enable-libxvid` |
 

@@ -7,6 +7,17 @@ import { mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { FFMPEG_BIN } from '../ffmpeg.js'
 import type { StreamRequest, ProviderResult } from '../providers/interface.js'
+import {
+  audioLanguageSchema,
+  magnetUriSchema,
+  validateStreamRequest,
+} from '../providers/contracts.js'
+import {
+  isAuthorizedLocalMediaRequest,
+  isPermittedLocalMediaMethod,
+  withLocalMediaCapability,
+} from '../providers/local-media-capability.js'
+import { trustedIpcHandler } from './security.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Free, built-in P2P (BitTorrent) dub pipeline — the way Stremio's own server works.
@@ -593,6 +604,16 @@ async function ensureServer(): Promise<number> {
         // Guard against oversized / malformed URLs (no legitimate request exceeds a few hundred bytes).
         if ((req.url?.length ?? 0) > 2048) { res.writeHead(414, CORS_HEADERS); res.end('URI too long'); return }
 
+        if (!isPermittedLocalMediaMethod(req.method)) {
+          res.writeHead(405, { ...CORS_HEADERS, Allow: 'GET, HEAD, OPTIONS' })
+          res.end()
+          return
+        }
+        if (!isAuthorizedLocalMediaRequest({ url: req.url, headers: req.headers })) {
+          res.writeHead(403, CORS_HEADERS)
+          res.end('forbidden')
+          return
+        }
         if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); res.end(); return }
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const token = url.pathname.replace(/^\/t\//, '').replace(/\.(mp4|stream)$/i, '')
@@ -616,7 +637,6 @@ async function ensureServer(): Promise<number> {
           res.end()
           return
         }
-        if (req.method !== 'GET') { res.writeHead(405, { ...CORS_HEADERS, Allow: 'GET, HEAD, OPTIONS' }); res.end(); return }
         // MP4, M4V, and WebM use WebTorrent's native seekable stream; FFmpeg remuxes other containers.
         if (direct) serveDirect(file, req, res)
         else serveTranscoded(file, req, res, startSec, audioLang, audioStreamIndex, totalDur).catch((e) => {
@@ -766,9 +786,9 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   // .mp4 suffix keeps the player's isDirectVideo (native <video>) path happy either way.
   // Use `localhost` (not 127.0.0.1) so the URL matches the renderer CSP's `media-src
   // http://localhost:*` allowance — CSP treats the two as different origins (DN-048).
-  const url = `http://localhost:${port}/t/${token}.mp4`
+  const url = withLocalMediaCapability(`http://localhost:${port}/t/${token}.mp4`)
   const transcoded = !PLAYABLE_EXT.test(name) || selectedAudioStreamIndex !== null
-  log(`streaming "${name}" (${transcoded ? 'transcode' : 'direct'}, audio=${effectiveLang || 'default'}) → ${url}`)
+  log(`streaming "${name}" (${transcoded ? 'transcode' : 'direct'}, audio=${effectiveLang || 'default'}) → local media stream`)
   // `transcoded` tells the renderer the stream is a progressive remux (unknown duration), so it
   // can show the TMDB runtime as the total instead of the buffered-end time growing in real time.
   // `audioLang` is what will really be audible — the renderer labels the Audio menu with THIS, and
@@ -777,11 +797,14 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
 }
 
 export function registerTorrentIpc() {
-  ipcMain.handle('torrent:get-streams', async (_e, req: StreamRequest) => {
+  ipcMain.handle('torrent:get-streams', trustedIpcHandler(async (_e, reqInput: unknown) => {
+    const req = validateStreamRequest(reqInput)
     try { return await getTorrentStreams(req) } catch (e) { log(`get-streams failed: ${(e as Error).message}`); return [] }
-  })
+  }))
 
-  ipcMain.handle('torrent:resolve', async (_e, magnet: string, audioLang?: string) => {
+  ipcMain.handle('torrent:resolve', trustedIpcHandler(async (_e, magnetInput: unknown, audioLangInput?: unknown) => {
+    const magnet = magnetUriSchema.parse(magnetInput)
+    const audioLang = audioLangInput === undefined ? undefined : audioLanguageSchema.parse(audioLangInput)
     try { return await resolveTorrent(magnet, audioLang || '') } catch (e) { return { error: (e as Error).message } }
-  })
+  }))
 }

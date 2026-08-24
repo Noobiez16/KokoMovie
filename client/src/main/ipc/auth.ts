@@ -3,9 +3,9 @@ import keytar from 'keytar'
 import { existsSync, readFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import {
-  assertTrustedRenderer,
   localAccountSchema,
   tmdbCredentialSchema,
+  trustedIpcHandler,
 } from './security'
 
 const SERVICE = 'kokomovie-pc'
@@ -87,16 +87,14 @@ export async function purgeAccountEraKeychainEntries(): Promise<void> {
 }
 
 export function registerAuthIpc(): void {
-  ipcMain.handle('keychain:get-tmdb-key', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('keychain:get-tmdb-key', trustedIpcHandler(async (_event, input: unknown) => {
     const accountId = localAccountSchema.parse(input)
     const accountKey = `tmdb-key-${accountId}`
     const stored = await keytar.getPassword(SERVICE, accountKey)
     return stored ?? migrateLegacyTmdbCredential(accountKey)
-  })
+  }))
 
-  ipcMain.handle('keychain:set-tmdb-key', async (event, accountInput: unknown, credentialInput: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('keychain:set-tmdb-key', trustedIpcHandler(async (_event, accountInput: unknown, credentialInput: unknown) => {
     const accountId = localAccountSchema.parse(accountInput)
     const accountKey = `tmdb-key-${accountId}`
 
@@ -107,11 +105,10 @@ export function registerAuthIpc(): void {
 
     const credential = tmdbCredentialSchema.parse(credentialInput)
     await keytar.setPassword(SERVICE, accountKey, credential)
-  })
+  }))
 
-  ipcMain.handle('keychain:clear-tmdb-key', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('keychain:clear-tmdb-key', trustedIpcHandler(async (_event, input: unknown) => {
     const accountId = localAccountSchema.parse(input)
     await keytar.deletePassword(SERVICE, `tmdb-key-${accountId}`)
-  })
+  }))
 }

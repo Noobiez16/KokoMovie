@@ -53,12 +53,13 @@ function SettingRow({ label, description, children }: {
   )
 }
 
-function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
+function Toggle({ enabled, onChange, label }: { enabled: boolean; onChange: () => void; label: string }) {
   return (
     <button
       onClick={onChange}
       className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${enabled ? 'bg-km-accent' : 'bg-white/20'}`}
       aria-pressed={enabled}
+      aria-label={label}
     >
       <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${enabled ? 'translate-x-5' : ''}`} />
     </button>
@@ -321,8 +322,18 @@ export function SettingsPage() {
   const updateMutation = useMutation({
     mutationFn: (payload: Partial<Omit<Preferences, 'isKids'>>) =>
       userApi.updatePreferences(payload, profileId),
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
       qc.invalidateQueries({ queryKey: ['preferences', profileId] })
+      if (payload.maturityRating) {
+        // A stricter maximum must not leave previously-authorized detail records
+        // or saved-list enrichment visible until their normal stale time expires.
+        const maturityDependentKeys = [
+          'content', 'similar', 'home', 'browse-genre', 'movies-home', 'movies-genre',
+          'series-home', 'series-genre', 'search', 'trending', 'recommendations',
+          'watchlist', 'history', 'continue-watching',
+        ]
+        for (const queryKey of maturityDependentKeys) qc.removeQueries({ queryKey: [queryKey] })
+      }
       flashSaved()
     },
     onError: () => setSaveStatus('error'),
@@ -506,7 +517,7 @@ export function SettingsPage() {
                     </SettingRow>
 
                     <SettingRow label={t('settings.autoplay')} description={t('settings.autoplayDescription')}>
-                      <Toggle enabled={prefs.autoplay} onChange={() => updateMutation.mutate({ autoplay: !prefs.autoplay })} />
+                      <Toggle label={t('settings.autoplay')} enabled={prefs.autoplay} onChange={() => updateMutation.mutate({ autoplay: !prefs.autoplay })} />
                     </SettingRow>
 
                     <SettingRow label={t('settings.sourceDiscovery')} description={t('settings.sourceDiscoveryDescription')}>

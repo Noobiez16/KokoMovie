@@ -1,7 +1,7 @@
 // Local playback tracking: resume positions and continue-watching live in local
 // SQLite (via IPC). Actual streams are located by the provider framework in the
 // main process; the "session" here is just a local handle for position tracking.
-import { catalogApi } from './catalog'
+import { catalogApi, ContentRestrictedByMaturityError } from './catalog'
 import { episodeRank } from '../lib/tmdb'
 
 export interface PositionRowLite {
@@ -121,7 +121,13 @@ export const playbackApi = {
     const items = (
       await Promise.all(
         active.map(async (r): Promise<ContinueWatchingItem | null> => {
-          const s = await catalogApi.getSummary(r.content_id)
+          let s
+          try {
+            s = await catalogApi.getSummary(r.content_id)
+          } catch (error) {
+            if (error instanceof ContentRestrictedByMaturityError) return null
+            throw error
+          }
           if (!s) return null
           return {
             contentId: r.content_id,

@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
   ProviderCircuitBreaker,
+  audioLanguageSchema,
   getProviderContract,
+  magnetUriSchema,
+  providerIdSchema,
+  providerSearchIdSchema,
+  providerStreamHeadersSchema,
+  providerToggleSchema,
   rankProviderCandidates,
   redactProviderDiagnostic,
   validateProviderEmbedUrl,
   validateStreamRequest,
 } from '../../main/providers/contracts'
 import { getBundledProviders } from '../../main/providers/registry'
+import { FIXTURE_HEADER_VALUE } from './security-test-fixtures'
 
 const MOVIE_FIXTURE = { type: 'movie' as const, imdbId: 'tt0133093', tmdbId: 603 }
 const TV_FIXTURE = { type: 'tv' as const, imdbId: 'tt0944947', tmdbId: 1399, season: 1, episode: 1 }
@@ -27,6 +34,31 @@ describe('provider contracts', () => {
     expect(validateStreamRequest(TV_FIXTURE)).toMatchObject(TV_FIXTURE)
     expect(() => validateStreamRequest({ type: 'tv', tmdbId: 1, season: 1 })).toThrow()
     expect(() => validateStreamRequest({ type: 'movie', imdbId: 'invalid' })).toThrow()
+    expect(() => validateStreamRequest({ ...MOVIE_FIXTURE, unexpected: true })).toThrow()
+    expect(() => providerIdSchema.parse('x'.repeat(65))).toThrow()
+    expect(() => providerSearchIdSchema.parse('x'.repeat(129))).toThrow()
+    expect(providerToggleSchema.parse({ providerId: 'vidsrc', enabled: true })).toEqual({ providerId: 'vidsrc', enabled: true })
+    expect(() => providerToggleSchema.parse({ providerId: 'vidsrc', enabled: 'yes' })).toThrow()
+  })
+
+  it('bounds stream-header, magnet, and language inputs', () => {
+    expect(providerStreamHeadersSchema.parse({
+      streamUrl: 'https://cdn.example.test/master.m3u8',
+      headers: { Referer: 'https://embed.example.test/' },
+    })).toMatchObject({ streamUrl: 'https://cdn.example.test/master.m3u8' })
+    expect(() => providerStreamHeadersSchema.parse({
+      streamUrl: 'https://cdn.example.test/master.m3u8',
+      headers: { Authorization: FIXTURE_HEADER_VALUE },
+    })).toThrow()
+    expect(() => providerStreamHeadersSchema.parse({
+      streamUrl: 'file:///etc/passwd',
+      headers: {},
+    })).toThrow()
+    expect(magnetUriSchema.parse('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'))
+      .toMatch(/^magnet:/)
+    expect(() => magnetUriSchema.parse('https://example.test/file.torrent')).toThrow()
+    expect(audioLanguageSchema.parse('es')).toBe('es')
+    expect(() => audioLanguageSchema.parse('spanish')).toThrow()
   })
 
   it('redacts URLs and credential-like diagnostics', () => {

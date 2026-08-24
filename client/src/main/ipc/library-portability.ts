@@ -13,7 +13,7 @@ import { basename, join } from 'path'
 import { z } from 'zod'
 import { getDb } from '../db/sqlite.js'
 import type { PositionRow, PreferencesRow, WatchlistRow } from './library.js'
-import { assertTrustedRenderer } from './security.js'
+import { trustedIpcHandler } from './security.js'
 import {
   incomingWins,
   hasValidArtworkSignature,
@@ -204,8 +204,7 @@ export function applyPayload(payload: LibraryExportPayload, mode: 'merge' | 'rep
 }
 
 export function registerLibraryPortabilityIpc(): void {
-  ipcMain.handle('library:export-file', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('library:export-file', trustedIpcHandler(async (_event, input: unknown) => {
     const { includeArtwork } = z.object({ includeArtwork: z.boolean() }).strict().parse(input)
     const result = parentWindow()
       ? await dialog.showSaveDialog(parentWindow()!, {
@@ -232,10 +231,9 @@ export function registerLibraryPortabilityIpc(): void {
         artwork: payload.artwork?.length ?? 0,
       },
     }
-  })
+  }))
 
-  ipcMain.handle('library:import-select', async (event) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('library:import-select', trustedIpcHandler(async () => {
     const result = parentWindow()
       ? await dialog.showOpenDialog(parentWindow()!, {
         title: 'Import KokoMovie Library',
@@ -257,10 +255,9 @@ export function registerLibraryPortabilityIpc(): void {
     pendingImports.set(token, { payload, preview, expiresAt })
     setTimeout(() => pendingImports.delete(token), 10 * 60_000).unref()
     return { cancelled: false, token, preview }
-  })
+  }))
 
-  ipcMain.handle('library:import-apply', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('library:import-apply', trustedIpcHandler(async (_event, input: unknown) => {
     const { token, mode } = importApplySchema.parse(input)
     const pending = pendingImports.get(token)
     if (!pending || pending.expiresAt < Date.now()) {
@@ -272,5 +269,5 @@ export function registerLibraryPortabilityIpc(): void {
     const artwork = restoreArtwork(pending.payload)
     pendingImports.delete(token)
     return { ok: true, mode, backupPath, ...applied, artwork }
-  })
+  }))
 }

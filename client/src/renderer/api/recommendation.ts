@@ -1,6 +1,6 @@
 // Local recommendations derived from TMDB (no ML backend).
 import type { ContentSummary } from './catalog'
-import { catalogApi, tmdbItemsToSummaries } from './catalog'
+import { applyCatalogMaturity, catalogApi, tmdbItemsToSummaries } from './catalog'
 import { createTmdbClient, decodeTmdbContentId } from '../lib/tmdb'
 import { useSettingsStore } from '../store/settings'
 import i18n from '../i18n'
@@ -31,7 +31,7 @@ export const recommendationApi = {
       : await c.getSimilarTv(decoded.tmdbId)
     // Tag media_type so the mapper produces the right ids/types.
     const tagged = res.results.map((i) => ({ ...i, media_type: decoded.type }))
-    return { success: true as const, data: tmdbItemsToSummaries(tagged).slice(0, 20) }
+    return { success: true as const, data: await applyCatalogMaturity(tmdbItemsToSummaries(tagged).slice(0, 20), c) }
   },
 
   getTrending: async () => {

@@ -1,0 +1,5 @@
+#EXTM3U
+#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://license"
+#EXTINF:6.0,
+segment.ts
+#EXT-X-ENDLIST

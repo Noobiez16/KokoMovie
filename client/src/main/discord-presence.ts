@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import DiscordRPC from 'discord-rpc'
+import { discordActivitySchema, trustedIpcHandler } from './ipc/security.js'
 
 type ActivityInput = { title: string; episode?: string; startedAt?: number } | null
 
@@ -24,11 +25,12 @@ function applyActivity(activity: ActivityInput): void {
 
 export function registerDiscordPresence(): void {
   const clientId = process.env['KOKOMOVIE_DISCORD_CLIENT_ID']?.trim() || '1512538334407295057'
-  ipcMain.handle('discord:set-activity', (_event, activity: ActivityInput) => {
+  ipcMain.handle('discord:set-activity', trustedIpcHandler((_event, activityInput: unknown) => {
+    const activity: ActivityInput = discordActivitySchema.parse(activityInput)
     if (!clientId) return { ok: false, reason: 'KOKOMOVIE_DISCORD_CLIENT_ID is not configured' }
     applyActivity(activity)
     return { ok: true }
-  })
+  }))
   if (!clientId) {
     console.info('[discord] Rich Presence disabled: set KOKOMOVIE_DISCORD_CLIENT_ID to a Discord application ID')
     return

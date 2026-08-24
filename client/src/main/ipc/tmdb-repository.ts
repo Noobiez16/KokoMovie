@@ -3,8 +3,10 @@ import { clearArtworkCache, getArtworkCacheStats } from '../catalog-artwork'
 import { z } from 'zod'
 import { getDb } from '../db/sqlite'
 import { getTmdbCredential, storeTmdbCredential } from './auth'
-import { assertTrustedRenderer, tmdbCredentialSchema } from './security'
+import { tmdbCredentialSchema, trustedIpcHandler } from './security'
 import { findCachedTmdbItem, mergeTmdbItems, downloadedRowsToTmdbItem, tmdbRequestCacheKey, type DownloadedMetadataRow, searchCachedTmdb, type CachedPayloadRow, type CachedTmdbItem } from '../tmdb-cache-policy'
+import { CoalescingRequestScheduler, tmdbRetryDelayMs } from '../tmdb-request-scheduler'
+import { withLocalMediaCapability } from '../providers/local-media-capability'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const CACHE_SCHEMA_VERSION = 1
@@ -12,8 +14,10 @@ const FRESH_TTL_MS = 24 * 60 * 60 * 1000
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 20_000
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+const MAX_TMDB_ATTEMPTS = 4
+const requestScheduler = new CoalescingRequestScheduler(6)
 
-const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/multi|configuration)$/
+const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/release_dates)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/content_ratings|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/multi|configuration)$/
 const paramsSchema = z.record(z.string().max(500)).default({}).refine((params) =>
   Object.keys(params).length <= 12 &&
   Object.keys(params).every((key) => ['page', 'sort_by', 'with_genres', 'primary_release_year', 'first_air_date_year', 'query', 'append_to_response', 'language'].includes(key)),
@@ -65,17 +69,27 @@ async function fetchTmdb(path: string, params: Record<string, string>, credentia
   if (!isV4) url.searchParams.set('api_key', credential)
   for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value)
 
-  const response = await net.fetch(url.toString(), {
-    method: 'GET',
-    headers: isV4 ? { Authorization: `Bearer ${credential}` } : {},
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  })
-  if (!response.ok) throw new Error(`TMDB request failed with status ${response.status}`)
-  const declaredLength = Number(response.headers.get('content-length') ?? 0)
-  if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('TMDB response is too large')
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > MAX_RESPONSE_BYTES) throw new Error('TMDB response is too large')
-  return new TextDecoder().decode(bytes)
+  for (let attempt = 0; attempt < MAX_TMDB_ATTEMPTS; attempt++) {
+    const response = await net.fetch(url.toString(), {
+      method: 'GET',
+      headers: isV4 ? { Authorization: `Bearer ${credential}` } : {},
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      const delay = tmdbRetryDelayMs(response.status, response.headers.get('retry-after'), attempt)
+      if (delay !== null && attempt + 1 < MAX_TMDB_ATTEMPTS) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delay))
+        continue
+      }
+      throw new Error(`TMDB request failed with status ${response.status}`)
+    }
+    const declaredLength = Number(response.headers.get('content-length') ?? 0)
+    if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('TMDB response is too large')
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_RESPONSE_BYTES) throw new Error('TMDB response is too large')
+    return new TextDecoder().decode(bytes)
+  }
+  throw new Error('TMDB request retry budget exhausted')
 }
 
 function allCachedPayloads(): CachedPayloadRow[] {
@@ -88,7 +102,10 @@ function downloadedTmdbItem(type: 'movie' | 'tv', tmdbId: number): CachedTmdbIte
   const contentId = `${typePart}-0000-4000-8000-${tmdbId.toString(16).padStart(12, '0')}`
   const rows = getDb().prepare("SELECT episode_id, title, thumbnail_url, duration_mins FROM downloads WHERE content_id = ? AND status = 'completed' ORDER BY downloaded_at DESC")
     .all(contentId) as DownloadedMetadataRow[]
-  return downloadedRowsToTmdbItem(rows, type, tmdbId)
+  return downloadedRowsToTmdbItem(rows.map((row) => ({
+    ...row,
+    thumbnail_url: row.thumbnail_url?.startsWith('offline:') ? withLocalMediaCapability(row.thumbnail_url) : row.thumbnail_url,
+  })), type, tmdbId)
 }
 
 function localFallback(path: string, params: Record<string, string>): string | null {
@@ -121,7 +138,7 @@ function mergeSearchBody(body: string, query: string): string {
   return JSON.stringify({ ...page, results: merged, total_results: Math.max(page.total_results ?? 0, merged.length) })
 }
 
-async function requestTmdb(path: string, params: Record<string, string>) {
+async function requestTmdbUncoalesced(path: string, params: Record<string, string>) {
   purgeExpiredCache()
   const key = tmdbRequestCacheKey(path, params, CACHE_SCHEMA_VERSION)
   const cached = readCache(key)
@@ -129,14 +146,14 @@ async function requestTmdb(path: string, params: Record<string, string>) {
   const fetchedAt = cached ? Date.parse(cached.fetched_at) : 0
   const forcedOffline = process.env['KOKOMOVIE_OFFLINE_TEST'] === '1'
   if (cached && !forcedOffline && Date.now() - fetchedAt <= FRESH_TTL_MS) {
-    void getTmdbCredential().then((credential) => {
+    void requestScheduler.run(`refresh:${key}`, () => getTmdbCredential().then((credential) => {
       if (!credential) return
       return fetchTmdb(path, params, credential).then((body) => {
         const refreshed = path === '/search/multi' ? mergeSearchBody(body, params['query'] ?? '') : body
         JSON.parse(refreshed)
         writeCache(key, path, params, refreshed)
       })
-    }).catch(() => {})
+    })).catch(() => {})
     return { body: cached.payload, source: 'cache' as const, stale: false, fetchedAt: cached.fetched_at }
   }
 
@@ -161,14 +178,12 @@ async function requestTmdb(path: string, params: Record<string, string>) {
 }
 
 export function registerTmdbRepositoryIpc(): void {
-  ipcMain.handle('tmdb:request', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('tmdb:request', trustedIpcHandler(async (_event, input: unknown) => {
     const request = requestSchema.parse(input)
     return requestTmdb(request.path, request.params)
-  })
+  }))
 
-  ipcMain.handle('tmdb:search-downloads', (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('tmdb:search-downloads', trustedIpcHandler((_event, input: unknown) => {
     const query = downloadSearchSchema.parse(input).toLocaleLowerCase()
     const rows = getDb().prepare("SELECT content_id, title, content_type, thumbnail_url, duration_mins FROM downloads WHERE status = 'completed' ORDER BY downloaded_at DESC")
       .all() as Array<{ content_id: string; title: string; content_type: string; thumbnail_url: string | null; duration_mins: number | null }>
@@ -177,12 +192,12 @@ export function registerTmdbRepositoryIpc(): void {
       .map((row) => [row.content_id, {
         id: row.content_id, title: row.title, type: row.content_type === 'series' ? 'series' : 'movie',
         releaseYear: null, rating: null, imdbScore: null, durationMins: row.duration_mins,
-        s3Thumbnail: row.thumbnail_url, backdropUrl: null, imdbId: null, tmdbId: null, planMinimum: 'basic',
+        s3Thumbnail: row.thumbnail_url?.startsWith('offline:') ? withLocalMediaCapability(row.thumbnail_url) : row.thumbnail_url,
+        backdropUrl: null, imdbId: null, tmdbId: null, planMinimum: 'basic',
       }])).values()]
-  })
+  }))
 
-  ipcMain.handle('tmdb:validate-credential', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('tmdb:validate-credential', trustedIpcHandler(async (_event, input: unknown) => {
     const credential = tmdbCredentialSchema.parse(input)
     try {
       await fetchTmdb('/configuration', {}, credential)
@@ -191,20 +206,23 @@ export function registerTmdbRepositoryIpc(): void {
     } catch {
       return false
     }
-  })
+  }))
 
-  ipcMain.handle('tmdb:cache:stats', async (event) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('tmdb:cache:stats', trustedIpcHandler(async () => {
     const row = getDb().prepare('SELECT COUNT(*) AS entries, COALESCE(SUM(LENGTH(payload)), 0) AS bytes FROM tmdb_cache')
       .get() as { entries: number; bytes: number }
     const artwork = await getArtworkCacheStats()
     return { entries: row.entries + artwork.entries, bytes: row.bytes + artwork.bytes }
-  })
+  }))
 
-  ipcMain.handle('tmdb:cache:clear', async (event) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('tmdb:cache:clear', trustedIpcHandler(async () => {
     const removed = getDb().prepare('DELETE FROM tmdb_cache').run().changes
     await clearArtworkCache()
     return { removed }
-  })
+  }))
+}
+
+async function requestTmdb(path: string, params: Record<string, string>) {
+  const key = tmdbRequestCacheKey(path, params, CACHE_SCHEMA_VERSION)
+  return requestScheduler.run(`request:${key}`, () => requestTmdbUncoalesced(path, params))
 }

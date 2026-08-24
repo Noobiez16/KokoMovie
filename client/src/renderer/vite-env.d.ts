@@ -114,6 +114,7 @@ interface ElectronAPI {
   ) => () => void
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) => Promise<{ ok: boolean }>
   getProxyPort: () => Promise<number>
+  getProxyInfo: () => Promise<{ port: number; capability: string }>
 
   // Built-in P2P torrent streaming (free dub sourcing)
   torrentGetStreams: (req: StreamRequest) => Promise<ProviderResult[]>

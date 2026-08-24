@@ -2,6 +2,7 @@ import { autoUpdater } from 'electron-updater'
 import { app, ipcMain, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
+import { booleanFlagSchema, trustedIpcHandler } from './ipc/security.js'
 
 // Persist the auto-update preference in userData (same pattern as provider prefs) so the
 // choice is respected at startup — before the renderer has loaded — not just in localStorage.
@@ -29,16 +30,17 @@ export function setupUpdater() {
   // Only run real updater logic in a packaged build. In development the app is unpackaged
   // and version is often '0.0', which makes electron-updater throw on init.
   if (!app.isPackaged) {
-    ipcMain.handle('app:install-update', () => {
+    ipcMain.handle('app:install-update', trustedIpcHandler(() => {
       console.log('[updater] app:install-update called in dev mode (stub)')
-    })
+    }))
     // The preference still persists in dev so the toggle reflects/saves the real choice.
-    ipcMain.handle('app:get-auto-update', () => loadAutoUpdate())
-    ipcMain.handle('app:set-auto-update', (_e, enabled: boolean) => {
-      saveAutoUpdate(!!enabled)
-      return !!enabled
-    })
-    ipcMain.handle('app:check-for-updates', () => ({ status: 'dev', version: app.getVersion() }))
+    ipcMain.handle('app:get-auto-update', trustedIpcHandler(() => loadAutoUpdate()))
+    ipcMain.handle('app:set-auto-update', trustedIpcHandler((_e, enabledInput: unknown) => {
+      const enabled = booleanFlagSchema.parse(enabledInput)
+      saveAutoUpdate(enabled)
+      return enabled
+    }))
+    ipcMain.handle('app:check-for-updates', trustedIpcHandler(() => ({ status: 'dev', version: app.getVersion() })))
     return
   }
 
@@ -60,14 +62,14 @@ export function setupUpdater() {
     console.error('[updater] Error:', err.message)
   })
 
-  ipcMain.handle('app:install-update', () => {
+  ipcMain.handle('app:install-update', trustedIpcHandler(() => {
     autoUpdater.quitAndInstall(false, true)
-  })
+  }))
 
   // Manual, on-demand check so the user doesn't have to wait for the 4-hour cycle. Resolves
   // once the check settles. An explicit check still downloads even when auto-download is off
   // (the user clearly wants the update), so the "ready to install" prompt appears regardless.
-  ipcMain.handle('app:check-for-updates', () => new Promise((resolve) => {
+  ipcMain.handle('app:check-for-updates', trustedIpcHandler(() => new Promise((resolve) => {
     let settled = false
     const finish = (r: { status: string; version?: string; message?: string }) => {
       if (settled) return
@@ -91,19 +93,19 @@ export function setupUpdater() {
     autoUpdater.once('error', onErr)
     const timer = setTimeout(() => finish({ status: 'error', message: 'Timed out checking for updates' }), 60000)
     autoUpdater.checkForUpdates().catch((err) => finish({ status: 'error', message: err?.message }))
-  }))
+  })))
 
-  ipcMain.handle('app:get-auto-update', () => enabled)
+  ipcMain.handle('app:get-auto-update', trustedIpcHandler(() => enabled))
 
-  ipcMain.handle('app:set-auto-update', (_e, next: boolean) => {
-    enabled = !!next
+  ipcMain.handle('app:set-auto-update', trustedIpcHandler((_e, nextInput: unknown) => {
+    enabled = booleanFlagSchema.parse(nextInput)
     saveAutoUpdate(enabled)
     autoUpdater.autoDownload = enabled
     autoUpdater.autoInstallOnAppQuit = enabled
     // Turning it back on should look for an update right away.
     if (enabled) autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('[updater]', e?.message))
     return enabled
-  })
+  }))
 
   // Startup + 4-hourly checks, each gated on the current preference so disabling it
   // genuinely stops auto-download/-install (not just hides the toast).

@@ -84,12 +84,19 @@ describe('localized TMDB requests', () => {
       client.trending(), client.popularMovies(), client.popularTv(), client.topRatedMovies(), client.topRatedTv(),
       client.discoverMovie(28), client.discoverTv(18), client.searchMulti('matrix'), client.getMovie(603),
       client.getTv(1399), client.getSeason(1399, 1), client.getMovieVideos(603), client.getTvVideos(1399),
-      client.getSimilarMovies(603), client.getSimilarTv(1399),
+      client.getSimilarMovies(603), client.getSimilarTv(1399), client.getMovieReleaseDates(603),
+      client.getTvContentRatings(1399),
     ])
 
-    expect(tmdbRequest).toHaveBeenCalledTimes(15)
+    expect(tmdbRequest).toHaveBeenCalledTimes(17)
     for (const [, params] of tmdbRequest.mock.calls) {
       expect(params).toMatchObject({ language: 'es-ES' })
     }
+    expect(tmdbRequest).toHaveBeenCalledWith('/movie/603', expect.objectContaining({
+      append_to_response: 'credits,external_ids,videos,release_dates',
+    }))
+    expect(tmdbRequest).toHaveBeenCalledWith('/tv/1399', expect.objectContaining({
+      append_to_response: 'credits,external_ids,videos,content_ratings',
+    }))
   })
 })

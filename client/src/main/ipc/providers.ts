@@ -1,7 +1,7 @@
 import { ipcMain, session } from 'electron'
 import { listProviders, getEnabledProviders, toggleProvider, getProvider } from '../providers/registry.js'
 import { extractStreamWithRetry } from '../stream-extractor/index.js'
-import type { StreamRequest, ProviderResult } from '../providers/interface.js'
+import type { ProviderResult } from '../providers/interface.js'
 import { classifySourceQuality, rankProviderResults } from '../providers/source-quality.js'
 import {
   createInitialSourceStatuses,
@@ -12,8 +12,22 @@ import {
 } from '../providers/source-discovery.js'
 import { getDb } from '../db/sqlite.js'
 import { bindProxyResponseLifecycle } from '../providers/proxy-response-lifecycle.js'
-import { ProviderCircuitBreaker, getProviderContract, redactProviderDiagnostic, validateProviderEmbedUrl, validateStreamRequest } from '../providers/contracts.js'
-import { isForbiddenProxyHostname, validateProxyTargetUrl } from '../providers/network-policy.js'
+import {
+  ProviderCircuitBreaker,
+  getProviderContract,
+  providerIdSchema,
+  providerSearchIdSchema,
+  providerStreamHeadersSchema,
+  providerToggleSchema,
+  redactProviderDiagnostic,
+  validateProviderEmbedUrl,
+  validateStreamRequest,
+} from '../providers/contracts.js'
+import {
+  resolveValidatedRedirect,
+  validateProxyTargetUrl,
+  validateResolvedAddresses,
+} from '../providers/network-policy.js'
 import { SupersedingRequestRegistry } from '../providers/request-lifecycle.js'
 import * as nodeHttp from 'http'
 import * as nodeHttps from 'https'
@@ -22,6 +36,19 @@ import { setMaxListeners } from 'events'
 import { writeDiagnosticEvent } from '../diagnostics.js'
 import { lookup, Resolver } from 'dns'
 import type { LookupAddress } from 'dns'
+import { createAuthenticatedHttpAgents } from '../providers/http-agents.js'
+import {
+  sanitizeUntrustedStreamHeaders,
+  StreamHeaderRegistry,
+} from '../providers/stream-header-registry.js'
+import {
+  decorateHlsManifestWithLocalCapability,
+  getLocalMediaCapability,
+  isAuthorizedLocalMediaRequest,
+  isPermittedLocalMediaMethod,
+  withLocalMediaCapability,
+} from '../providers/local-media-capability.js'
+import { trustedIpcHandler } from './security.js'
 
 // Some ISPs (especially in regions that block piracy CDNs — VixSrc's `*.vix-content.net` is a
 // prime example) return NXDOMAIN for stream segment hosts even though those domains resolve
@@ -53,12 +80,16 @@ function resilientLookup(
   ) => void
   sysLookup(hostname, opts, (err, address, family) => {
     if (!err) {
-      const resolved = (Array.isArray(address)
+      const resolved = Array.isArray(address)
         ? address
-        : [{ address, family }]).filter((entry) => !isForbiddenProxyHostname(entry.address))
-      if (resolved.length === 0) {
+        : [{ address, family }]
+      try {
+        validateResolvedAddresses(resolved.map((entry) => entry.address))
+      } catch {
         cb(unsafeDnsError())
-      } else if (opts.all) {
+        return
+      }
+      if (opts.all) {
         cb(null, resolved)
       } else {
         cb(null, resolved[0]!.address, resolved[0]!.family)
@@ -66,17 +97,27 @@ function resilientLookup(
       return
     }
     publicDnsResolver.resolve4(hostname, (e4, addrs4) => {
-      const safe4 = (addrs4 ?? []).filter((address) => !isForbiddenProxyHostname(address))
-      if (!e4 && safe4.length > 0) {
-        if (opts.all) cb(null, safe4.map((address) => ({ address, family: 4 })))
-        else cb(null, safe4[0], 4)
+      if (!e4 && (addrs4?.length ?? 0) > 0) {
+        try {
+          validateResolvedAddresses(addrs4)
+        } catch {
+          cb(unsafeDnsError())
+          return
+        }
+        if (opts.all) cb(null, addrs4.map((address) => ({ address, family: 4 })))
+        else cb(null, addrs4[0], 4)
         return
       }
       publicDnsResolver.resolve6(hostname, (e6, addrs6) => {
-        const safe6 = (addrs6 ?? []).filter((address) => !isForbiddenProxyHostname(address))
-        if (!e6 && safe6.length > 0) {
-          if (opts.all) cb(null, safe6.map((address) => ({ address, family: 6 })))
-          else cb(null, safe6[0], 6)
+        if (!e6 && (addrs6?.length ?? 0) > 0) {
+          try {
+            validateResolvedAddresses(addrs6)
+          } catch {
+            cb(unsafeDnsError())
+            return
+          }
+          if (opts.all) cb(null, addrs6.map((address) => ({ address, family: 6 })))
+          else cb(null, addrs6[0], 6)
           return
         }
         cb((!e4 || !e6) ? unsafeDnsError() : err)
@@ -87,18 +128,10 @@ function resilientLookup(
 const HTTP_REQUEST_KEY = ['req', 'uest'].join('')
 const HTTP_CREATE_SERVER_KEY = ['create', 'Server'].join('')
 
-const nodeHttpAgent = new nodeHttp.Agent({
-  keepAlive: true,
-  maxSockets: 64,
-  keepAliveMsecs: 30000,
-})
-
-const nodeHttpsAgent = new nodeHttps.Agent({
-  keepAlive: true,
-  maxSockets: 64,
-  keepAliveMsecs: 30000,
-  rejectUnauthorized: false,
-})
+const {
+  httpAgent: nodeHttpAgent,
+  httpsAgent: nodeHttpsAgent,
+} = createAuthenticatedHttpAgents(64)
 const providerCircuits = new ProviderCircuitBreaker()
 const directProviderRequests = new SupersedingRequestRegistry()
 const DIRECT_PROVIDER_DEADLINE_MS = 20_000
@@ -124,40 +157,19 @@ function checkDomainResolves(url: string): Promise<boolean> {
   })
 }
 
-// Stream headers to inject when the renderer's HLS player fetches segments
-// Keyed by URL host prefix
-const streamHeadersRegistry = new Map<string, Record<string, string>>()
-const streamSessionsRegistry = new Map<string, string>()
+// Stream headers are bound to the exact origin where the extractor observed them.
+const streamHeaderRegistry = new StreamHeaderRegistry()
 
-export function getStreamHeaders(host: string): Record<string, string> {
-  const headers = streamHeadersRegistry.get(host)
-  if (headers && Object.keys(headers).length > 0) {
-    return headers
-  }
-  if (streamHeadersRegistry.size > 0) {
-    const entries = Array.from(streamHeadersRegistry.entries())
-    const lastEntry = entries[entries.length - 1]
-    if (lastEntry && lastEntry[1]) {
-      return lastEntry[1]
-    }
-  }
-  return {}
+export function getStreamHeaders(url: string): Record<string, string> {
+  return streamHeaderRegistry.get(url)
 }
 
 // Pre-register headers and session partition in the main process so they're ready BEFORE the renderer starts loading
 export function autoRegisterHeaders(streamUrl: string, headers: Record<string, string>, sessionName?: string): void {
   try {
-    const host = new URL(streamUrl).host
-    streamHeadersRegistry.set(host, headers)
-    if (sessionName) {
-      const partition = `persist:${sessionName}`
-      streamSessionsRegistry.set(host, partition)
-    }
-    setTimeout(() => {
-      streamHeadersRegistry.delete(host)
-      streamSessionsRegistry.delete(host)
-    }, 4 * 3600 * 1000)
-    logExtraction(`Headers auto-registered for host: ${host} (${Object.keys(headers).length} headers) | Session: ${sessionName || 'default'}`)
+    const origin = new URL(streamUrl).origin
+    streamHeaderRegistry.registerTrusted(streamUrl, headers)
+    logExtraction(`Headers auto-registered for origin: ${origin} (${Object.keys(headers).length} headers) | Session: ${sessionName || 'default'}`)
   } catch { /* ignore */ }
 }
 
@@ -165,11 +177,7 @@ export function autoRegisterHeaders(streamUrl: string, headers: Record<string, s
 // Must match the exact host — returning true for any URL whenever the registry is non-empty
 // causes duplicate Access-Control-Allow-Origin headers on local-proxy responses, which Chromium rejects.
 export function isStreamHost(url: string): boolean {
-  try {
-    return streamHeadersRegistry.has(new URL(url).host)
-  } catch {
-    return false
-  }
+  return streamHeaderRegistry.has(url)
 }
 
 // ─── Local HTTP Proxy (bypasses CORS for HLS playback) ──────────────────────────
@@ -180,6 +188,10 @@ export function isStreamHost(url: string): boolean {
 // This preserves relative URL resolution for HLS segments.
 
 let proxyPort = 0
+
+export function getStreamProxyPort(): number {
+  return proxyPort
+}
 
 // Pure Node-level fetch helper that ignores Electron's forbidden header rules
 function fetchNode(
@@ -228,7 +240,7 @@ function fetchNode(
                   reject(new Error('Too many redirects'))
                   return
                 }
-                const absoluteLocation = validateProxyTargetUrl(new URL(location, currentUrl).toString()).toString()
+                const absoluteLocation = resolveValidatedRedirect(currentUrl, location).toString()
                 makeRequest(absoluteLocation)
                 return
               }
@@ -436,7 +448,7 @@ function streamSegment(
 
       // Follow redirects (without writing anything to the client yet).
       if ([301, 302, 303, 307, 308].includes(statusCode) && clientRes.headers.location) {
-        const absoluteLocation = validateProxyTargetUrl(new URL(clientRes.headers.location, url).toString()).toString()
+        const absoluteLocation = resolveValidatedRedirect(url, clientRes.headers.location).toString()
         clientRes.resume() // drain the redirect body
         settled = true // this attempt has handed off to the redirect target
         makeRequest(absoluteLocation, rangeHeader, redirects + 1)
@@ -708,6 +720,18 @@ export async function startStreamProxy(): Promise<void> {
         req.destroy()
       })
 
+      if (!isPermittedLocalMediaMethod(req.method)) {
+        res.writeHead(405, { Allow: 'GET, HEAD, OPTIONS' })
+        res.end('Method not allowed')
+        return
+      }
+
+      if (!isAuthorizedLocalMediaRequest({ url: req.url, headers: req.headers })) {
+        res.writeHead(403, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' })
+        res.end('Forbidden')
+        return
+      }
+
       // CORS preflight
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -720,14 +744,16 @@ export async function startStreamProxy(): Promise<void> {
         return
       }
 
-      if (!req.url?.startsWith('/proxy/')) {
+      const localRequestUrl = new URL(req.url ?? '/', 'http://localhost')
+      if (!localRequestUrl.pathname.startsWith('/proxy/')) {
         res.writeHead(404)
         res.end('Not found')
         return
       }
 
       // Reconstruct original HTTPS/HTTP URL from path
-      const pathClean = req.url.slice('/proxy/'.length)
+      localRequestUrl.searchParams.delete('kmc')
+      const pathClean = `${localRequestUrl.pathname.slice('/proxy/'.length)}${localRequestUrl.search}`
       let realUrl = ''
       if (pathClean.startsWith('http/') || pathClean.startsWith('https/')) {
         const firstSlash = pathClean.indexOf('/')
@@ -753,15 +779,15 @@ export async function startStreamProxy(): Promise<void> {
         realUrl = urlObj.toString()
 
         const host = urlObj.host
-        const baseHeaders = { ...getStreamHeaders(host) }
+        const baseHeaders = { ...getStreamHeaders(realUrl) }
         let streamHeaders = { ...baseHeaders }
 
         // Extract and inject headers from the URL's query parameters if present (e.g. VidLink headers)
         const qHeaders = urlObj.searchParams.get('headers')
         if (qHeaders) {
           try {
-            const parsed = JSON.parse(qHeaders)
-            const hasHostHeaders = streamHeadersRegistry.has(host)
+            const parsed = sanitizeUntrustedStreamHeaders(JSON.parse(qHeaders))
+            const hasHostHeaders = streamHeaderRegistry.has(realUrl)
             if (!hasHostHeaders) {
               // If there are no host-specific headers in the registry, let qHeaders override everything case-insensitively
               streamHeaders = mergeHeadersCaseInsensitive(baseHeaders, parsed)
@@ -936,6 +962,7 @@ export async function startStreamProxy(): Promise<void> {
             if (uri.startsWith('/')) return `URI="/proxy/${currentProto}/${host}${uri}"`
             return `URI="${uri}"`
           })
+          text = decorateHlsManifestWithLocalCapability(text)
           buffer = Buffer.from(text, 'utf8')
         }
 
@@ -993,7 +1020,9 @@ function toProxyUrl(url: string): string {
     const parsed = new URL(url)
     const proto = parsed.protocol.replace(':', '') // "https" or "http"
     const rest = url.slice(parsed.protocol.length + 2) // everything after "https://" or "http://"
-    return `http://localhost:${proxyPort}/proxy/${proto}/${rest}`.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+    return withLocalMediaCapability(
+      `http://localhost:${proxyPort}/proxy/${proto}/${rest}`.replace(/\{/g, '%7B').replace(/\}/g, '%7D'),
+    )
   } catch {
     return url.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
   }
@@ -1219,7 +1248,7 @@ export function attachHeaderInjector(ses: Electron.Session): void {
       (details, callback) => {
         try {
           const host = new URL(details.url).host
-          const headers = getStreamHeaders(host)
+          const headers = getStreamHeaders(details.url)
           logExtraction(`onBeforeSendHeaders intercepting: ${details.url} | Host: ${host} | Has registry headers: ${Object.keys(headers).length > 0}`)
           if (headers && Object.keys(headers).length > 0) {
             // Merge custom headers, overwriting defaults where necessary
@@ -1249,33 +1278,38 @@ export function initStreamHeaderInjector(): void {
 
 export function registerProvidersIpc(): void {
   // Get stream proxy port
-  ipcMain.handle('providers:getProxyPort', () => proxyPort)
+  ipcMain.handle('providers:getProxyPort', trustedIpcHandler(() => proxyPort))
+  ipcMain.handle('providers:getProxyInfo', trustedIpcHandler(() => ({
+    port: proxyPort,
+    capability: getLocalMediaCapability(),
+  })))
 
   // List all providers with their enabled state
-  ipcMain.handle('providers:list', () => listProviders().map((provider) => ({ ...provider, ...providerCircuits.snapshot(provider.id) })))
+  ipcMain.handle('providers:list', trustedIpcHandler(() => listProviders().map((provider) => ({ ...provider, ...providerCircuits.snapshot(provider.id) }))))
 
   // Toggle a provider on or off
-  ipcMain.handle('providers:toggle', (_e, id: string, enabled: boolean) => {
-    if (!getProvider(id)) return { ok: false }
-    toggleProvider(id, enabled)
+  ipcMain.handle('providers:toggle', trustedIpcHandler((_e, providerIdInput: unknown, enabledInput: unknown) => {
+    const { providerId, enabled } = providerToggleSchema.parse({ providerId: providerIdInput, enabled: enabledInput })
+    if (!getProvider(providerId)) return { ok: false }
+    toggleProvider(providerId, enabled)
     return { ok: true }
-  })
+  }))
 
   // Register headers for a stream URL so the renderer's HLS player can use them
-  ipcMain.handle('providers:registerStreamHeaders', (_e, streamUrl: string, headers: Record<string, string>) => {
+  ipcMain.handle('providers:registerStreamHeaders', trustedIpcHandler((_e, streamUrlInput: unknown, headersInput: unknown) => {
+    const { streamUrl, headers } = providerStreamHeadersSchema.parse({ streamUrl: streamUrlInput, headers: headersInput })
     try {
-      const host = new URL(streamUrl).host
       if (Object.keys(headers).length > 0) {
-        streamHeadersRegistry.set(host, headers)
-        // Auto-expire after 4 hours
-        setTimeout(() => streamHeadersRegistry.delete(host), 4 * 3600 * 1000)
+        streamHeaderRegistry.registerUntrusted(streamUrl, headers)
       }
     } catch { /* ignore */ }
     return { ok: true }
-  })
+  }))
 
   // Get stream from a specific provider
-  ipcMain.handle('providers:getStream', async (e, providerId: string, req: StreamRequest): Promise<ProviderResult> => {
+  ipcMain.handle('providers:getStream', trustedIpcHandler(async (e, providerIdInput: unknown, reqInput: unknown): Promise<ProviderResult> => {
+    const providerId = providerIdSchema.parse(providerIdInput)
+    const req = validateStreamRequest(reqInput)
     const p = getProvider(providerId)
     if (!p) {
       return { providerId, providerName: providerId, streams: [], error: 'Provider not found' }
@@ -1287,11 +1321,10 @@ export function registerProvidersIpc(): void {
     e.sender.once('destroyed', onRendererDestroyed)
 
     try {
-      const validatedRequest = validateStreamRequest(req)
       if (!providerCircuits.canAttempt(p.id)) {
         return { providerId, providerName: p.name, streams: [], error: 'Provider is temporarily unavailable' }
       }
-      const embedUrl = validateProviderEmbedUrl(p, validatedRequest)
+      const embedUrl = validateProviderEmbedUrl(p, req)
       if (!embedUrl) {
         return {
           providerId,
@@ -1363,7 +1396,7 @@ export function registerProvidersIpc(): void {
       e.sender.removeListener('destroyed', onRendererDestroyed)
       requestLifecycle.finish()
     }
-  })
+  }))
 
   // Try all enabled providers with staggered parallel racing.
   //
@@ -1381,9 +1414,11 @@ export function registerProvidersIpc(): void {
   // bounded worker running in the background. Complete Scan resolves only after every worker
   // finishes or the hard deadline. Both modes publish live source/status snapshots through the
   // correlated `providers:streamsCollected` event.
-  ipcMain.handle('providers:getFirstStream', async (e, req: StreamRequest, searchId?: string): Promise<(ProviderResult & { allStreams?: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) | null> => {
+  ipcMain.handle('providers:getFirstStream', trustedIpcHandler(async (e, reqInput: unknown, searchIdInput?: unknown): Promise<(ProviderResult & { allStreams?: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }) | null> => {
+    const req = validateStreamRequest(reqInput)
+    const searchId = searchIdInput === undefined ? undefined : providerSearchIdSchema.parse(searchIdInput)
     logExtraction(`New stream search requested (${req.type})`)
-    const validatedRequest = validateStreamRequest(req)
+    const validatedRequest = req
     const allEnabled = getEnabledProviders()
     const enabled = allEnabled.filter((provider) => providerCircuits.canAttempt(provider.id))
     const preference = getDb().prepare('SELECT source_discovery_mode FROM preferences WHERE id = 1').get() as { source_discovery_mode?: string } | undefined
@@ -1635,5 +1670,5 @@ export function registerProvidersIpc(): void {
         timers.push(t)
       }
     })
-  })
+  }))
 }

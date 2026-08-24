@@ -18,7 +18,7 @@ KokoMovie is licensed **GPL-3.0-or-later** (`LICENSE`). Both `package.json` mani
 `npm run check:licenses` enforces it.
 
 The bundled FFmpeg executable is an **LGPL-3.0-or-later** build (BtbN/FFmpeg-Builds, release
-`autobuild-2026-08-03-14-02`, FFmpeg `n8.1.2`). It replaces the former `ffmpeg-static` dependency,
+`autobuild-2026-07-31-14-10`, FFmpeg `n8.1.2`). It replaces the former `ffmpeg-static` dependency,
 whose binary was configured `--enable-gpl --enable-version3`. FFmpeg is spawned as a separate
 executable and never linked, and every GPL-only component is disabled in the build.
 

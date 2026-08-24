@@ -34,11 +34,31 @@ jobs:
         run: npm run check:licenses -- --report
       - name: Production build
         run: npm run build
+      - name: Verify Electron runtime fuses
+        run: npm run verify:fuses --workspace=client
+
+  electron-e2e:
+    name: Real Electron security boundaries
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Production build
+        run: npm run build --workspace=client
+      - name: Real Electron security boundary tests
+        run: xvfb-run -a npm run test:e2e --workspace=client
+        env:
+          DEBUG: pw:browser
 
   # ─── Linux: native x64 + ARM64 AppImage/.deb builds ─────────────────────────────────────────────────
   build-linux:
     name: Build Linux (${{ matrix.arch }})
-    needs: quality
+    needs: [quality, electron-e2e]
     strategy:
       fail-fast: false
       matrix:
@@ -283,7 +303,7 @@ jobs:
   # ─── Windows: NSIS .exe installer → client/release/windows/ ─────────────────
   build-windows:
     name: Build Windows
-    needs: quality
+    needs: [quality, electron-e2e]
     runs-on: windows-latest
 
     steps:

@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) =>
     ipcRenderer.invoke('providers:registerStreamHeaders', streamUrl, headers),
   getProxyPort: () => ipcRenderer.invoke('providers:getProxyPort'),
+  getProxyInfo: () => ipcRenderer.invoke('providers:getProxyInfo'),
 
   // ─── Built-in P2P torrent streaming (free dub sourcing, e.g. Spanish/Latino) ──
   // Discovery returns selectable sources whose URL is a magnet; the renderer resolves it to a

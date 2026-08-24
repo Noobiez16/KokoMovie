@@ -3,6 +3,40 @@ import type { Provider, ProviderResult, StreamRequest } from './interface.js'
 
 const positiveInteger = z.number().int().positive()
 
+export const providerIdSchema = z.string().trim().min(1).max(64).regex(/^[a-z0-9-]+$/)
+export const providerSearchIdSchema = z.string().trim().min(1).max(128)
+export const providerToggleSchema = z.object({
+  providerId: providerIdSchema,
+  enabled: z.boolean(),
+}).strict()
+export const audioLanguageSchema = z.string().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/)
+export const magnetUriSchema = z.string().trim().min(1).max(16_384)
+  .regex(/^magnet:\?xt=urn:btih:(?:[a-fA-F\d]{40}|[A-Z2-7]{32})(?:&|$)/)
+
+const untrustedStreamHeadersSchema = z.record(z.string().max(8_192)).superRefine((headers, context) => {
+  if (Object.keys(headers).length > 32) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Too many stream headers' })
+  }
+  for (const name of Object.keys(headers)) {
+    const lower = name.toLowerCase()
+    if (
+      lower.startsWith('sec-') ||
+      /(?:authorization|cookie|credential|proxy-|token|api[_-]?key|secret|signature)/i.test(lower) ||
+      ['connection', 'content-length', 'host', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'upgrade'].includes(lower)
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: `Stream header is not allowed: ${name}` })
+    }
+  }
+})
+
+export const providerStreamHeadersSchema = z.object({
+  streamUrl: z.string().url().max(4_096).refine((value) => {
+    const protocol = new URL(value).protocol
+    return protocol === 'http:' || protocol === 'https:'
+  }, 'Stream URL must use HTTP or HTTPS'),
+  headers: untrustedStreamHeadersSchema,
+}).strict()
+
 export const streamRequestSchema = z.object({
   imdbId: z.string().regex(/^tt\d{5,12}$/).optional(),
   tmdbId: positiveInteger.optional(),
@@ -10,8 +44,8 @@ export const streamRequestSchema = z.object({
   season: positiveInteger.optional(),
   episode: positiveInteger.optional(),
   title: z.string().trim().max(300).optional(),
-  audioLang: z.string().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/).optional(),
-}).superRefine((request, context) => {
+  audioLang: audioLanguageSchema.optional(),
+}).strict().superRefine((request, context) => {
   if (!request.imdbId && !request.tmdbId) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'An IMDB or TMDB ID is required' })
   }

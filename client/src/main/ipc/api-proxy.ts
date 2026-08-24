@@ -1,7 +1,7 @@
 import { ipcMain, net } from 'electron'
 import {
   apiProxyRequestSchema,
-  assertTrustedRenderer,
+  trustedIpcHandler,
   validateApiProxyUrl,
 } from './security'
 
@@ -9,8 +9,7 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 20_000
 
 export function registerApiProxy(): void {
-  ipcMain.handle('api:request', async (event, input: unknown) => {
-    assertTrustedRenderer(event)
+  ipcMain.handle('api:request', trustedIpcHandler(async (_event, input: unknown) => {
     const opts = apiProxyRequestSchema.parse(input)
     const url = validateApiProxyUrl(opts.url)
 
@@ -31,5 +30,5 @@ export function registerApiProxy(): void {
       status: response.status,
       body: new TextDecoder().decode(bytes),
     }
-  })
+  }))
 }

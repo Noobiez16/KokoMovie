@@ -5,6 +5,7 @@ import {
   positionKey,
   hasValidArtworkSignature,
 } from '../../main/library-portability'
+import { FIXTURE_HEADER_VALUE } from './security-test-fixtures'
 
 const payload = {
   format: 'kokomovie-library',
@@ -35,7 +36,7 @@ describe('library portability format', () => {
       },
     }).library.preferences.source_discovery_mode).toBe('complete')
     expect(() => libraryExportSchema.parse({ ...payload, schemaVersion: 2 })).toThrow()
-    expect(() => libraryExportSchema.parse({ ...payload, credential: 'secret' })).toThrow()
+    expect(() => libraryExportSchema.parse({ ...payload, credential: FIXTURE_HEADER_VALUE })).toThrow()
   })
 
   it('uses strict timestamp ordering for deterministic merge conflicts', () => {

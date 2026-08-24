@@ -23,6 +23,7 @@ describe('download IPC contracts', () => {
     expect(() => downloadStartSchema.parse({ ...valid, manifestUrl: 'file:///etc/passwd' })).toThrow()
     expect(() => downloadStartSchema.parse({ ...valid, thumbnailUrl: 'file:///etc/passwd' })).toThrow()
     expect(() => downloadStartSchema.parse({ ...valid, title: '' })).toThrow()
+    expect(() => downloadStartSchema.parse({ ...valid, unexpected: true })).toThrow()
     expect(() => downloadStartSchema.parse({
       ...valid,
       subtitles: Array.from({ length: 9 }, (_, index) => ({

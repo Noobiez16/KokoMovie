@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session, shell, protocol, nativeImage } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'node:url'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
 import { purgeAccountEraKeychainEntries, purgeLegacyCredentialFile, registerAuthIpc } from './ipc/auth'
@@ -15,6 +16,8 @@ import { registerArtworkProtocol } from './catalog-artwork'
 import { registerTorrentIpc } from './ipc/torrent'
 import { destroyDiscordPresence, registerDiscordPresence } from './discord-presence'
 import { installApplicationMenu } from './app-menu'
+import { isTrustedRendererUrl, setTrustedRendererWebContentsId } from './ipc/security'
+import { isAuthorizedLocalMediaRequest, isPermittedLocalMediaMethod } from './providers/local-media-capability'
 
 // Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
 // the pipe has been closed (e.g. when the parent process exits or during rapid
@@ -40,11 +43,13 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.kokomovie.app')
 }
 
-const isDev = !app.isPackaged || process.env['NODE_ENV'] === 'development'
+const isBehavioralTest = process.env['KOKOMOVIE_E2E'] === '1'
+const isDev = !isBehavioralTest && (!app.isPackaged || process.env['NODE_ENV'] === 'development')
 const devProto = 'http'
 const devHost = 'localhost:5173'
 const RENDERER_URL = `${devProto}://${devHost}`
 const DIST = join(__dirname, '../dist')
+const RENDERER_ENTRY_URL = isDev ? RENDERER_URL : pathToFileURL(join(DIST, 'index.html')).toString()
 
 let mainWindow: BrowserWindow | null = null
 
@@ -80,6 +85,7 @@ function createWindow() {
       experimentalFeatures: false,
     },
   })
+  setTrustedRendererWebContentsId(mainWindow.webContents.id, RENDERER_ENTRY_URL)
 
   // Show when ready to avoid white flash — with fallbacks for Windows/Linux
   // packaged builds where ready-to-show can fail to fire if the renderer
@@ -116,8 +122,7 @@ function createWindow() {
 
   // Block navigation away from app origin
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const allowed = isDev ? url.startsWith(RENDERER_URL) : url.startsWith('file://')
-    if (!allowed) event.preventDefault()
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
   })
 
   if (isDev) {
@@ -126,7 +131,10 @@ function createWindow() {
     mainWindow.loadFile(join(DIST, 'index.html'))
   }
 
-  mainWindow.on('closed', () => { mainWindow = null })
+  mainWindow.on('closed', () => {
+    setTrustedRendererWebContentsId(null)
+    mainWindow = null
+  })
 }
 
 // ─── Content Security Policy ──────────────────────────────────────────────────
@@ -184,6 +192,12 @@ app.whenReady().then(async () => {
 
   // Serve encrypted offline segments via offline://downloadId/seg_N.enc
   protocol.handle('offline', (request) => {
+    if (!isPermittedLocalMediaMethod(request.method)) {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD, OPTIONS' } })
+    }
+    if (!isAuthorizedLocalMediaRequest({ url: request.url, headers: Object.fromEntries(request.headers.entries()) })) {
+      return new Response(null, { status: 403, headers: { 'Access-Control-Allow-Origin': '*' } })
+    }
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 200,
@@ -211,14 +225,14 @@ app.whenReady().then(async () => {
     if (filename.startsWith('subtitle/')) {
       const subtitle = readOfflineSubtitle(downloadId, filename.slice('subtitle/'.length))
       return subtitle !== null
-        ? new Response(subtitle, { status: 200, headers: { 'Content-Type': 'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } })
+        ? new Response(request.method === 'HEAD' ? null : subtitle, { status: 200, headers: { 'Content-Type': 'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } })
         : new Response(null, { status: 404 })
     }
 
     if (filename === 'artwork.jpg') {
       const artwork = readOfflineArtwork(downloadId)
       return artwork
-        ? new Response(new Uint8Array(artwork), { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' } })
+        ? new Response(request.method === 'HEAD' ? null : new Uint8Array(artwork), { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' } })
         : new Response(null, { status: 404 })
     }
 
@@ -256,7 +270,7 @@ app.whenReady().then(async () => {
         },
       })
     }
-    return new Response(new Uint8Array(decrypted), {
+    return new Response(request.method === 'HEAD' ? null : new Uint8Array(decrypted), {
       status: 200,
       headers: {
         'Content-Type': 'video/mp2t',

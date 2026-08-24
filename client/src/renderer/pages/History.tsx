@@ -95,8 +95,10 @@ export function HistoryPage() {
         <div className="flex gap-2 mb-6">
           {([['history', t('history.title')], ['list', t('history.myList')]] as const).map(([tab, label]) => (
             <button
+              type="button"
               key={tab}
               onClick={() => setActiveTab(tab)}
+              aria-pressed={activeTab === tab}
               className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 ${
                 activeTab === tab
                   ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-600/25'
@@ -136,11 +138,16 @@ export function HistoryPage() {
                   const isCompleted = item.completedAt !== null || pct >= 95 || pct === 100
 
                   return (
-                    <div
+                    <article
                       key={item.watchedAt + item.contentId}
-                      className="flex items-center gap-4 bg-white/[0.03] backdrop-blur-md rounded-xl p-3 cursor-pointer hover:bg-white/[0.08] transition-all hover:scale-[1.01] hover:shadow-lg hover:shadow-violet-950/20 duration-300 shadow-sm"
-                      onClick={() => handleItemClick(item)}
+                      className="flex items-center gap-4 bg-white/[0.03] backdrop-blur-md rounded-xl p-3 hover:bg-white/[0.08] transition-all hover:scale-[1.01] hover:shadow-lg hover:shadow-violet-950/20 duration-300 shadow-sm"
                     >
+                      <button
+                        type="button"
+                        aria-label={item.contentTitle}
+                        onClick={() => handleItemClick(item)}
+                        className="flex items-center gap-4 flex-1 min-w-0 text-left rounded-lg cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                      >
                       {item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt={item.contentTitle} className="w-24 h-14 object-cover rounded flex-shrink-0" />
                       ) : (
@@ -166,6 +173,7 @@ export function HistoryPage() {
                           </div>
                         )}
                       </div>
+                      </button>
 
                       <div className="flex-shrink-0 flex flex-col items-end gap-2 text-right">
                         {/* Dynamic status badge — completed vs in-progress (with %). */}
@@ -212,7 +220,7 @@ export function HistoryPage() {
                           {t('common.remove')}
                         </button>
                       </div>
-                    </div>
+                    </article>
                   )
                 })}
               </div>
@@ -252,9 +260,11 @@ export function HistoryPage() {
             {!isWatchlistLoading && !isWatchlistError && watchlistItems.length > 0 && (
               <div className="space-y-2 max-w-2xl">
                 {watchlistItems.map((item) => (
-                  <div
+                  <button
+                    type="button"
                     key={item.contentId}
-                    className="flex items-center gap-4 bg-white/[0.03] backdrop-blur-md rounded-xl p-3 cursor-pointer hover:bg-white/[0.08] transition-all hover:scale-[1.01] hover:shadow-lg hover:shadow-violet-950/20 duration-300 shadow-sm"
+                    aria-label={item.title || t('history.unknownTitle')}
+                    className="w-full flex items-center gap-4 bg-white/[0.03] backdrop-blur-md rounded-xl p-3 cursor-pointer hover:bg-white/[0.08] transition-all hover:scale-[1.01] hover:shadow-lg hover:shadow-violet-950/20 duration-300 shadow-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                     onClick={() => navigate(`/content/${item.contentId}`)}
                   >
                     {item.s3Thumbnail ? (
@@ -273,7 +283,7 @@ export function HistoryPage() {
                     <div className="flex-shrink-0 flex items-center gap-2 pr-2">
                       <span className="text-purple-300/40 text-xs uppercase tracking-wider font-semibold">{item.contentType}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}

@@ -1,7 +1,7 @@
 // Local user data: profiles collapse to a single on-device profile; watchlist,
 // history and preferences live in local SQLite (via IPC). Same exported shapes
 // as before so pages/components are unchanged.
-import { catalogApi } from './catalog'
+import { catalogApi, ContentRestrictedByMaturityError } from './catalog'
 import { dedupeByTitle } from './playback'
 import { decodeTmdbEpisodeId } from '../lib/tmdb'
 import { LOCAL_PROFILE, LOCAL_PROFILE_ID } from '../lib/local-identity'
@@ -76,6 +76,16 @@ export interface Preferences {
 }
 
 const api = () => window.electronAPI!
+const isPresent = <T>(value: T | null): value is T => value !== null
+
+async function visibleSummary(contentId: string) {
+  try {
+    return await catalogApi.getSummary(contentId)
+  } catch (error) {
+    if (error instanceof ContentRestrictedByMaturityError) return false as const
+    throw error
+  }
+}
 
 export const userApi = {
   // ─── Profiles (single local profile) ──────────────────────────────────────
@@ -87,9 +97,10 @@ export const userApi = {
   // ─── Watchlist ──────────────────────────────────────────────────────────────
   getWatchlist: async (_profileId?: string) => {
     const rows = await api().watchlistList()
-    const items = await Promise.all(
-      rows.map(async (r): Promise<WatchlistItem> => {
-        const s = await catalogApi.getSummary(r.content_id)
+    const items = (await Promise.all(
+      rows.map(async (r): Promise<WatchlistItem | null> => {
+        const s = await visibleSummary(r.content_id)
+        if (s === false) return null
         return {
           profileId: LOCAL_PROFILE_ID,
           contentId: r.content_id,
@@ -101,7 +112,7 @@ export const userApi = {
           releaseYear: s?.releaseYear ?? null,
         }
       }),
-    )
+    )).filter(isPresent)
     return { success: true as const, data: items }
   },
 
@@ -125,9 +136,10 @@ export const userApi = {
     // One entry per title: collapse a series' episodes to the most advanced one watched
     // (e.g. after finishing 1–3 and jumping to 4, history shows S1:E4, not four rows).
     const rows = dedupeByTitle(await api().positionList()).slice(0, limit)
-    const items = await Promise.all(
-      rows.map(async (r): Promise<HistoryItem> => {
-        const s = await catalogApi.getSummary(r.content_id)
+    const items = (await Promise.all(
+      rows.map(async (r): Promise<HistoryItem | null> => {
+        const s = await visibleSummary(r.content_id)
+        if (s === false) return null
         const ep = decodeTmdbEpisodeId(r.episode_id)
         return {
           profileId: LOCAL_PROFILE_ID,
@@ -144,7 +156,7 @@ export const userApi = {
           ...(ep ? { seasonNumber: ep.season, episodeNumber: ep.episode } : {}),
         }
       }),
-    )
+    )).filter(isPresent)
     return { success: true as const, data: items, meta: { nextCursor: undefined as string | undefined } }
   },
 

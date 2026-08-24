@@ -13,6 +13,7 @@ import { resolveSubtitleTrackUrl } from '../../../main/download-offline-policy'
 import { usePlayerStore } from '../../store/player'
 import { rankSourceStatuses } from '../../../main/providers/source-discovery'
 import { selectAutomaticFallback } from '../../../main/providers/source-quality'
+import { createMediaListenerScope } from '../../lib/media-listener-scope'
 
 interface CachedStream {
   providerId: string
@@ -35,6 +36,7 @@ interface Props {
   onClose: () => void
   onNextEpisode?: (ep: Episode) => void
   nextEpisode?: Episode | null
+  autoplayNextEpisode?: boolean
   /** Rendered inside a Picture-in-Picture box: fill the parent (not the viewport) and hide
    *  the heavy chrome (title, close, controls) — the PiP host supplies its own controls. */
   embedded?: boolean
@@ -192,6 +194,7 @@ function preferredAudioIndex(tracks: Array<{ lang?: string }>): number {
 interface SubtitleTracksProps {
   externalSubs: Array<{ id: number; name: string; lang: string; url: string }>
   proxyPort: string
+  proxyCapability: string
   currentSubtitle: number
   subtitleOffset: number
   /** For progressive torrent remuxes the video timeline starts at 0 after each seek; external
@@ -208,7 +211,7 @@ interface SubtitleTracksProps {
 // <track>, which left residual cues on screen (the "bleeding" artifact) and made
 // every nudge a network round-trip. Loading once and mutating cue times makes the
 // offset instant and lets the browser's native cue lifecycle clear cleanly.
-const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle, subtitleOffset, timelineOffset }: SubtitleTracksProps) => {
+const SubtitleTracks = memo(({ externalSubs, proxyPort, proxyCapability, currentSubtitle, subtitleOffset, timelineOffset }: SubtitleTracksProps) => {
   const trackRef = useRef<HTMLTrackElement>(null)
   // Pristine cue times captured on first load, so repeated offset changes always
   // shift from the original timing (never compound).
@@ -216,7 +219,7 @@ const SubtitleTracks = memo(({ externalSubs, proxyPort, currentSubtitle, subtitl
 
   const selected = currentSubtitle >= 1000 ? externalSubs.find((subtitle) => subtitle.id === currentSubtitle) : undefined
   const localUrl = selected?.url.startsWith('offline:') ?? false
-  const proxiedUrl = selected ? resolveSubtitleTrackUrl(selected.url, proxyPort) : ''
+  const proxiedUrl = selected ? resolveSubtitleTrackUrl(selected.url, proxyPort, proxyCapability) : ''
   // New subtitle source → forget the previous track's captured timings.
   useEffect(() => { originalsRef.current = null }, [proxiedUrl])
 
@@ -269,7 +272,7 @@ SubtitleTracks.displayName = 'SubtitleTracks'
 
 export function VideoPlayer({
   content, episode, session, streamHeaders, initialProviderId, allStreams = [], sourceStatuses = [], profileId, resumeAtSeconds: initialResumeAt,
-  defaultSubtitleLanguage, offlineSubtitles = [], onClose, onNextEpisode, nextEpisode, embedded = false, onPip,
+  defaultSubtitleLanguage, offlineSubtitles = [], onClose, onNextEpisode, nextEpisode, autoplayNextEpisode = true, embedded = false, onPip,
 }: Props) {
   const { t } = useTranslation()
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -322,6 +325,7 @@ export function VideoPlayer({
   torrentSeekingRef.current = torrentSeeking
   // HLS proxy port for external subtitle fetches/tracks — NOT the torrent server's port.
   const [hlsProxyPort, setHlsProxyPort] = useState('')
+  const [hlsProxyCapability, setHlsProxyCapability] = useState('')
   const [buffered, setBuffered] = useState(0)
   const [currentLevel, setCurrentLevel] = useState(-1)
   const [levels, setLevels] = useState<Array<{ height: number; bitrate: number }>>([])
@@ -833,11 +837,21 @@ export function VideoPlayer({
     void (async () => {
       const match = activeStreamUrl.match(/^http:\/\/localhost:(\d+)\/proxy\//)
       if (match) {
-        if (!cancelled) setHlsProxyPort(match[1]!)
+        if (!cancelled) {
+          setHlsProxyPort(match[1]!)
+          try {
+            setHlsProxyCapability(new URL(activeStreamUrl).searchParams.get('kmc') ?? '')
+          } catch {
+            setHlsProxyCapability('')
+          }
+        }
         return
       }
-      const portNum = await window.electronAPI?.getProxyPort?.()
-      if (!cancelled && portNum) setHlsProxyPort(String(portNum))
+      const proxyInfo = await window.electronAPI?.getProxyInfo?.()
+      if (!cancelled && proxyInfo?.port) {
+        setHlsProxyPort(String(proxyInfo.port))
+        setHlsProxyCapability(proxyInfo.capability)
+      }
     })()
     return () => { cancelled = true }
   }, [activeStreamUrl])
@@ -873,9 +887,9 @@ export function VideoPlayer({
           subQuery = `${imdbId}:${seasonNumber}:${episode.episodeNumber}`
         }
 
-        if (!hlsProxyPort) return
+        if (!hlsProxyPort || !hlsProxyCapability) return
 
-        const listUrl = `http://localhost:${hlsProxyPort}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${subQuery}.json`
+        const listUrl = `http://localhost:${hlsProxyPort}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${subQuery}.json?kmc=${encodeURIComponent(hlsProxyCapability)}`
         const res = await fetch(listUrl)
         if (!res.ok) throw new Error('Subtitles response error')
         
@@ -904,7 +918,7 @@ export function VideoPlayer({
     return () => {
       active = false
     }
-  }, [content.id, content.imdbId, content.type, content.seasons, episode, activeStreamUrl, hlsProxyPort, offlineSubtitles])
+  }, [content.id, content.imdbId, content.type, content.seasons, episode, activeStreamUrl, hlsProxyPort, hlsProxyCapability, offlineSubtitles])
 
   // Enable the selected subtitle track programmatically — disable ALL others to prevent duplication.
   // Three cases:
@@ -988,6 +1002,16 @@ export function VideoPlayer({
     setHlsError(null)
     setInitialLoading(true)
     const manifestUrl = activeStreamUrl
+    const sourceListeners = createMediaListenerScope(video)
+    const playWhenReady: EventListener = () => { video.play().catch(() => {}) }
+    const handleDirectMetadata: EventListener = () => {
+      if (resumeAtSeconds && resumeAtSeconds > 0 && !torrentStreamRef.current?.transcoded) {
+        video.currentTime = resumeAtSeconds
+      }
+      video.play().catch(() => {})
+    }
+    const handleDirectError: EventListener = () => setHlsError('Video failed to load. Try a different source.')
+    const handleFallbackError: EventListener = () => setHlsError('Stream failed to load. Try choosing a different source.')
 
     // Detect if this is a direct video file (MP4/WebM) vs HLS manifest
     const isDirectVideo = (() => {
@@ -1002,16 +1026,10 @@ export function VideoPlayer({
     if (isDirectVideo) {
       // Direct video — use native <video> playback, no hls.js needed
       video.src = manifestUrl
-      video.addEventListener('loadedmetadata', () => {
-        // Transcoded torrents seek via ?start= in the URL (timeline offset tracked separately).
-        // Direct MP4/WebM torrents and other files use native Range seeking.
-        if (resumeAtSeconds && resumeAtSeconds > 0 && !torrentStreamRef.current?.transcoded) {
-          video.currentTime = resumeAtSeconds
-        }
-        video.play().catch(() => {})
-      }, { once: true })
-      video.addEventListener('error', () => setHlsError('Video failed to load. Try a different source.'), { once: true })
+      sourceListeners.listen('loadedmetadata', handleDirectMetadata, { once: true })
+      sourceListeners.listen('error', handleDirectError, { once: true })
       return () => {
+        sourceListeners.clear()
         video.removeAttribute('src')
         video.load()
       }
@@ -1075,7 +1093,7 @@ export function VideoPlayer({
 
       // Play only after the browser signals it has enough data to start — avoids
       // bufferStalledError caused by calling play() before the first segment buffers.
-      video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true })
+      sourceListeners.listen('canplay', playWhenReady, { once: true })
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         const mapped = data.levels.map((l) => ({
@@ -1223,9 +1241,7 @@ export function VideoPlayer({
             hlsRef.current = null
             video.src = manifestUrl
             video.play().catch(() => {})
-            video.addEventListener('error', () => {
-              setHlsError('Stream failed to load. Try choosing a different source.')
-            }, { once: true })
+            sourceListeners.listen('error', handleFallbackError, { once: true })
             break
         }
       })
@@ -1233,11 +1249,12 @@ export function VideoPlayer({
       hlsRef.current = hls
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = manifestUrl
-      video.addEventListener('loadedmetadata', () => video.play().catch(() => {}))
-      video.addEventListener('error', () => setHlsError('Video failed to load. Try a different source.'))
+      sourceListeners.listen('loadedmetadata', playWhenReady)
+      sourceListeners.listen('error', handleDirectError)
     }
 
     return () => {
+      sourceListeners.clear()
       // Disable the internal subtitle before teardown so it can't linger in a
       // 'showing' state and double up with the next source's subtitles.
       try { if (hlsRef.current) hlsRef.current.subtitleTrack = -1 } catch { /* noop */ }
@@ -1863,7 +1880,12 @@ export function VideoPlayer({
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500/90 text-white text-xs px-4 py-2.5 rounded-lg border border-red-400/20 shadow-2xl z-40 flex items-center gap-2 backdrop-blur-md">
           <span>⚠</span>
           <span>{switchingError}</span>
-          <button onClick={() => setSwitchingError(null)} className="ml-2 hover:opacity-80 font-bold">×</button>
+          <button
+            onClick={() => setSwitchingError(null)}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+            className="ml-2 hover:opacity-80 font-bold"
+          >×</button>
         </div>
       )}
 
@@ -1879,6 +1901,7 @@ export function VideoPlayer({
         <SubtitleTracks
           externalSubs={externalSubs}
           proxyPort={hlsProxyPort}
+          proxyCapability={hlsProxyCapability}
           currentSubtitle={currentSubtitle}
           subtitleOffset={subtitleOffset}
           timelineOffset={torrentTimelineOffset}
@@ -1890,6 +1913,7 @@ export function VideoPlayer({
           nextEpisode={nextEpisode}
           onPlay={() => { setShowNextEpisode(false); onNextEpisode?.(nextEpisode) }}
           onDismiss={() => setShowNextEpisode(false)}
+          autoplayEnabled={autoplayNextEpisode}
         />
       )}
 

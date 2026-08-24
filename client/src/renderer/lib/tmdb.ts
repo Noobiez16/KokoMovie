@@ -56,11 +56,25 @@ export interface TmdbExternalIds {
   imdb_id: string | null
 }
 
+export interface TmdbVideos {
+  results: Array<{ key: string; site: string; type: string; official: boolean }>
+}
+
+export interface TmdbMovieReleaseDates {
+  results: Array<{ iso_3166_1: string; release_dates: Array<{ certification: string; type: number }> }>
+}
+
+export interface TmdbTvContentRatings {
+  results: Array<{ iso_3166_1: string; rating: string }>
+}
+
 export interface TmdbMovieDetail extends TmdbItem {
   runtime: number | null
   genres: Array<{ id: number; name: string }>
   credits: TmdbCredits
   external_ids: TmdbExternalIds
+  videos?: TmdbVideos
+  release_dates?: TmdbMovieReleaseDates
 }
 
 export interface TmdbTvDetail extends TmdbItem {
@@ -78,6 +92,8 @@ export interface TmdbTvDetail extends TmdbItem {
   }>
   credits: TmdbCredits
   external_ids: TmdbExternalIds
+  videos?: TmdbVideos
+  content_ratings?: TmdbTvContentRatings
 }
 
 export interface TmdbSeason {
@@ -243,14 +259,18 @@ export function createTmdbClient(apiKey: string, locale: AppLocale | string = 'e
     searchMulti: (query: string, page = 1) =>
       get<TmdbPage>('/search/multi', { query, page: String(page) }),
     getMovie: (id: number) =>
-      get<TmdbMovieDetail>(`/movie/${id}`, { append_to_response: 'credits,external_ids' }),
+      get<TmdbMovieDetail>(`/movie/${id}`, { append_to_response: 'credits,external_ids,videos,release_dates' }),
     getTv: (id: number) =>
-      get<TmdbTvDetail>(`/tv/${id}`, { append_to_response: 'credits,external_ids' }),
+      get<TmdbTvDetail>(`/tv/${id}`, { append_to_response: 'credits,external_ids,videos,content_ratings' }),
     getSeason: (tvId: number, season: number) => get<TmdbSeason>(`/tv/${tvId}/season/${season}`),
     getMovieVideos: (id: number) =>
-      get<{ results: Array<{ key: string; site: string; type: string; official: boolean }> }>(`/movie/${id}/videos`),
+      get<TmdbVideos>(`/movie/${id}/videos`),
     getTvVideos: (id: number) =>
-      get<{ results: Array<{ key: string; site: string; type: string; official: boolean }> }>(`/tv/${id}/videos`),
+      get<TmdbVideos>(`/tv/${id}/videos`),
+    getMovieReleaseDates: (id: number) =>
+      get<TmdbMovieReleaseDates>(`/movie/${id}/release_dates`),
+    getTvContentRatings: (id: number) =>
+      get<TmdbTvContentRatings>(`/tv/${id}/content_ratings`),
     getSimilarMovies: (id: number) => get<TmdbPage>(`/movie/${id}/recommendations`),
     getSimilarTv: (id: number) => get<TmdbPage>(`/tv/${id}/recommendations`),
   }

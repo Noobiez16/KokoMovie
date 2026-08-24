@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { downloadsApi, type DownloadItem } from '../api/downloads'
 import { AppLayout } from '../components/layout/AppLayout'
 import { applyDownloadProgress } from '../lib/download-progress'
+import { downloadErrorTranslationKey } from '../lib/download-error-policy'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'text-yellow-400',
@@ -202,7 +203,7 @@ function DownloadCard({
 
           <p className={`text-xs font-semibold mb-2 ${STATUS_COLOR[item.status] ?? 'text-white/40'}`}>
             {t(`downloads.status.${item.status}`, { defaultValue: item.status })}
-            {item.status === 'error' && item.error_message ? ` — ${item.error_message}` : ''}
+            {item.status === 'error' && item.error_message ? ` — ${t(downloadErrorTranslationKey(item.error_message))}` : ''}
           </p>
 
           {(item.status === 'pending' || item.status === 'downloading' || item.status === 'paused') && (

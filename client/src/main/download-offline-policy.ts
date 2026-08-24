@@ -57,9 +57,16 @@ export function normalizeSubtitleText(input: string): string {
 
 }
 
-export function resolveSubtitleTrackUrl(url: string, proxyPort: string): string {
+export function resolveSubtitleTrackUrl(
+  url: string,
+  proxyPort: string,
+  capability: string,
+): string {
   if (url.startsWith('offline:')) return url
-  if (!proxyPort || !/^https?:\/\//.test(url)) return ''
+  if (!proxyPort || !capability || !/^https?:\/\//.test(url)) return ''
   const clean = url.replace(/^https?:\/\//, '')
-  return `http://localhost:${proxyPort}/proxy/${clean}${clean.includes('?') ? '&' : '?'}format=vtt`
+  const proxyUrl = new URL(`http://localhost:${proxyPort}/proxy/${clean}`)
+  proxyUrl.searchParams.set('format', 'vtt')
+  proxyUrl.searchParams.set('kmc', capability)
+  return proxyUrl.toString()
 }

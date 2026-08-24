@@ -10,6 +10,7 @@ import { useAuthStore } from '../../store/auth'
 import { usePlayerStore, type CachedStream, type PlaybackRequest } from '../../store/player'
 import { LOCAL_PROFILE_ID } from '../../lib/local-identity'
 import { userApi } from '../../api/user'
+import { decodeTmdbEpisodeId } from '../../lib/tmdb'
 
 // Lazy-load the heavy player (pulls in hls.js, ~570 kB). PlayerHost is always mounted at
 // the app root, but the actual VideoPlayer chunk is only fetched the first time something
@@ -83,6 +84,25 @@ export function PlayerHost() {
   })
 
   const content = contentData?.data
+  const requestedEpisode = useMemo(() => decodeTmdbEpisodeId(episodeId), [episodeId])
+  const requestedSeason = content?.seasons.find((season) => season.seasonNumber === requestedEpisode?.season)
+  const { data: requestedSeasonData } = useQuery({
+    queryKey: ['season', contentId, requestedEpisode?.season],
+    queryFn: () => catalogApi.getSeason(contentId!, requestedEpisode!.season),
+    enabled: content?.type === 'series' && !!contentId && !!requestedEpisode && requestedSeason?.episodes.length === 0,
+    staleTime: 10 * 60 * 1000,
+  })
+  const orderedSeasonMetadata = useMemo(() => content?.seasons
+    ? [...content.seasons].sort((a, b) => a.seasonNumber - b.seasonNumber)
+    : [], [content?.seasons])
+  const requestedSeasonIndex = orderedSeasonMetadata.findIndex((season) => season.seasonNumber === requestedEpisode?.season)
+  const adjacentSeason = requestedSeasonIndex >= 0 ? orderedSeasonMetadata[requestedSeasonIndex + 1] : undefined
+  const { data: adjacentSeasonData } = useQuery({
+    queryKey: ['season', contentId, adjacentSeason?.seasonNumber],
+    queryFn: () => catalogApi.getSeason(contentId!, adjacentSeason!.seasonNumber),
+    enabled: content?.type === 'series' && !!contentId && !!adjacentSeason && adjacentSeason.episodes.length === 0,
+    staleTime: 10 * 60 * 1000,
+  })
   const { data: preferencesData } = useQuery({
     queryKey: ['preferences', profileId],
     queryFn: () => userApi.getPreferences(profileId),
@@ -90,11 +110,17 @@ export function PlayerHost() {
   })
   const sortedContent = useMemo(() => {
     if (!content) return null
+    const loadedSeasons = new Map(
+      [requestedSeasonData?.data, adjacentSeasonData?.data]
+        .filter((season): season is NonNullable<typeof season> => !!season)
+        .map((season) => [season.seasonNumber, season]),
+    )
     const sortedSeasons = [...content.seasons]
       .sort((a, b) => a.seasonNumber - b.seasonNumber)
+      .map((season) => loadedSeasons.get(season.seasonNumber) ?? season)
       .map((s) => ({ ...s, episodes: [...s.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber) }))
     return { ...content, seasons: sortedSeasons }
-  }, [content])
+  }, [content, requestedSeasonData, adjacentSeasonData])
 
   const currentEpisode: Episode | null = useMemo(() => {
     if (!sortedContent || !episodeId) return null
@@ -441,6 +467,7 @@ export function PlayerHost() {
             onPip={handlePip}
             onNextEpisode={handleNextEpisode}
             nextEpisode={nextEpisode}
+            autoplayNextEpisode={preferencesData?.data.autoplay ?? true}
           />
         </Suspense>
       ) : null}

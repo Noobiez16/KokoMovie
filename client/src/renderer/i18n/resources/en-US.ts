@@ -183,6 +183,9 @@ const enUS = {
     resume: 'Resume download',
     cancel: 'Cancel download',
     remove: 'Remove download',
+    unsupportedDrm: 'This stream uses download protection that KokoMovie cannot save offline. Try another source.',
+    unsupportedPlaylist: 'This stream uses a playlist format that KokoMovie cannot save offline. Try another source.',
+    startFailed: 'The download could not be started. Try another source or try again.',
   },
   history: {
     title: 'Viewing History',

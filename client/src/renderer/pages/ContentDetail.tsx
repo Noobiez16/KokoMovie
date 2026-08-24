@@ -14,6 +14,8 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
 import type { ContentSummary } from '../api/catalog'
 import { sanitizeMediaUrl } from '../lib/media-url'
+import { downloadErrorTranslationKey } from '../lib/download-error-policy'
+import { decodeTmdbEpisodeId } from '../lib/tmdb'
 
 const sanitizeUrl = sanitizeMediaUrl
 type DownloadTorrentOption = { id: string; name: string; magnet: string; language: string }
@@ -27,12 +29,12 @@ async function getDownloadSubtitles(
 ): Promise<Array<{ lang: string; url: string }>> {
   if (!content.imdbId || !window.electronAPI) return []
   try {
-    const port = await window.electronAPI.getProxyPort()
-    if (!port) return []
+    const { port, capability } = await window.electronAPI.getProxyInfo()
+    if (!port || !capability) return []
     const series = content.type === 'series' && episode
     const typePath = series ? 'series' : 'movie'
     const query = series ? `${content.imdbId}:${seasonNumber ?? 1}:${episode.episodeNumber}` : content.imdbId
-    const response = await fetch(`http://localhost:${port}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${query}.json`)
+    const response = await fetch(`http://localhost:${port}/proxy/opensubtitles-v3.strem.io/subtitles/${typePath}/${query}.json?kmc=${encodeURIComponent(capability)}`)
     if (!response.ok) return []
     const data = await response.json() as { subtitles?: Array<{ lang?: unknown; url?: unknown }> }
     return (data.subtitles ?? [])
@@ -103,9 +105,30 @@ export function ContentDetailPage() {
   })
 
   const content = data?.data
-  const sortedSeasons = useMemo(() => content?.seasons
+  const baseSortedSeasons = useMemo(() => content?.seasons
     ? [...content.seasons].sort((a, b) => a.seasonNumber - b.seasonNumber)
     : [], [content?.seasons])
+  const selectedSeasonNumber = baseSortedSeasons[selectedSeason]?.seasonNumber
+  const selectedSeasonNeedsEpisodes = baseSortedSeasons[selectedSeason]?.episodes.length === 0
+  const { data: selectedSeasonData, isFetching: isSeasonLoading } = useQuery({
+    queryKey: ['season', id, selectedSeasonNumber],
+    queryFn: () => catalogApi.getSeason(id!, selectedSeasonNumber!),
+    enabled: content?.type === 'series' && !!id && selectedSeasonNumber !== undefined && selectedSeasonNeedsEpisodes,
+    staleTime: 10 * 60 * 1000,
+  })
+  const sortedSeasons = useMemo(() => baseSortedSeasons.map((season) =>
+    selectedSeasonData?.data.seasonNumber === season.seasonNumber ? selectedSeasonData.data : season,
+  ), [baseSortedSeasons, selectedSeasonData])
+
+  function prefetchSeason(selectedIndex: number): void {
+    const adjacent = baseSortedSeasons[selectedIndex]
+    if (!id || !adjacent || adjacent.episodes.length > 0) return
+    void qc.prefetchQuery({
+      queryKey: ['season', id, adjacent.seasonNumber],
+      queryFn: () => catalogApi.getSeason(id, adjacent.seasonNumber),
+      staleTime: 10 * 60 * 1000,
+    })
+  }
 
   const { data: watchlistData } = useQuery({
     queryKey: ['watchlist-check', id, profileId],
@@ -251,15 +274,22 @@ export function ContentDetailPage() {
 
   // Default selected season to Season 1 if available, otherwise 0
   useEffect(() => {
-    if (sortedSeasons && sortedSeasons.length > 0) {
-      const s1Idx = sortedSeasons.findIndex((s) => s.seasonNumber === 1)
-      if (s1Idx !== -1) {
+    if (baseSortedSeasons.length > 0) {
+      const resumeSeason = decodeTmdbEpisodeId(navState?.resumeEpisodeId)?.season
+      const resumeIdx = resumeSeason === undefined ? -1 : baseSortedSeasons.findIndex((s) => s.seasonNumber === resumeSeason)
+      const s1Idx = baseSortedSeasons.findIndex((s) => s.seasonNumber === 1)
+      if (resumeIdx !== -1) {
+        setSelectedSeason(resumeIdx)
+      } else if (s1Idx !== -1) {
         setSelectedSeason(s1Idx)
       } else {
         setSelectedSeason(0)
       }
     }
-  }, [sortedSeasons])
+  // This is an initialization effect: loaded season data and cleared router state must not reset
+  // a season the user selected after the content identity was established.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content?.id])
 
   const handleAutoStreamRef = useRef(handleAutoStream)
   handleAutoStreamRef.current = handleAutoStream
@@ -429,6 +459,8 @@ export function ContentDetailPage() {
       })
       setDownloadDone(true)
       navigate("/downloads")
+    } catch (error) {
+      setAutoStreamState({ loading: false, error: t(downloadErrorTranslationKey(error)), isDownload: true })
     } finally {
       setDownloading(false)
     }
@@ -438,8 +470,16 @@ export function ContentDetailPage() {
     const c = data?.data
     if (!c || c.type !== 'series') return
 
+    const completeSeasons = await Promise.all(c.seasons.map(async (season) => {
+      if (season.episodes.length > 0) return season
+      try {
+        return (await catalogApi.getSeason(c.id, season.seasonNumber)).data
+      } catch {
+        return season
+      }
+    }))
     const downloadableEpisodes: { ep: Episode; seasonNum: number }[] = []
-    c.seasons.forEach((season) => {
+    completeSeasons.forEach((season) => {
       season.episodes.forEach((ep) => {
         downloadableEpisodes.push({ ep, seasonNum: season.seasonNumber })
       })
@@ -476,6 +516,7 @@ export function ContentDetailPage() {
             setEpisodeDownloadDoneMap((prev) => ({ ...prev, [ep.id]: true }))
           } catch (err) {
             console.error(`Failed to download episode S${seasonNum}E${ep.episodeNumber}:`, err)
+            setAutoStreamState({ loading: false, error: t(downloadErrorTranslationKey(err)), isDownload: true })
             allSucceeded = false
           }
         }
@@ -515,6 +556,7 @@ export function ContentDetailPage() {
       navigate("/downloads")
     } catch (err) {
       console.error('Episode download failed:', err)
+      setAutoStreamState({ loading: false, episode: ep, seasonNumber, error: t(downloadErrorTranslationKey(err)), isDownload: true })
     } finally {
       setEpisodeDownloadingMap((prev) => ({ ...prev, [epId]: false }))
     }
@@ -792,7 +834,11 @@ export function ContentDetailPage() {
             {content && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setShowActionsDropdown(!showActionsDropdown)}
+                  aria-label={t('detail.options')}
+                  aria-haspopup="menu"
+                  aria-expanded={showActionsDropdown}
                   className="flex items-center justify-center w-12 h-12 rounded bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
                   title={t('detail.options')}
                 >
@@ -807,9 +853,11 @@ export function ContentDetailPage() {
                       className="fixed inset-0 z-10" 
                       onClick={() => setShowActionsDropdown(false)}
                     />
-                    <div className="absolute left-0 mt-2 w-48 rounded bg-km-surface-2/95 backdrop-blur-md border border-white/10 shadow-2xl z-20 overflow-hidden py-1">
+                    <div role="menu" className="absolute left-0 mt-2 w-48 rounded bg-km-surface-2/95 backdrop-blur-md border border-white/10 shadow-2xl z-20 overflow-hidden py-1">
                       {content.type === 'movie' ? (
                         <button
+                          type="button"
+                          role="menuitem"
                           onClick={() => {
                             setShowActionsDropdown(false)
                             openDownloadPicker({ kind: "movie" })
@@ -866,7 +914,12 @@ export function ContentDetailPage() {
                 {sortedSeasons.length > 1 && (
                   <select
                     value={selectedSeason}
-                    onChange={(e) => setSelectedSeason(Number(e.target.value))}
+                    onChange={(e) => {
+                      const selectedIndex = Number(e.target.value)
+                      setSelectedSeason(selectedIndex)
+                      prefetchSeason(selectedIndex - 1)
+                      prefetchSeason(selectedIndex + 1)
+                    }}
                     className="bg-km-surface-2 border border-km-border text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer"
                   >
                     {sortedSeasons.map((s, i) => {
@@ -883,12 +936,22 @@ export function ContentDetailPage() {
               </div>
 
               <div className="space-y-2 max-w-3xl">
+                {isSeasonLoading && sortedEpisodes.length === 0 && (
+                  <div className="flex items-center justify-center py-8" role="status" aria-label={t('common.loading')}>
+                    <div className="w-6 h-6 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
+                  </div>
+                )}
                 {sortedEpisodes.map((ep) => (
                   <div
                     key={ep.id}
-                    className="flex items-center gap-4 bg-km-card rounded-lg p-3 cursor-pointer hover:bg-white/10 transition-colors group"
-                    onClick={() => handleAutoStream(ep, season?.seasonNumber)}
+                    className="flex items-center gap-4 bg-km-card rounded-lg p-3 hover:bg-white/10 transition-colors group"
                   >
+                    <button
+                      type="button"
+                      aria-label={ep.title}
+                      onClick={() => handleAutoStream(ep, season?.seasonNumber)}
+                      className="flex items-center gap-4 flex-1 min-w-0 text-left rounded-md cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                    >
                     <div className="w-8 text-center text-white/40 text-sm font-medium flex-shrink-0">
                       {ep.episodeNumber}
                     </div>
@@ -909,16 +972,22 @@ export function ContentDetailPage() {
                       {ep.durationMins && <span className="text-white/40 text-xs mr-2">{ep.durationMins}m</span>}
                       
                       <span className="text-white/20 group-hover:text-white/60 transition-colors">▶</span>
-                      
+                    </div>
+                    </button>
+
                       {true && (
                         <div className="relative">
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation()
                               setActiveEpisodeDropdownId(activeEpisodeDropdownId === ep.id ? null : ep.id)
                             }}
                             className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-white/50 hover:text-white"
                             title={t('detail.episodeOptions')}
+                            aria-label={t('detail.episodeOptions')}
+                            aria-haspopup="menu"
+                            aria-expanded={activeEpisodeDropdownId === ep.id}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
                               <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -934,8 +1003,10 @@ export function ContentDetailPage() {
                                   setActiveEpisodeDropdownId(null)
                                 }}
                               />
-                              <div className="absolute right-0 mt-1 w-36 rounded bg-km-surface-2 shadow-2xl z-20 overflow-hidden py-1 border border-white/10">
+                              <div role="menu" className="absolute right-0 mt-1 w-36 rounded bg-km-surface-2 shadow-2xl z-20 overflow-hidden py-1 border border-white/10">
                                 <button
+                                  type="button"
+                                  role="menuitem"
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setActiveEpisodeDropdownId(null)
@@ -952,7 +1023,6 @@ export function ContentDetailPage() {
                           )}
                         </div>
                       )}
-                    </div>
                   </div>
                 ))}
               </div>

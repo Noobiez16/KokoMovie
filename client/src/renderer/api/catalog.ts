@@ -8,6 +8,14 @@ import {
   tmdbTitle, tmdbType, tmdbYear, tmdbContentId, decodeTmdbContentId, tmdbEpisodeId,
   type TmdbItem, type TmdbClient, tmdbCatalogSource,
 } from '../lib/tmdb'
+import {
+  certificationRegionForLocale,
+  filterByMaturity,
+  isCertificationAllowed,
+  selectMovieCertification,
+  selectTvCertification,
+  type CertificationRegion,
+} from '../lib/certification-policy'
 
 // TMDB refuses discover queries beyond page 500.
 const TMDB_MAX_PAGE = 500
@@ -178,6 +186,67 @@ function mapCast(cast: Array<{ id: number; name: string; character: string; prof
   }))
 }
 
+export class ContentRestrictedByMaturityError extends Error {
+  constructor() {
+    super('CONTENT_RESTRICTED_BY_MATURITY')
+    this.name = 'ContentRestrictedByMaturityError'
+  }
+}
+
+function mapSeason(contentId: string, tvId: number, season: Awaited<ReturnType<TmdbClient['getSeason']>>): Season {
+  return {
+    id: `s-${tvId}-${season.season_number}`,
+    contentId,
+    seasonNumber: season.season_number,
+    title: season.name ?? null,
+    overview: season.overview ?? null,
+    episodes: (season.episodes ?? []).map((episode) => ({
+      id: tmdbEpisodeId(tvId, season.season_number, episode.episode_number),
+      seasonId: `s-${tvId}-${season.season_number}`,
+      contentId,
+      episodeNumber: episode.episode_number,
+      title: episode.name ?? `Episode ${episode.episode_number}`,
+      description: episode.overview ?? null,
+      durationMins: episode.runtime ?? null,
+      s3HlsKey: null,
+      s3ThumbnailKey: stillUrl(episode.still_path),
+      introStartSecs: null,
+      introEndSecs: null,
+      creditsStartSecs: null,
+      airDate: episode.air_date ?? null,
+    })),
+  }
+}
+
+async function savedMaturityMaximum(): Promise<string> {
+  try {
+    return (await window.electronAPI?.prefsGet())?.maturity_rating ?? 'TV-MA'
+  } catch {
+    return 'TV-MA'
+  }
+}
+
+async function loadSummaryCertification(
+  c: TmdbClient,
+  summary: ContentSummary,
+  region: CertificationRegion,
+): Promise<string | null> {
+  if (!summary.tmdbId) return null
+  try {
+    return summary.type === 'movie'
+      ? selectMovieCertification(await c.getMovieReleaseDates(summary.tmdbId), region)
+      : selectTvCertification(await c.getTvContentRatings(summary.tmdbId), region)
+  } catch {
+    return null
+  }
+}
+
+export async function applyCatalogMaturity(items: ContentSummary[], c: TmdbClient): Promise<ContentSummary[]> {
+  const maximum = await savedMaturityMaximum()
+  const region = certificationRegionForLocale(i18n.language)
+  return filterByMaturity(items, maximum, region, (item) => loadSummaryCertification(c, item, region))
+}
+
 // ── API ──────────────────────────────────────────────────────────────────────
 
 export const catalogApi = {
@@ -186,17 +255,17 @@ export const catalogApi = {
     const type = params.type
     const trendingType = type === 'movie' ? 'movie' : type === 'series' ? 'tv' : 'all'
     const trendingPage = await c.trending(trendingType, 1)
-    const trending = summaries(trendingPage.results).slice(0, 20)
+    const trending = await applyCatalogMaturity(summaries(trendingPage.results).slice(0, 20), c)
 
     const rowGenres = GENRES.slice(0, 8)
     const rowPages = await Promise.all(
       rowGenres.map((g) => (type === 'series' ? c.discoverTv(g.tvId) : c.discoverMovie(g.movieId))),
     )
-    const rows: HomeRow[] = rowGenres
-      .map((g, i) => ({
+    const rows: HomeRow[] = (await Promise.all(rowGenres
+      .map(async (g, i) => ({
         genre: { id: g.slug, name: g.name, slug: g.slug },
-        items: summaries(rowPages[i]!.results).slice(0, 20),
-      }))
+        items: await applyCatalogMaturity(summaries(rowPages[i]!.results).slice(0, 20), c),
+      }))))
       .filter((r) => r.items.length > 0)
 
     const featured = trending[0] ?? null
@@ -243,7 +312,7 @@ export const catalogApi = {
 
     return {
       success: true as const,
-      data: summaries(combined),
+      data: await applyCatalogMaturity(summaries(combined), c),
       meta: {
         ...meta(),
         source: tmdbCatalogSource(...responses) as CatalogSource,
@@ -263,18 +332,22 @@ export const catalogApi = {
     if (!decoded) throw new Error(`Unrecognised content id: ${id}`)
 
     if (decoded.type === 'movie') {
-      const [m, videos] = await Promise.all([
+      const region = certificationRegionForLocale(i18n.language)
+      const [m, maximum] = await Promise.all([
         c.getMovie(decoded.tmdbId),
-        c.getMovieVideos(decoded.tmdbId).catch(() => ({ results: [] })),
+        savedMaturityMaximum(),
       ])
+      const certification = selectMovieCertification(m.release_dates ?? { results: [] }, region)
+      if (!isCertificationAllowed(certification, maximum, region)) throw new Error('CONTENT_RESTRICTED_BY_MATURITY')
       const detail: ContentDetail = {
         ...toSummary({ ...m, media_type: 'movie' }),
+        rating: certification,
         durationMins: m.runtime ?? null,
         imdbId: m.external_ids?.imdb_id ?? null,
         description: m.overview ?? null,
         s3HlsKey: null, s3TrailerKey: null, drmKeyId: null,
         introStartSecs: null, introEndSecs: null, creditsStartSecs: null,
-        trailerKey: pickTrailer(videos.results),
+        trailerKey: pickTrailer(m.videos?.results ?? []),
         genres: mapGenres(m.genres ?? []),
         cast: mapCast(m.credits?.cast ?? []),
         seasons: [],
@@ -283,59 +356,62 @@ export const catalogApi = {
     }
 
     // TV
-    const [tv, videos] = await Promise.all([
+    const region = certificationRegionForLocale(i18n.language)
+    const [tv, maximum] = await Promise.all([
       c.getTv(decoded.tmdbId),
-      c.getTvVideos(decoded.tmdbId).catch(() => ({ results: [] })),
+      savedMaturityMaximum(),
     ])
+    const certification = selectTvCertification(tv.content_ratings ?? { results: [] }, region)
+    if (!isCertificationAllowed(certification, maximum, region)) throw new Error('CONTENT_RESTRICTED_BY_MATURITY')
     const realSeasons = (tv.seasons ?? []).filter((s) => s.season_number >= 1)
-    const seasonDetails = await Promise.all(
-      realSeasons.map((s) => c.getSeason(decoded.tmdbId, s.season_number).catch(() => null)),
-    )
-    const seasons: Season[] = seasonDetails
-      .filter((s): s is NonNullable<typeof s> => s !== null)
-      .map((s) => ({
-        id: `s-${decoded.tmdbId}-${s.season_number}`,
+    const defaultSeasonNumber = realSeasons[0]?.season_number
+    const defaultSeason = defaultSeasonNumber === undefined
+      ? null
+      : await c.getSeason(decoded.tmdbId, defaultSeasonNumber).catch(() => null)
+    const seasons: Season[] = realSeasons.map((season) => {
+      if (defaultSeason?.season_number === season.season_number) return mapSeason(id, decoded.tmdbId, defaultSeason)
+      return {
+        id: `s-${decoded.tmdbId}-${season.season_number}`,
         contentId: id,
-        seasonNumber: s.season_number,
-        title: s.name ?? null,
-        overview: s.overview ?? null,
-        episodes: (s.episodes ?? []).map((e) => ({
-          id: tmdbEpisodeId(decoded.tmdbId, s.season_number, e.episode_number),
-          seasonId: `s-${decoded.tmdbId}-${s.season_number}`,
-          contentId: id,
-          episodeNumber: e.episode_number,
-          title: e.name ?? `Episode ${e.episode_number}`,
-          description: e.overview ?? null,
-          durationMins: e.runtime ?? null,
-          s3HlsKey: null,
-          s3ThumbnailKey: stillUrl(e.still_path),
-          introStartSecs: null, introEndSecs: null, creditsStartSecs: null,
-          airDate: e.air_date ?? null,
-        })),
-      }))
+        seasonNumber: season.season_number,
+        title: season.name ?? null,
+        overview: season.overview ?? null,
+        episodes: [],
+      }
+    })
 
     const detail: ContentDetail = {
       ...toSummary({ ...tv, media_type: 'tv' }),
+      rating: certification,
       imdbId: tv.external_ids?.imdb_id ?? null,
       description: tv.overview ?? null,
       s3HlsKey: null, s3TrailerKey: null, drmKeyId: null,
       introStartSecs: null, introEndSecs: null, creditsStartSecs: null,
-      trailerKey: pickTrailer(videos.results),
+      trailerKey: pickTrailer(tv.videos?.results ?? []),
       genres: mapGenres(tv.genres ?? []),
       cast: mapCast(tv.credits?.cast ?? []),
       seasons,
     }
-    return { success: true as const, data: detail, meta: { ...meta(), source: tmdbCatalogSource(tv, ...seasonDetails) as CatalogSource } }
+    return { success: true as const, data: detail, meta: { ...meta(), source: tmdbCatalogSource(tv, defaultSeason) as CatalogSource } }
+  },
+
+  getSeason: async (contentId: string, seasonNumber: number) => {
+    const decoded = decodeTmdbContentId(contentId)
+    if (!decoded || decoded.type !== 'tv') throw new Error(`Unrecognised series id: ${contentId}`)
+    if (!Number.isInteger(seasonNumber) || seasonNumber < 1) throw new Error('Invalid season number')
+    const season = await client().getSeason(decoded.tmdbId, seasonNumber)
+    return { success: true as const, data: mapSeason(contentId, decoded.tmdbId, season), meta: meta() }
   },
 
   search: async (q: string, params: { type?: string; genres?: string; page?: number } = {}, _profileId?: string) => {
     const page = params.page ?? 1
+    const c = client()
     const downloaded = window.electronAPI ? await window.electronAPI.searchDownloadedCatalog(q) : []
     let online: ContentSummary[] = []
     let onlineTotal = 0
     let searchSource: CatalogSource = downloaded.length > 0 ? 'cache' : 'tmdb'
     try {
-      const res = await client().searchMulti(q, page)
+      const res = await c.searchMulti(q, page)
       online = summaries(res.results)
       onlineTotal = res.total_results
       searchSource = tmdbCatalogSource(res) as CatalogSource
@@ -345,6 +421,7 @@ export const catalogApi = {
     let data = [...new Map([...online, ...downloaded].map((item) => [item.id, item])).values()]
     if (params.type === 'movie') data = data.filter((item) => item.type === 'movie')
     if (params.type === 'series') data = data.filter((item) => item.type === 'series')
+    data = await applyCatalogMaturity(data, c)
     return { success: true as const, data, meta: { ...meta(), query: q, total: Math.max(onlineTotal, data.length), source: searchSource } }
   },
 
@@ -357,7 +434,7 @@ export const catalogApi = {
   getTrending: async (_profileId?: string) => {
     const c = client()
     const res = await c.trending('all', 1)
-    return { success: true as const, data: summaries(res.results).slice(0, 20) }
+    return { success: true as const, data: await applyCatalogMaturity(summaries(res.results).slice(0, 20), c) }
   },
 
   getGenres: async (_profileId?: string) => {
@@ -369,9 +446,9 @@ export const catalogApi = {
     return { success: true as const, data: { id: tmdbContentId(type, tmdbId) } }
   },
 
-  // Lightweight enrichment for watchlist / continue-watching rows. Returns null
-  // (rather than throwing) when the id is unknown or no TMDB key is set, so
-  // callers can simply drop the entry.
+  // Lightweight enrichment for saved rows. Network/key failures return null so
+  // offline entries remain visible, while a known maturity rejection is explicit
+  // so callers can remove that row from the current view.
   getSummary: async (id: string): Promise<ContentSummary | null> => {
     const decoded = decodeTmdbContentId(id)
     if (!decoded) return null
@@ -379,8 +456,11 @@ export const catalogApi = {
       const c = client()
       const item = decoded.type === 'movie' ? await c.getMovie(decoded.tmdbId) : await c.getTv(decoded.tmdbId)
       const summary = toSummary({ ...item, media_type: decoded.type })
-      return { ...summary, durationMins: ('runtime' in item ? item.runtime : null) ?? summary.durationMins }
-    } catch {
+      const [filtered] = await applyCatalogMaturity([{ ...summary, durationMins: ('runtime' in item ? item.runtime : null) ?? summary.durationMins }], c)
+      if (!filtered) throw new ContentRestrictedByMaturityError()
+      return filtered
+    } catch (error) {
+      if (error instanceof ContentRestrictedByMaturityError) throw error
       return null
     }
   },

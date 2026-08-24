@@ -1,10 +1,12 @@
 import { app, BrowserWindow, session } from 'electron'
+import { isExtractorRequestAllowed } from './egress-policy.js'
 import { promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { lookup } from 'dns'
 import { reclaimOversizedLog, rotateLogIfNeeded } from '../diagnostics.js'
 import { ExtractionSlotLimiter } from './slot-limiter.js'
 import { teardownExtractionResources } from './resource-lifecycle.js'
+import { startFilteringProxy } from './filtering-proxy.js'
 
 // Extraction logging keeps full provider URLs on purpose: it is the only way to diagnose a
 // provider that stops resolving, and it never leaves the machine (the Settings diagnostic report
@@ -87,6 +89,7 @@ const HOST_RESOLUTION_TTL_MS = 3 * 60 * 1000
 const MAX_EXTRACTION_WINDOWS = 8
 const activeExtractionWindows = new Set<BrowserWindow>()
 const extractionSlots = new ExtractionSlotLimiter(MAX_EXTRACTION_WINDOWS)
+const filteringProxyUrl = startFilteringProxy()
 
 function isStreamUrl(url: string): boolean {
   try {
@@ -214,11 +217,7 @@ export async function extractStream(
         webviewTag: false,
         allowRunningInsecureContent: false,
         experimentalFeatures: false,
-        // E1-S7: webSecurity is disabled on this isolated off-screen scraper window
-        // to permit CORS-disabled stream segment and manifest extraction from external CDNs.
-        // This is mitigated by isolating the browser context inside a random ephemeral partition
-        // session, enabling contextIsolation, and disabling nodeIntegration.
-        webSecurity: process.env['FORCE_WEB_SECURITY'] === 'true',
+        webSecurity: true,
         javascript: true,
         images: false,
         backgroundThrottling: false,
@@ -328,7 +327,13 @@ export async function extractStream(
       { urls: ['*://*/*'] },
       (details, callback) => {
         logExtraction(`[Request] ${details.url}`)
-        callback({ cancel: shouldBlock(details.url) })
+        if (shouldBlock(details.url)) {
+          callback({ cancel: true })
+          return
+        }
+        void isExtractorRequestAllowed(details.url)
+          .then((allowed) => callback({ cancel: !allowed }))
+          .catch(() => callback({ cancel: true }))
       },
     )
 
@@ -337,12 +342,16 @@ export async function extractStream(
 
     win.webContents.setUserAgent(USER_AGENTS[attempt % USER_AGENTS.length]!)
 
-    win.loadURL(embedUrl, {
-      httpReferrer: new URL(embedUrl).origin,
-    }).catch((err) => {
-      logExtraction(`[Extractor] loadURL failed for ${embedUrl} with error: ${String(err)}`)
-      finish(null)
-    })
+    void filteringProxyUrl
+      .then(async (proxyRules) => {
+        await providerSession.setProxy({ proxyRules, proxyBypassRules: '<-loopback>' })
+        if (done) return
+        await win.loadURL(embedUrl, { httpReferrer: new URL(embedUrl).origin })
+      })
+      .catch((err) => {
+        logExtraction(`[Extractor] loadURL failed for ${embedUrl} with error: ${String(err)}`)
+        finish(null)
+      })
 
     win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       logExtraction(`[Extractor] did-fail-load for ${validatedURL} | code: ${errorCode} | desc: ${errorDescription} | isMainFrame: ${isMainFrame}`)

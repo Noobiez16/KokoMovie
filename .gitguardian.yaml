@@ -14,11 +14,11 @@ secret:
     # client/src/renderer/lib/ffmpeg-licensing.test.ts read them to prove the shipped binary is
     # the audited LGPL build. Removing or rotating them would silently disable that guarantee.
     - name: FFmpeg linux-x64 release archive SHA-256
-      match: c6794916cf8acef176d55d09f16752ff7abf188f0afe4285f8e45bec40f9aba2
+      match: 8c8b2897f2a8093ae2d985f7f1867d218451d4c567c1b2437f86a7c73a950b9f
     - name: FFmpeg linux-arm64 release archive SHA-256
-      match: 819b2edc2c65b8d1f4157e00a10e4b7116f06ad989355124c8d4ee34f5b90a1a
+      match: 0c8716a94ac1fe22eb56e7a0cedd0f00c1d8fae712ec19973d679a7a87916743
     - name: FFmpeg win32-x64 release archive SHA-256
-      match: 17593d84c02c3569cfd507541e1c1aecb87d2a8b87ab0ba1d260400c3380efbf
+      match: 089e4169e93b2b3f3acbfced3c0704d24276a225641bdda04d796d28b07a2a38
 
     # Static UUID fixture asserting that the download-id schema accepts a well-formed UUID.
     - name: Download identifier test fixture UUID

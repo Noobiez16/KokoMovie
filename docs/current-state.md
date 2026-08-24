@@ -120,7 +120,7 @@ A fresh Linux x64 package gate produced the 1.5.1 AppImage (164.5 MB) and Debian
 
 ### Runtime and licensing
 
-Electron 43.2.0 ships Chromium 150 and Node.js 24.18.0. The bundled FFmpeg is a checksum-pinned LGPL-3.0 build (FFmpeg 8.1, BtbN release `autobuild-2026-08-03-14-02`) installed at `resources/ffmpeg/` outside the asar archive with its license text and provenance record. KokoMovie itself is licensed GPL-3.0-or-later. `npm run check:licenses` gates all of this and currently reports 223 compatible production packages.
+Electron 43.4.1 ships Chromium 150 and Node.js 24.18.1. The bundled FFmpeg is a checksum-pinned LGPL-3.0 build (FFmpeg 8.1, BtbN release `autobuild-2026-07-31-14-10`) installed at `resources/ffmpeg/` outside the asar archive with its license text and provenance record. KokoMovie itself is licensed GPL-3.0-or-later. `npm run check:licenses` gates all of this and currently reports 227 compatible production packages.
 
 better-sqlite3 v13 distributes an ABI-stable N-API prebuild rather than a `build/Release/` artifact, so it no longer needs a per-Electron rebuild. CI native-binary verification was rewritten to name each shipped binary explicitly because the previous glob silently stopped covering both SQLite and FFmpeg.
 

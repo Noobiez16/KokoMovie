@@ -8,8 +8,9 @@
 // are reachable from KokoMovie's FFmpeg invocations.
 //
 // Builds come from BtbN/FFmpeg-Builds, which publishes explicitly LGPL-configured artifacts.
-// The release tag, asset names, and SHA-256 digests below are pinned: a changed upstream
-// artifact fails the build instead of silently altering what gets shipped.
+// The retained monthly release tag, asset names, and SHA-256 digests below are pinned: a changed
+// upstream artifact fails the build instead of silently altering what gets shipped. BtbN keeps
+// the last build of each month for two years; ordinary daily builds expire after fourteen days.
 
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -21,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const vendorRoot = join(repoRoot, 'client', 'vendor', 'ffmpeg')
 
-export const FFMPEG_RELEASE = 'autobuild-2026-08-03-14-02'
+export const FFMPEG_RELEASE = 'autobuild-2026-07-31-14-10'
 export const FFMPEG_VERSION = 'n8.1.2-34-g9b6c8969e0'
 const BASE_URL = `https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_RELEASE}`
 
@@ -36,17 +37,17 @@ const BASE_URL = `https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMP
 export const FFMPEG_TARGETS = {
   'linux-x64': {
     asset: `ffmpeg-${FFMPEG_VERSION}-linux64-lgpl-8.1.tar.xz`,
-    sha256: 'c6794916cf8acef176d55d09f16752ff7abf188f0afe4285f8e45bec40f9aba2',
+    sha256: '8c8b2897f2a8093ae2d985f7f1867d218451d4c567c1b2437f86a7c73a950b9f',
     binary: 'ffmpeg',
   },
   'linux-arm64': {
     asset: `ffmpeg-${FFMPEG_VERSION}-linuxarm64-lgpl-8.1.tar.xz`,
-    sha256: '819b2edc2c65b8d1f4157e00a10e4b7116f06ad989355124c8d4ee34f5b90a1a',
+    sha256: '0c8716a94ac1fe22eb56e7a0cedd0f00c1d8fae712ec19973d679a7a87916743',
     binary: 'ffmpeg',
   },
   'win32-x64': {
     asset: `ffmpeg-${FFMPEG_VERSION}-win64-lgpl-8.1.zip`,
-    sha256: '17593d84c02c3569cfd507541e1c1aecb87d2a8b87ab0ba1d260400c3380efbf',
+    sha256: '089e4169e93b2b3f3acbfced3c0704d24276a225641bdda04d796d28b07a2a38',
     binary: 'ffmpeg.exe',
   },
 }

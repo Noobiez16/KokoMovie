@@ -1,7 +1,8 @@
 appId: com.kokomovie.app
 productName: KokoMovie
 copyright: Copyright © 2026 KokoMovie Inc.
-electronVersion: "43.2.0"
+electronVersion: "43.4.1"
+afterPack: build/after-pack.cjs
 
 directories:
   buildResources: build

@@ -1,20 +1,91 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { apiProxyRequestSchema, localAccountSchema, tmdbCredentialSchema, validateApiProxyUrl } from '../../main/ipc/security'
+import {
+  apiProxyRequestSchema,
+  appLocaleSchema,
+  assertTrustedRenderer,
+  booleanFlagSchema,
+  contentIdSchema,
+  discordActivitySchema,
+  localAccountSchema,
+  playbackPositionSchema,
+  PublicIpcError,
+  preferencesPatchSchema,
+  setTrustedRendererWebContentsId,
+  tmdbCredentialSchema,
+  trustedIpcHandler,
+  validateApiProxyUrl,
+} from '../../main/ipc/security'
+import { FIXTURE_BEARER_VALUE, FIXTURE_HEADER_VALUE, urlWithFixtureCredentials } from './security-test-fixtures'
+
+function ipcEvent(senderId: number, frame: 'main' | 'child', url = 'file:///app/index.html') {
+  const mainFrame = { url }
+  return {
+    sender: { id: senderId, getURL: () => url, mainFrame },
+    senderFrame: frame === 'main' ? mainFrame : { url },
+  }
+}
 
 describe('main-process security boundaries', () => {
+  it('trusts only the registered main WebContents and its main frame', () => {
+    setTrustedRendererWebContentsId(7, 'file:///app/index.html')
+
+    expect(() => assertTrustedRenderer(ipcEvent(7, 'main') as never)).not.toThrow()
+    expect(() => assertTrustedRenderer(ipcEvent(8, 'main') as never)).toThrow('Untrusted IPC sender')
+    expect(() => assertTrustedRenderer(ipcEvent(7, 'child') as never)).toThrow('Untrusted IPC sender')
+    expect(() => assertTrustedRenderer(ipcEvent(7, 'main', 'file:///tmp/hostile.html') as never)).toThrow('Untrusted IPC sender')
+
+    setTrustedRendererWebContentsId(null)
+    expect(() => assertTrustedRenderer(ipcEvent(7, 'main') as never)).toThrow('Untrusted IPC sender')
+  })
+
+  it('applies the trust check before invoking a handler', () => {
+    setTrustedRendererWebContentsId(11, 'file:///app/index.html')
+    const handler = trustedIpcHandler((_event, value: string) => value.toUpperCase())
+
+    expect(handler(ipcEvent(11, 'main') as never, 'safe')).toBe('SAFE')
+    expect(() => handler(ipcEvent(12, 'main') as never, 'unsafe')).toThrow('Untrusted IPC sender')
+    setTrustedRendererWebContentsId(null)
+  })
+
+  it('normalizes handler failures without exposing internal details', async () => {
+    setTrustedRendererWebContentsId(13, 'file:///app/index.html')
+    const event = ipcEvent(13, 'main') as never
+    const syncHandler = trustedIpcHandler(() => {
+      throw new Error('request failed with credential super-secret-value')
+    })
+    const asyncHandler = trustedIpcHandler(async () => {
+      throw new Error('upstream response contained super-secret-value')
+    })
+
+    expect(() => syncHandler(event)).toThrow('IPC request failed')
+    expect(() => syncHandler(event)).not.toThrow('super-secret-value')
+    await expect(asyncHandler(event)).rejects.toThrow('IPC request failed')
+    await expect(asyncHandler(event)).rejects.not.toThrow('super-secret-value')
+    setTrustedRendererWebContentsId(null)
+  })
+
+  it('preserves explicitly public error codes for localized renderer copy', () => {
+    setTrustedRendererWebContentsId(14, 'file:///app/index.html')
+    const handler = trustedIpcHandler(() => {
+      throw new PublicIpcError('DOWNLOAD_UNSUPPORTED_DRM')
+    })
+    expect(() => handler(ipcEvent(14, 'main') as never)).toThrow('DOWNLOAD_UNSUPPORTED_DRM')
+    setTrustedRendererWebContentsId(null)
+  })
+
   it('allows only measured HTTPS API destinations', () => {
     expect(validateApiProxyUrl('https://api.github.com/repos/a/b/issues').hostname).toBe('api.github.com')
-    for (const url of ['https://api.themoviedb.org/3/movie/1', 'http://api.themoviedb.org/3/movie/1', 'https://example.com/', 'https://api.themoviedb.org.evil.example/', 'https://user:secret@api.github.com/', 'https://api.github.com:444/']) {
+    for (const url of ['https://api.themoviedb.org/3/movie/1', 'http://api.themoviedb.org/3/movie/1', 'https://example.com/', 'https://api.themoviedb.org.evil.example/', urlWithFixtureCredentials('api.github.com'), 'https://api.github.com:444/']) {
       expect(() => validateApiProxyUrl(url)).toThrow('API destination is not allowed')
     }
   })
 
   it('rejects expanded proxy capabilities', () => {
-    expect(apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'GET', headers: { Authorization: 'Bearer redacted', Accept: 'application/json' } }).method).toBe('GET')
+    expect(apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'GET', headers: { Authorization: FIXTURE_BEARER_VALUE, Accept: 'application/json' } }).method).toBe('GET')
     expect(() => apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'POST', headers: {} })).toThrow()
-    expect(() => apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'GET', headers: { Cookie: 'secret' } })).toThrow()
+    expect(() => apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'GET', headers: { Cookie: FIXTURE_HEADER_VALUE } })).toThrow()
     expect(() => apiProxyRequestSchema.parse({ url: 'https://api.themoviedb.org/3/movie/1', method: 'GET', headers: {}, body: 'unexpected' })).toThrow()
   })
 
@@ -23,6 +94,50 @@ describe('main-process security boundaries', () => {
     expect(() => localAccountSchema.parse('another-account')).toThrow()
     expect(tmdbCredentialSchema.parse('12345678')).toBe('12345678')
     expect(() => tmdbCredentialSchema.parse('short')).toThrow()
+  })
+
+  it('bounds library positions and preference patches', () => {
+    expect(contentIdSchema.parse('tmdb:movie:603')).toBe('tmdb:movie:603')
+    expect(() => contentIdSchema.parse('x'.repeat(201))).toThrow()
+    expect(playbackPositionSchema.parse({
+      contentId: 'tmdb:movie:603',
+      contentType: 'movie',
+      positionSeconds: 120,
+      durationSeconds: 300,
+    })).toMatchObject({ positionSeconds: 120, durationSeconds: 300 })
+    expect(() => playbackPositionSchema.parse({
+      contentId: 'tmdb:movie:603',
+      contentType: 'movie',
+      positionSeconds: -1,
+      durationSeconds: Number.POSITIVE_INFINITY,
+    })).toThrow()
+    expect(preferencesPatchSchema.parse({
+      language: 'es',
+      autoplay: false,
+      maturityRating: 'PG-13',
+      sourceDiscoveryMode: 'complete',
+    })).toMatchObject({ language: 'es', autoplay: false })
+    expect(() => preferencesPatchSchema.parse({ maturityRating: 'NC-17' })).toThrow()
+    expect(() => preferencesPatchSchema.parse({ autoplay: true, unexpected: true })).toThrow()
+  })
+
+  it('accepts only supported application locales at the privileged boundary', () => {
+    expect(appLocaleSchema.parse('es-ES')).toBe('es-ES')
+    expect(() => appLocaleSchema.parse('es-BO')).toThrow()
+    expect(() => appLocaleSchema.parse({ locale: 'en-US' })).toThrow()
+  })
+
+  it('bounds updater flags and Discord activity', () => {
+    expect(booleanFlagSchema.parse(false)).toBe(false)
+    expect(() => booleanFlagSchema.parse('false')).toThrow()
+    expect(discordActivitySchema.parse({
+      title: 'Example Movie',
+      episode: 'S1E2',
+      startedAt: 1_700_000_000_000,
+    })).toMatchObject({ title: 'Example Movie', episode: 'S1E2' })
+    expect(discordActivitySchema.parse(null)).toBeNull()
+    expect(() => discordActivitySchema.parse({ title: 'x'.repeat(129) })).toThrow()
+    expect(() => discordActivitySchema.parse({ title: 'Movie', unexpected: true })).toThrow()
   })
 })
 

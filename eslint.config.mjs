@@ -13,7 +13,7 @@ export default [
     ],
   },
   {
-    files: ['client/src/**/*.{ts,tsx}', 'client/*.ts', 'scripts/**/*.d.mts'],
+    files: ['client/src/**/*.{ts,tsx}', 'client/e2e/**/*.{ts,tsx}', 'client/*.ts', 'scripts/**/*.d.mts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
