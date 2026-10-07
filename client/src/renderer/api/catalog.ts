@@ -24,6 +24,7 @@ const TMDB_MAX_PAGE = 500
 const TMDB_PAGES_PER_VIEW_MAX = 5
 
 export interface ContentSummary {
+  description?: string | null
   id: string
   title: string
   type: 'movie' | 'series'
@@ -135,6 +136,7 @@ function toSummary(item: TmdbItem): ContentSummary {
   return {
     id: tmdbContentId(type === 'series' ? 'tv' : 'movie', item.id),
     title: tmdbTitle(item),
+    description: item.overview ?? null,
     type,
     releaseYear: tmdbYear(item),
     rating: null,
@@ -409,20 +411,26 @@ export const catalogApi = {
     const downloaded = window.electronAPI ? await window.electronAPI.searchDownloadedCatalog(q) : []
     let online: ContentSummary[] = []
     let onlineTotal = 0
+    let onlinePages = 1
+    let effectivePage = page
     let searchSource: CatalogSource = downloaded.length > 0 ? 'cache' : 'tmdb'
     try {
-      const res = await c.searchMulti(q, page)
+      const res = params.type === 'movie' ? await c.searchMovies(q, page)
+        : params.type === 'series' ? await c.searchTv(q, page) : await c.searchMulti(q, page)
       online = summaries(res.results)
+      if (Number.isInteger(res.page) && res.page! >= 1 && res.page! <= 500) effectivePage = res.page!
       onlineTotal = res.total_results
+      onlinePages = Math.max(1, Math.min(500, res.total_pages || 1))
       searchSource = tmdbCatalogSource(res) as CatalogSource
     } catch (error) {
       if (downloaded.length === 0) throw error
+      effectivePage = 1
     }
-    let data = [...new Map([...online, ...downloaded].map((item) => [item.id, item])).values()]
+    let data = [...new Map([...online, ...(effectivePage === 1 ? downloaded : [])].map((item) => [item.id, item])).values()]
     if (params.type === 'movie') data = data.filter((item) => item.type === 'movie')
     if (params.type === 'series') data = data.filter((item) => item.type === 'series')
     data = await applyCatalogMaturity(data, c)
-    return { success: true as const, data, meta: { ...meta(), query: q, total: Math.max(onlineTotal, data.length), source: searchSource } }
+    return { success: true as const, data, meta: { ...meta(), query: q, page: effectivePage, total: Math.max(onlineTotal, data.length), pages: onlinePages, source: searchSource } }
   },
 
   // No AI backend in the local build — behave like a normal search.

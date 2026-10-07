@@ -15,6 +15,7 @@ const SearchPage = lazy(() => import('./pages/Search').then((m) => ({ default: m
 const ContentDetailPage = lazy(() => import('./pages/ContentDetail').then((m) => ({ default: m.ContentDetailPage })))
 const PlayerPage = lazy(() => import('./pages/Player').then((m) => ({ default: m.PlayerPage })))
 const HistoryPage = lazy(() => import('./pages/History').then((m) => ({ default: m.HistoryPage })))
+const ContinueWatchingPage = lazy(() => import('./pages/ContinueWatching').then((m) => ({ default: m.ContinueWatchingPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 const DownloadsPage = lazy(() => import('./pages/Downloads').then((m) => ({ default: m.DownloadsPage })))
 const ProvidersPage = lazy(() => import('./pages/Providers').then((m) => ({ default: m.ProvidersPage })))
@@ -66,6 +67,7 @@ export function App() {
         <Route path="/player/:contentId/:episodeId" element={<PlayerPage />} />
         <Route path="/downloads" element={<DownloadsPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/continue-watching" element={<ContinueWatchingPage />} />
         <Route path="/providers" element={<ProvidersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {/* Legacy redirects → straight into the app */}

@@ -121,7 +121,7 @@ export const playbackPositionSchema = z.object({
 }).strict()
 
 export const preferencesPatchSchema = z.object({
-  language: z.enum(['en', 'es', 'fr']).optional(),
+  language: z.enum(['en-US', 'es-ES', 'fr-FR', 'en', 'es', 'fr']).optional(),
   subtitleDefault: z.string().trim().min(1).max(10).nullable().optional(),
   autoplay: z.boolean().optional(),
   maturityRating: z.enum(['G', 'PG', 'PG-13', 'R', 'TV-MA']).optional(),

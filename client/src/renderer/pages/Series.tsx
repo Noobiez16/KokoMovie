@@ -10,6 +10,8 @@ import { ContentRow } from '../components/catalog/ContentRow'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { CatalogFallbackBanner } from '../components/catalog/CatalogFallbackBanner'
 import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/CategoryPagination'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 
 export function SeriesPage() {
@@ -34,14 +36,14 @@ export function SeriesPage() {
 
   const profileId = 'local'
 
-  const { data: homeData, isLoading: isHomeLoading, isError: isHomeError } = useQuery({
+  const { data: homeData, isLoading: isHomeLoading, isError: isHomeError, refetch: refetchHome } = useQuery({
     queryKey: ['series-home', profileId, tmdbApiKey],
     queryFn: () => catalogApi.getHome({ type: 'series' }, profileId),
     staleTime: 5 * 60 * 1000,
     enabled: !genre,
   })
 
-  const { data: genreData, isLoading: isGenreLoading, isError: isGenreError } = useQuery({
+  const { data: genreData, isLoading: isGenreLoading, isError: isGenreError, refetch: refetchGenre } = useQuery({
     queryKey: ['series-genre', profileId, genre, page, tmdbApiKey],
     queryFn: () => catalogApi.browse({ type: 'series', genre, limit: 80, page }, profileId),
     staleTime: 5 * 60 * 1000,
@@ -64,9 +66,7 @@ export function SeriesPage() {
     if (isGenreError) {
       return (
         <AppLayout>
-          <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-            {t('catalog.serviceError')}
-          </div>
+          <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchGenre()}>{t('common.retry')}</button>} />
         </AppLayout>
       )
     }
@@ -77,22 +77,19 @@ export function SeriesPage() {
 
     return (
       <AppLayout>
-        <div className="px-8 py-8 animate-fade-in">
+        <div className="px-6 lg:px-10 py-7 animate-fade-in">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate('/series')}
-                className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-all active:scale-95"
+                className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent"
                 title={t('catalog.backSeries')}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <div>
-                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">{t('catalog.seriesCategory')}</span>
-                <h1 className="text-2xl font-bold text-white mt-1 leading-none">{genreTitle}</h1>
-              </div>
+              <PageHeader title={genreTitle} eyebrow={t('catalog.seriesCategory')} />
             </div>
 
             {totalPages > 1 && (
@@ -101,10 +98,10 @@ export function SeriesPage() {
           </div>
 
           {items.length === 0 ? (
-            <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noSeries')}</div>
+            <EmptyState title={t('catalog.noSeries')} />
           ) : (
             <>
-              <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+              <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
                 {items.map((show) => (
                   <ContentCard key={show.id} content={show} size="md" />
                 ))}
@@ -130,15 +127,13 @@ export function SeriesPage() {
   if (isHomeError) {
     return (
       <AppLayout>
-        <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-          {t('catalog.serviceError')}
-        </div>
+        <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />
       </AppLayout>
     )
   }
 
   const seriesData = homeData?.data
-  const featured = seriesData?.featured as any | null
+  const featured = seriesData?.featured
   const trending = seriesData?.trending ?? []
   const rows = seriesData?.rows ?? []
 
@@ -167,7 +162,7 @@ export function SeriesPage() {
         ))}
 
         {!featured && trending.length === 0 && rows.length === 0 && (
-          <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noSeriesAvailable')}</div>
+          <EmptyState title={t('catalog.noSeriesAvailable')} />
         )}
       </div>
     </AppLayout>

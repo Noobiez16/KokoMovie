@@ -15,7 +15,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
   const { t } = useTranslation()
   const [imgError, setImgError] = useState(false)
 
-  const widths = { sm: 'w-28', md: 'w-36', lg: 'w-48' }
+  const widths = { sm: 'w-32 max-w-full', md: 'w-40 max-w-full', lg: 'w-48 max-w-full' }
   const cw = content as any
   const hasProgress = cw.positionSeconds !== undefined && cw.durationSeconds !== undefined && cw.durationSeconds > 0
   const progressPercent = hasProgress ? (cw.positionSeconds / cw.durationSeconds) * 100 : 0
@@ -45,6 +45,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
       <button
         type="button"
         aria-label={content.title}
+        title={t('catalog.moreInfo')}
         onClick={go}
         className="block w-full text-left cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
       >
@@ -53,8 +54,8 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
         {content.s3Thumbnail && !imgError ? (
           <img
             src={content.s3Thumbnail}
-            alt={content.title}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            alt=""
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03] motion-reduce:transform-none"
             loading="lazy"
             onError={() => setImgError(true)}
           />
@@ -68,10 +69,10 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-violet-950/45 transition-all duration-300 flex items-center justify-center">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all duration-300 shadow-lg text-white">
-            <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-km-bg/60 group-focus-within:bg-km-bg/60 transition-all duration-300 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-km-accent flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 scale-95 group-hover:scale-100 group-focus-within:scale-100 motion-reduce:transform-none transition-all duration-300 shadow-lg text-white">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M11 10h2v7h-2zm0-3h2v2h-2z" /><path fillRule="evenodd" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 100 16 8 8 0 000-16z" />
             </svg>
           </div>
         </div>
@@ -105,10 +106,10 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
       </div>
 
       {/* Title + meta */}
-      <p className="text-purple-100/90 text-xs font-semibold truncate group-hover:text-violet-400 transition-colors leading-tight">
+      <p className="text-purple-100 text-sm font-semibold line-clamp-2 min-h-10 group-hover:text-violet-400 transition-colors leading-tight">
         {content.title}
       </p>
-      <p className="text-purple-300/40 text-[10px] mt-0.5 font-medium">{content.releaseYear}</p>
+      <p className="text-purple-200/65 text-xs mt-1 font-medium">{content.releaseYear}</p>
       </button>
 
       {/* Separate sibling action prevents nested interactive controls. */}
@@ -118,7 +119,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
           aria-label={t('catalog.removeContinue')}
           title={t('catalog.removeContinue')}
           onClick={() => onRemove(content.id)}
-          className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+          className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white/90 border border-white/15 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:bg-red-500/80 hover:border-red-400/40 hover:scale-110 transition-all duration-200 backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
             <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

@@ -113,6 +113,7 @@ export interface TmdbSeason {
 }
 
 export interface TmdbPage {
+  page?: number
   results: TmdbItem[]
   total_results: number
   total_pages: number
@@ -258,6 +259,10 @@ export function createTmdbClient(apiKey: string, locale: AppLocale | string = 'e
       }),
     searchMulti: (query: string, page = 1) =>
       get<TmdbPage>('/search/multi', { query, page: String(page) }),
+    searchMovies: (query: string, page = 1) =>
+      get<TmdbPage>('/search/movie', { query, page: String(page) }),
+    searchTv: (query: string, page = 1) =>
+      get<TmdbPage>('/search/tv', { query, page: String(page) }),
     getMovie: (id: number) =>
       get<TmdbMovieDetail>(`/movie/${id}`, { append_to_response: 'credits,external_ids,videos,release_dates' }),
     getTv: (id: number) =>

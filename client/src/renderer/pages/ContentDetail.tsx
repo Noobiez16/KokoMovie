@@ -64,6 +64,7 @@ export function ContentDetailPage() {
   }>({ loading: false })
 
   const cancelAutoStreamRef = useRef<(() => void) | null>(null)
+  const mountedRef = useRef(true)
 
   const [prevId, setPrevId] = useState<string | undefined>(id)
 
@@ -81,6 +82,7 @@ export function ContentDetailPage() {
   const navState = location.state as {
     tmdbId?: number
     tmdbType?: 'movie' | 'tv'
+    autoPlay?: boolean
     resumePosition?: number
     resumeEpisodeId?: string | null
   } | null
@@ -293,6 +295,24 @@ export function ContentDetailPage() {
 
   const handleAutoStreamRef = useRef(handleAutoStream)
   handleAutoStreamRef.current = handleAutoStream
+
+  const launchedEntryRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Metadata must pass the catalog's maturity check before source discovery.
+    if (isLoading || !content || content.type !== 'movie' || navState?.autoPlay !== true) return
+    if (launchedEntryRef.current === location.key) return
+    launchedEntryRef.current = location.key
+    const state = { ...navState }
+    delete state.autoPlay
+    // Consume the intent in history before starting, including cancel and Back paths.
+    navigate(location.pathname + location.search + location.hash, { replace: true, state })
+    void handleAutoStreamRef.current()
+  }, [isLoading, content, navState, location.key, location.pathname, location.search, location.hash, navigate])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   // Auto-resume from router state if resumePosition is present
   useEffect(() => {
@@ -620,7 +640,7 @@ export function ContentDetailPage() {
           setTimeout(() => reject(new Error('Timed out searching for a stream')), 50000)
         ),
       ])
-      if (cancelled) return
+      if (cancelled || !mountedRef.current) return
 
       if (result && result.streams.length > 0) {
         const releaseType = result.streams[0]!.qualityInfo?.releaseType
@@ -662,7 +682,7 @@ export function ContentDetailPage() {
         })
       }
     } catch (err) {
-      if (cancelled) return
+      if (cancelled || !mountedRef.current) return
       setAutoStreamState({
         loading: false,
         episode,
@@ -734,7 +754,7 @@ export function ContentDetailPage() {
       {/* Backdrop */}
       <div className="relative">
         {thumbnail ? (
-          <div className="relative h-[45vh] overflow-hidden">
+          <div className="relative h-[38vh] min-h-[240px] max-h-[380px] overflow-hidden">
             <img src={sanitizeUrl(thumbnail)} alt={content.title} className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-km-bg/60 to-km-bg" />
           </div>
@@ -754,10 +774,10 @@ export function ContentDetailPage() {
           {t('common.back')}
         </button>
 
-        <div className={thumbnail ? 'px-8 -mt-24 relative z-10' : 'px-8 pt-8'}>
-          <h1 className="text-4xl font-bold text-white mb-3">{content.title}</h1>
+        <div className={thumbnail ? 'px-6 lg:px-10 -mt-20 relative z-10 pb-10' : 'px-6 lg:px-10 pt-8 pb-10'}>
+          <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-4 max-w-3xl">{content.title}</h1>
 
-          <div className="flex flex-wrap items-center gap-3 mb-4 text-sm text-white/60">
+          <div className="flex flex-wrap items-center gap-3 mb-5 text-sm text-white/75">
             {content.releaseYear && <span>{content.releaseYear}</span>}
             {content.imdbScore && (
               <span className="text-yellow-400 font-medium">★ {parseFloat(content.imdbScore).toFixed(1)}</span>
@@ -784,13 +804,13 @@ export function ContentDetailPage() {
           )}
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap gap-3 mb-6">
+          <div className="flex flex-wrap items-center gap-3 mb-7">
             <button
               onClick={() => handleAutoStream(
                 content.type === 'series' ? sortedEpisodes[0] : undefined,
                 content.type === 'series' ? season?.seasonNumber : undefined,
               )}
-              className="flex items-center gap-2 bg-white text-black font-semibold px-8 py-3 rounded hover:bg-white/90 active:scale-95 transition-all"
+              className="flex items-center gap-2 bg-white text-black font-semibold px-6 py-3 rounded-xl hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
             >
               <span>▶</span> {t('detail.watchNow')}
             </button>
@@ -805,7 +825,7 @@ export function ContentDetailPage() {
                     handleAutoStreamRef.current(undefined, undefined, resumeItem.positionSeconds)
                   }
                 }}
-                className="flex items-center gap-2 bg-violet-600 text-white font-semibold px-8 py-3 rounded hover:bg-violet-500 active:scale-95 transition-all"
+                className="flex items-center gap-2 bg-km-accent text-white font-semibold px-6 py-3 rounded-xl hover:bg-km-accent-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 <span>▶</span>
                 <span>
@@ -821,7 +841,7 @@ export function ContentDetailPage() {
             <button
               onClick={() => inWatchlist ? removeMutation.mutate() : addMutation.mutate()}
               disabled={addMutation.isPending || removeMutation.isPending}
-              className={`flex items-center gap-2 font-semibold px-6 py-3 rounded border transition-colors disabled:opacity-50 ${
+              className={`flex items-center gap-2 font-semibold px-5 py-3 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent disabled:opacity-50 ${
                 inWatchlist
                   ? 'bg-white/20 border-white/40 text-white hover:bg-white/30'
                   : 'bg-transparent border-white/40 text-white hover:bg-white/10'
@@ -839,7 +859,7 @@ export function ContentDetailPage() {
                   aria-label={t('detail.options')}
                   aria-haspopup="menu"
                   aria-expanded={showActionsDropdown}
-                  className="flex items-center justify-center w-12 h-12 rounded bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
+                  className="flex items-center justify-center w-12 h-12 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
                   title={t('detail.options')}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white/70 hover:text-white transition-colors">
@@ -889,7 +909,7 @@ export function ContentDetailPage() {
           </div>
 
           {content.description && (
-            <p className="text-white/70 text-sm leading-relaxed max-w-2xl mb-8">{content.description}</p>
+            <p className="text-white/75 text-base leading-relaxed max-w-3xl mb-10">{content.description}</p>
           )}
 
           {content.cast.length > 0 && (

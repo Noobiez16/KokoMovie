@@ -1,7 +1,20 @@
 # Testing and Regression Baseline
 
-**Date:** 2026-08-08
-**Automated baseline:** lint, strict renderer/main typecheck, 113 Vitest tests, the production dependency audit policy, the distribution licence gate, and the production build are active gates on the v1.5.2 optimization line.
+**Current verification:** 2026-10-07, v2.0.0 interface block.
+
+- 366 deterministic tests passed. Renderer/main TypeScript, lint (zero errors/warnings), and production build passed.
+- Six real Electron tests passed on Windows: five privileged boundary tests and a desktop UI flow with isolated SQLite and credentials intercepted before application startup.
+- UI flow covered detail navigation, typed paginated search, Back, query changes, watchlist/resume records, operational pages, EN/ES/FR persistence, compact navigation and Ctrl+K focus.
+- Screenshots at 1440×900 and 1024×768 used synthetic catalog artwork. This verifies layout and interaction, not external provider availability or a packaged upgrade.
+- License gate: 227 compatible production packages and three verified LGPL FFmpeg targets. Audit security findings remain a separate correction block.
+- Logo hash and base CSS palette were compared with the pre-change source and are unchanged.
+
+On this Windows sandbox, set TEMP/TMP to a project-local writable temporary folder before
+Vitest/Playwright; the system temporary folder can reject Vitest artifact renames. The tests
+do not need changes to product behavior for that environment limitation.
+
+Historical baseline (2026-08-08): 113 Vitest tests on v1.5.2. Historical phase notes below
+are retained and do not imply every live/manual scenario has been repeated for v2.0.0.
 
 ## Existing commands
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { isolatedCredentials } from './isolated-credentials'
 
 let application: ElectronApplication
 let page: Page
@@ -33,7 +34,7 @@ test.beforeAll(async () => {
   if (!tlsAddress || typeof tlsAddress === 'string') throw new Error('TLS test server failed to bind')
   invalidTlsUrl = `https://127.0.0.1:${tlsAddress.port}/`
   application = await electron.launch({
-    args: ['.', `--user-data-dir=${userDataDirectory}`],
+    args: await isolatedCredentials(userDataDirectory, null),
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -53,7 +54,7 @@ test.afterAll(async () => {
 })
 
 test('launches the real isolated renderer on Electron 43.4.1', async () => {
-  expect(await application.evaluate(({ app }) => app.getVersion())).toBe('1.5.5')
+  expect(await application.evaluate(({ app }) => app.getVersion())).toBe('2.0.0')
   expect(await application.evaluate(() => process.versions.electron)).toBe('43.4.1')
   const preferences = await application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0]?.webContents.getLastWebPreferences(),

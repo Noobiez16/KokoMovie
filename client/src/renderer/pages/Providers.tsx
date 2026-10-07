@@ -2,13 +2,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { providersApi } from '../api/providers'
 import { AppLayout } from '../components/layout/AppLayout'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 
 export function ProvidersPage() {
   const { t } = useTranslation()
 
   const qc = useQueryClient()
 
-  const { data: providers, isLoading } = useQuery({
+  const { data: providers, isLoading, isError, refetch } = useQuery({
     queryKey: ['providers'],
     queryFn: () => providersApi.list(),
     staleTime: 60 * 1000,
@@ -22,12 +24,11 @@ export function ProvidersPage() {
 
   return (
     <AppLayout>
-      <div className="px-8 py-8 max-w-2xl">
-        <h1 className="text-2xl font-bold text-white mb-2">{t('providers.title')}</h1>
-        <p className="text-white/50 text-sm mb-8">
-          {t('providers.fullDescription')}
-        </p>
+      <div className="km-page max-w-5xl">
+        <PageHeader title={t('providers.title')} description={t('providers.fullDescription')} />
 
+        {toggleMutation.isError && <p role="alert" className="mb-4 text-red-300">{t('common.failedToSave')}</p>}
+        {isError && <EmptyState title={t('ui.providersLoadError')} action={<button className="km-button-secondary" onClick={() => refetch()}>{t('common.retry')}</button>} />}
         {isLoading ? (
           <div role="status" aria-live="polite" className="flex items-center gap-3 text-white/40">
             <div className="w-5 h-5 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
@@ -38,7 +39,7 @@ export function ProvidersPage() {
             {providers?.map((p) => (
               <div
                 key={p.id}
-                className="flex items-center justify-between bg-km-card rounded-lg px-5 py-4 border border-white/10"
+                className="flex items-center justify-between gap-4 bg-km-surface rounded-2xl px-5 py-4 border border-white/10"
               >
                 <div>
                   <p className="text-white font-medium flex items-center gap-2">

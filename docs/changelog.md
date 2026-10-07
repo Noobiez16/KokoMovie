@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.0.0] — Unreleased
+
+### Added
+- Grouped Explore, Library and Tools navigation, persistent compact layout, keyboard search shortcut, and a direct Continue Watching page using existing local records.
+- A single URL-based search field with movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
+- Shared page headings and empty/error states with real retry actions; a separate Library tab for existing import/export controls.
+- Deterministic UI behavior tests and real Electron desktop smoke coverage with temporary SQLite data and credentials intercepted before startup.
+
+### Changed
+- Refined hero, cards, rows, details and operational pages while preserving the logo bytes and original base palette.
+- Movie hero Play runs existing source discovery after approved metadata; series opens episodes. Playback intent is consumed once, retaining cancellation, maturity and CAM checks.
+- Locale preference validation now accepts the interface's en-US/es-ES/fr-FR codes and legacy values, fixing language changes reverting to English.
+- All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
+
+### Verification and remaining work
+- UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).
+- Desktop layouts were inspected at 1440×900 and 1024×768 with synthetic catalog artwork; EN/ES/FR and local watchlist/resume persistence were exercised.
+- Live provider playback, torrents, download finalization, signed packaging and upgrades are not established by the UI smoke tests. Source/downloader compatibility, redirects, audit policy and storage corrections remain separate work below this same version.
+
 ## [1.5.5] — 2026-08-24 — Reliability, Security & Offline Playback
 
 ### Added

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { downloadsApi, type DownloadItem } from '../api/downloads'
 import { AppLayout } from '../components/layout/AppLayout'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { applyDownloadProgress } from '../lib/download-progress'
 import { downloadErrorTranslationKey } from '../lib/download-error-policy'
 
@@ -31,13 +33,15 @@ export function DownloadsPage() {
   const navigate = useNavigate()
   const [items, setItems] = useState<DownloadItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
 
   useEffect(() => {
     const refresh = () => downloadsApi.list().then((list) => {
       setItems(list)
       setLoading(false)
-    })
+      setLoadError(false)
+    }).catch(() => { setLoading(false); setLoadError(true) })
 
     void refresh()
     const refreshWhenVisible = () => {
@@ -95,30 +99,24 @@ export function DownloadsPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-white">{t('downloads.title')}</h1>
-          <button onClick={() => downloadsApi.openFolder()} className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors">{t('downloads.openDownloadsFolder')}</button>
-        </div>
+      <div className="km-page">
+        <PageHeader title={t('downloads.title')} description={t('ui.downloadsDescription')} action={<button onClick={() => downloadsApi.openFolder()} className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors">{t('downloads.openDownloadsFolder')}</button>} />
 
         {loading && (
-          <div className="flex items-center justify-center py-16">
+          <div role="status" aria-label={t('common.loading')} className="flex items-center justify-center py-16">
             <div className="w-8 h-8 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
           </div>
         )}
 
-        {!loading && items.length === 0 && (
-          <div className="text-center py-16 text-white/40">
-            <div className="text-5xl mb-4">⬇</div>
-            <p className="text-lg">{t('downloads.empty')}</p>
-            <p className="text-sm mt-2">{t('downloads.emptyDescription')}</p>
-          </div>
+        {loadError && <p role="alert" className="py-6 text-red-300">{t('ui.downloadsLoadError')}</p>}
+        {!loading && !loadError && items.length === 0 && (
+          <EmptyState title={t('downloads.empty')} description={t('downloads.emptyDescription')} action={<button className="km-button-secondary" onClick={() => navigate('/browse')}>{t('ui.exploreLibrary')}</button>} />
         )}
 
         {active.length > 0 && (
           <section className="mb-8">
             <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.inProgress')}</h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {active.map((item) => (
                 <DownloadCard
                   key={item.id}
@@ -135,7 +133,7 @@ export function DownloadsPage() {
         {completed.length > 0 && (
           <section className="mb-8">
             <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.availableOffline')}</h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {completed.map((item) => (
                 <DownloadCard
                   key={item.id}
@@ -152,7 +150,7 @@ export function DownloadsPage() {
         {other.length > 0 && (
           <section>
             <h2 className="text-white/60 text-xs uppercase tracking-widest mb-4">{t('downloads.cancelledFailed')}</h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {other.map((item) => (
                 <DownloadCard
                   key={item.id}
@@ -190,7 +188,7 @@ function DownloadCard({
   const days = daysUntil(item.expires_at)
 
   return (
-    <div className="bg-white/[0.03] backdrop-blur-md rounded-xl overflow-hidden shadow-lg transition-all duration-300 hover:scale-[1.02] hover:bg-white/[0.08] hover:shadow-violet-500/5 group flex flex-col justify-between">
+    <div className="bg-km-surface border border-white/10 rounded-2xl overflow-hidden shadow-lg transition-all duration-300  hover:bg-white/[0.08] hover:shadow-violet-500/5 group flex flex-col justify-between">
       <div>
         {item.thumbnail_url ? (
           <img src={item.thumbnail_url} alt={item.title} className="w-full aspect-video object-cover transition-transform duration-500 group-hover:scale-103" />
@@ -223,6 +221,8 @@ function DownloadCard({
               </div>
             </div>
           )}
+
+          {item.status === 'completed' && <p className="text-xs text-white/60 mb-2 tabular-nums">{formatBytes(item.total_bytes || item.downloaded_bytes)}</p>}
 
           {item.status === 'completed' && days > 0 && (
             <p className="text-xs text-white/30 mb-2">{t('downloads.expiresIn', { count: days })}</p>

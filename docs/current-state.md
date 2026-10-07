@@ -1,8 +1,37 @@
 # KokoMovie Current State
 
-**Audit date:** 2026-08-12
-**Baseline:** v1.5.4 source-discovery branch based on tagged v1.5.3
-**Rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
+**Current review:** 2026-10-07
+**Source target:** v2.0.0, branch `codex/kokomovie-v2-0-0`, based on `a0f7531`.
+**Release status:** development source; no v2.0.0 installer published or installed by this work.
+
+## Verified v2.0.0 interface
+
+The desktop shell exposes Explore, Library and Tools, a persistent compact sidebar, one
+global URL-based search, and a shared content scroll area. My List, Continue Watching,
+History and Downloads access the existing local records. Library import/export has its
+own Settings tab; language, playback, storage and advanced controls retain their APIs.
+
+Movie hero Play enters source discovery through approved content details rather than
+opening an empty player. Series opens episode selection. Search uses complete typed
+TMDB endpoints, preserves filters/pagination through navigation, and normalizes synthesized
+offline matches to page 1. Catalog failures expose actual query retries.
+
+The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
+base palette values are unchanged. Locale persistence accepts both canonical and legacy
+codes. Six real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+search/navigation and privileged boundaries. See [testing](testing.md) for limits.
+
+Next audit blocks: source/downloader contracts and redirects; audit fail-closed and
+patched production dependencies; finalization/cancellation/collision/retention/P2P cleanup;
+distribution verification and discovery. These are not represented as completed UI work.
+
+## Historical architecture and phase notes
+
+The remaining sections describe prior milestones and audit findings. They are historical;
+the current verification above takes precedence over old baseline counts and risk status.
+
+**Historical audit:** 2026-08-12, v1.5.4 source-discovery branch based on tagged v1.5.3.
+**Historical rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
 
 ## Runtime
 

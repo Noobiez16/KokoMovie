@@ -17,7 +17,7 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const MAX_TMDB_ATTEMPTS = 4
 const requestScheduler = new CoalescingRequestScheduler(6)
 
-const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/release_dates)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/content_ratings|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/multi|configuration)$/
+const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/release_dates)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/content_ratings|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/(?:multi|movie|tv)|configuration)$/
 const paramsSchema = z.record(z.string().max(500)).default({}).refine((params) =>
   Object.keys(params).length <= 12 &&
   Object.keys(params).every((key) => ['page', 'sort_by', 'with_genres', 'primary_release_year', 'first_air_date_year', 'query', 'append_to_response', 'language'].includes(key)),
@@ -110,9 +110,11 @@ function downloadedTmdbItem(type: 'movie' | 'tv', tmdbId: number): CachedTmdbIte
 
 function localFallback(path: string, params: Record<string, string>): string | null {
   const rows = allCachedPayloads()
-  if (path === '/search/multi') {
-    const results = searchCachedTmdb(rows, params['query'] ?? '')
-    return results.length > 0 ? JSON.stringify({ results, total_results: results.length, total_pages: 1 }) : null
+  const searchType = /^\/search\/(multi|movie|tv)$/.exec(path)?.[1]
+  if (searchType) {
+    const matches = searchCachedTmdb(rows, params['query'] ?? '')
+    const results = searchType === 'multi' ? matches : matches.filter((item) => item.media_type === searchType)
+    return results.length > 0 ? JSON.stringify({ page: 1, results, total_results: results.length, total_pages: 1 }) : null
   }
   const season = /^\/tv\/([0-9]+)\/season\/([0-9]+)$/.exec(path)
   if (season) {
@@ -149,7 +151,7 @@ async function requestTmdbUncoalesced(path: string, params: Record<string, strin
     void requestScheduler.run(`refresh:${key}`, () => getTmdbCredential().then((credential) => {
       if (!credential) return
       return fetchTmdb(path, params, credential).then((body) => {
-        const refreshed = path === '/search/multi' ? mergeSearchBody(body, params['query'] ?? '') : body
+        const refreshed = path === '/search/multi' && (params['page'] ?? '1') === '1' ? mergeSearchBody(body, params['query'] ?? '') : body
         JSON.parse(refreshed)
         writeCache(key, path, params, refreshed)
       })
@@ -166,7 +168,7 @@ async function requestTmdbUncoalesced(path: string, params: Record<string, strin
 
   try {
     const networkBody = await fetchTmdb(path, params, credential)
-    const body = path === '/search/multi' ? mergeSearchBody(networkBody, params['query'] ?? '') : networkBody
+    const body = path === '/search/multi' && (params['page'] ?? '1') === '1' ? mergeSearchBody(networkBody, params['query'] ?? '') : networkBody
     JSON.parse(body)
     writeCache(key, path, params, body)
     return { body, source: 'network' as const, stale: false, fetchedAt: new Date().toISOString() }

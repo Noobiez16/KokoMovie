@@ -6,7 +6,7 @@
 
 **All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
 
-[![Version](https://img.shields.io/badge/version-1.5.4-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#automatic-updates)
 
@@ -38,6 +38,12 @@ artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` �
 ---
 
 ## What is KokoMovie?
+
+The **2.0.0 development branch** introduces grouped navigation with a visible local library,
+one URL-based search with movie/series filters and pagination, responsive desktop layouts,
+and consistent recovery actions. The existing purple theme and logo are preserved.
+This source version has not been published as an installer; release downloads below may
+still contain an earlier version. See [current state](docs/current-state.md) for verified scope.
 
 KokoMovie is a desktop app that brings movies and TV shows together in one place,
 with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
@@ -196,8 +202,8 @@ Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) 
 `latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
-git tag v1.5.4
-git push origin v1.5.4
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
