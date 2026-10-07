@@ -275,15 +275,17 @@ export const catalogApi = {
   },
 
   browse: async (
-    params: { genre?: string; type?: string; year?: number; page?: number; limit?: number },
+    params: { genre?: string; collection?: 'trending'; type?: string; year?: number; page?: number; limit?: number },
     _profileId?: string,
   ) => {
     const c = client()
     const page = params.page ?? 1
     const g = params.genre ? GENRES.find((x) => x.slug === params.genre) : undefined
     const isTv = params.type === 'series'
+    const isTrending = params.collection === 'trending' || params.genre === 'trending'
+    const trendingType = isTv ? 'tv' : params.type === 'movie' ? 'movie' : 'all'
 
-    // TMDB discover pages are fixed at 20 results, so a larger page size means fetching several
+    // TMDB catalog pages are fixed at 20 results, so a larger page size means fetching several
     // consecutive TMDB pages and presenting them as one. `limit` used to be accepted and silently
     // ignored, which is why category views always showed 20 items no matter what was requested.
     const perTmdbPage = 20
@@ -295,7 +297,9 @@ export const catalogApi = {
         Array.from({ length: batch }, (_, offset) => {
           const tmdbPage = firstTmdbPage + offset
           if (tmdbPage > TMDB_MAX_PAGE) return null
-          const request = isTv
+          const request = isTrending
+            ? c.trending(trendingType, tmdbPage)
+            : isTv
             ? c.discoverTv(g?.tvId, tmdbPage, params.year)
             : c.discoverMovie(g?.movieId, tmdbPage, params.year)
           // A later page in the batch can legitimately fall past the end of the result set; that
@@ -308,8 +312,8 @@ export const catalogApi = {
     const [first] = responses
     if (!first) throw new Error('Could not load this category.')
 
-    // Consecutive discover pages can repeat a title as popularity shifts between requests.
-    const combined = [...new Map(responses.flatMap((res) => res.results).map((item) => [item.id, item])).values()]
+    // Consecutive catalog pages can repeat a title as popularity shifts between requests.
+    const combined = [...new Map(responses.flatMap((res) => res.results).map((item) => [tmdbContentId(tmdbType(item) === 'series' ? 'tv' : 'movie', item.id), item])).values()]
     const totalTmdbPages = Math.min(first.total_pages, TMDB_MAX_PAGE)
 
     return {

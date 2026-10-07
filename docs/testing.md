@@ -16,6 +16,14 @@ do not need changes to product behavior for that environment limitation.
 Historical baseline (2026-08-08): 113 Vitest tests on v1.5.2. Historical phase notes below
 are retained and do not imply every live/manual scenario has been repeated for v2.0.0.
 
+### v2.0.0 core correction block
+
+- Full suite: 417 passed; six Electron tests passed again after dependency/source changes.
+- Final IPv4 endpoint refinement: 25 targeted source/redirect tests passed, including rejection of IPv6 literals and real HTTP transfers via localhost and 127.0.0.1.
+- Callback tests exercise invalid/private/prohibited redirects, late response errors, valid public redirects and same-origin sensitive-header isolation. They use synthetic fixtures rather than external providers or peers.
+- Audit CLI tests cover malformed/operational/error reports, signal/spawn failures, exit/count consistency, and severity policy. The actual external production audit returned exit 0 with all vulnerability counts zero.
+- Both TypeScript targets, zero-error/zero-warning lint, production build, license gate, and npm ci --dry-run passed. No installer signature, upgrade, live swarm or long-duration playback is implied.
+
 ## Existing commands
 
 - npm run dev:client: Vite, main-process TypeScript watch, and Electron.

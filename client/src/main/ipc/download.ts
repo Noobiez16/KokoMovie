@@ -22,6 +22,7 @@ import { headersForDownloadTarget } from '../download-header-policy.js'
 import { unwrapLocalMediaProxyUrl } from '../providers/local-media-capability.js'
 import { decorateHlsManifestWithLocalCapability, withLocalMediaCapability } from '../providers/local-media-capability.js'
 import { resolveValidatedRedirect } from '../providers/network-policy.js'
+import { isTrustedTorrentDownloadSource } from '../providers/torrent-download-source.js'
 import {
   createHlsDownloadPlan,
   materializeHlsObject,
@@ -76,6 +77,15 @@ export function decryptSegment(encrypted: Buffer, key: Buffer): Buffer {
 import { getStreamHeaders, getStreamProxyPort, mergeHeadersCaseInsensitive, validateDownloadSourceUrl } from './providers.js'
 
 const { httpAgent, httpsAgent } = createAuthenticatedHttpAgents(32)
+// The torrent server is bound to IPv4 loopback. Only its main-registered URLs may
+// bypass the public-address DNS guard; no renderer-provided host is resolved here.
+const torrentDownloadAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: MAX_CONCURRENT,
+  lookup: ((_hostname: string, options: { all?: boolean }, callback: Function) => {
+    callback(null, options.all ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4)
+  }) as http.RequestOptions['lookup'],
+})
 
 const activeRequests = new Map<string, http.ClientRequest[]>()
 const hostNextRequestAt = new Map<string, number>()
@@ -153,7 +163,7 @@ function abortActiveRequests(id: string): void {
   }
 }
 
-function fetchBuffer(
+export function fetchBuffer(
   url: string,
   id?: string,
   customHeaders?: Record<string, string>,
@@ -204,7 +214,7 @@ function fetchBuffer(
 
     const options = {
       headers: reqHeaders,
-      agent: isHttps ? httpsAgent : httpAgent,
+      agent: isTrustedTorrentDownloadSource(normalizedUrl) ? torrentDownloadAgent : isHttps ? httpsAgent : httpAgent,
     }
 
     const req = get(normalizedUrl, options, (res) => {
@@ -213,8 +223,16 @@ function fetchBuffer(
         const location = res.headers.location
         if (location) {
           cleanUpReq()
-          const absoluteLocation = resolveValidatedRedirect(normalizedUrl, location).toString()
-          resolve(fetchBuffer(absoluteLocation, id, customHeaders, onProgress, redirectsCount + 1, onFinalUrl, sourceUrl, requestHeaders, maxBytes))
+          // This response is discarded after redirect handoff. Its body can still
+          // fail while draining, after the promise has rejected or adopted the target.
+          res.on('error', () => {})
+          res.resume()
+          try {
+            const absoluteLocation = resolveValidatedRedirect(normalizedUrl, location).toString()
+            resolve(fetchBuffer(absoluteLocation, id, customHeaders, onProgress, redirectsCount + 1, onFinalUrl, sourceUrl, requestHeaders, maxBytes))
+          } catch (error) {
+            reject(error)
+          }
           return
         }
       }
@@ -401,7 +419,7 @@ const cancelSignals = new Map<string, boolean>()
 const pauseSignals = new Map<string, boolean>()
 let activeCount = 0
 
-async function downloadDirectVideo(
+export async function downloadDirectVideo(
   id: string,
   row: DownloadRow,
   key: Buffer,
@@ -455,7 +473,7 @@ async function downloadDirectVideo(
 
     const options = {
       headers: reqHeaders,
-      agent: isHttps ? httpsAgent : httpAgent,
+      agent: isTrustedTorrentDownloadSource(currentUrl) ? torrentDownloadAgent : isHttps ? httpsAgent : httpAgent,
     }
 
     const res: http.IncomingMessage = await new Promise((resolve, reject) => {
@@ -490,9 +508,9 @@ async function downloadDirectVideo(
     if ([301, 302, 303, 307, 308].includes(statusCode)) {
       const location = res.headers.location
       if (location) {
+        res.resume() // drain even when redirect validation rejects
         currentUrl = resolveValidatedRedirect(currentUrl, location).toString()
         redirectsCount++
-        res.resume() // consume stream
         continue
       }
     }

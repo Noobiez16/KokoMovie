@@ -21,9 +21,15 @@ base palette values are unchanged. Locale persistence accepts both canonical and
 codes. Six real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
 search/navigation and privileged boundaries. See [testing](testing.md) for limits.
 
-Next audit blocks: source/downloader contracts and redirects; audit fail-closed and
-patched production dependencies; finalization/cancellation/collision/retention/P2P cleanup;
-distribution verification and discovery. These are not represented as completed UI work.
+The next core block repaired source/downloader contracts and callback redirects. Torrent
+downloads require the actual IPv4 endpoint, live selected file and capability. Both accepted
+hostnames were exercised through a real local HTTP server. Production audit now fails closed;
+js-yaml 4.3.2 and ip-address 10.7.3 yielded a fresh report with zero findings. Weekly trending
+collections preserve scope and pagination instead of treating trending as an unknown genre.
+
+Remaining audit blocks: finalization/cancellation/collision/retention/P2P cleanup;
+distribution verification and discovery. Live peer playback and packaged upgrades remain
+unverified by the deterministic source tests.
 
 ## Historical architecture and phase notes
 

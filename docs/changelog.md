@@ -17,12 +17,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Refined hero, cards, rows, details and operational pages while preserving the logo bytes and original base palette.
 - Movie hero Play runs existing source discovery after approved metadata; series opens episodes. Playback intent is consumed once, retaining cancellation, maturity and CAM checks.
 - Locale preference validation now accepts the interface's en-US/es-ES/fr-FR codes and legacy values, fixing language changes reverting to English.
+- Torrent downloads now accept only the main process's live selected file on its actual IPv4 server, with the session capability; ordinary outbound DNS/TLS guards remain in place.
+- Invalid download/proxy redirects and late redirect-body errors now settle as controlled failures instead of throwing outside their request callbacks.
+- Production audit validation rejects execution failures, malformed/incomplete reports, inconsistent severity totals and clean reports with failure exits. Compatible patches update js-yaml to 4.3.2 and ip-address to 10.7.3.
+- Trending See All preserves its weekly all/movie/TV collection, uses real trending pagination, normalizes legacy links and retains distinct movie/TV IDs.
 - All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
 
 ### Verification and remaining work
 - UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).
 - Desktop layouts were inspected at 1440×900 and 1024×768 with synthetic catalog artwork; EN/ES/FR and local watchlist/resume persistence were exercised.
-- Live provider playback, torrents, download finalization, signed packaging and upgrades are not established by the UI smoke tests. Source/downloader compatibility, redirects, audit policy and storage corrections remain separate work below this same version.
+- Core block: 417 tests and six real Electron tests passed; final IPv4 contract refinement passed 25 targeted tests. Renderer/main checks, lint, build, license gate and a dry-run locked install passed. Fresh production audit reports zero findings at every severity.
+- Torrent HTTP tests use registered fixture files and a real local server; remote redirect tests invoke actual callbacks with mocked remote responses. Live swarms, provider playback, download finalization, signed packaging and upgrades remain outside those verified results. Storage corrections continue below the same version.
 
 ## [1.5.5] — 2026-08-24 — Reliability, Security & Offline Playback
 

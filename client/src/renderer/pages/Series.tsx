@@ -17,8 +17,19 @@ import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 export function SeriesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const genre = searchParams.get('genre') || undefined
+  const [searchParams, setSearchParams] = useSearchParams()
+  const legacyTrending = searchParams.get('genre') === 'trending'
+  const collection = searchParams.get('collection') === 'trending' || legacyTrending ? 'trending' : undefined
+  const genre = collection ? undefined : searchParams.get('genre') || undefined
+  const isCategory = !!genre || !!collection
+
+  useEffect(() => {
+    if (!legacyTrending) return
+    const normalized = new URLSearchParams(searchParams)
+    normalized.delete('genre')
+    normalized.set('collection', 'trending')
+    setSearchParams(normalized, { replace: true })
+  }, [legacyTrending, searchParams, setSearchParams])
   const [page, setPage] = useState(1)
 
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
@@ -26,7 +37,7 @@ export function SeriesPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [genre])
+  }, [genre, collection])
 
   const goToPage = (next: number) => {
     setPage(next)
@@ -40,19 +51,19 @@ export function SeriesPage() {
     queryKey: ['series-home', profileId, tmdbApiKey],
     queryFn: () => catalogApi.getHome({ type: 'series' }, profileId),
     staleTime: 5 * 60 * 1000,
-    enabled: !genre,
+    enabled: !isCategory,
   })
 
   const { data: genreData, isLoading: isGenreLoading, isError: isGenreError, refetch: refetchGenre } = useQuery({
-    queryKey: ['series-genre', profileId, genre, page, tmdbApiKey],
-    queryFn: () => catalogApi.browse({ type: 'series', genre, limit: 80, page }, profileId),
+    queryKey: ['series-genre', profileId, genre, collection, page, tmdbApiKey],
+    queryFn: () => catalogApi.browse({ type: 'series', genre, ...(collection ? { collection } : {}), limit: 80, page }, profileId),
     staleTime: 5 * 60 * 1000,
-    enabled: !!genre,
+    enabled: isCategory,
   })
 
   if (tmdbKeyHydrated && !tmdbApiKey) return <ApiKeyRequired />
 
-  if (genre) {
+  if (isCategory) {
     if (isGenreLoading) {
       return (
         <AppLayout>
@@ -73,7 +84,7 @@ export function SeriesPage() {
 
     const items = [...new Map((genreData?.data ?? []).map((s) => [s.id, s])).values()]
     const totalPages = genreData?.meta?.pagination?.pages ?? 1
-    const genreTitle = genre.charAt(0).toUpperCase() + genre.slice(1).replace('-', ' ')
+    const genreTitle = collection ? t('catalog.trending') : genre!.charAt(0).toUpperCase() + genre!.slice(1).replace('-', ' ')
 
     return (
       <AppLayout>
@@ -148,7 +159,7 @@ export function SeriesPage() {
           <ContentRow
             title={t('catalog.trendingSeries')}
             items={trending}
-            onViewAll={() => navigate('/series?genre=trending')}
+            onViewAll={() => navigate('/series?collection=trending')}
           />
         )}
 

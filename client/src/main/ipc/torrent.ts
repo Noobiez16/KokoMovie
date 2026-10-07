@@ -18,6 +18,7 @@ import {
   withLocalMediaCapability,
 } from '../providers/local-media-capability.js'
 import { trustedIpcHandler } from './security.js'
+import { bindTorrentDownloadSource, isLiveTorrentFile } from '../providers/torrent-download-source.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Free, built-in P2P (BitTorrent) dub pipeline — the way Stremio's own server works.
@@ -316,7 +317,7 @@ const VIDEO_EXT = /\.(mp4|mkv|avi|m4v|webm|mov)$/i
 // token -> the WebTorrent file being served (plus the audio language the user picked, so the
 // remux selects the right dub — and keeps selecting it across seek reloads, which re-hit this
 // server by token), for the range server below.
-const served = new Map<string, { file: any; audioLang: string; audioStreamIndex: number | null }>()
+const served = new Map<string, { torrent: any; file: any; audioLang: string; audioStreamIndex: number | null }>()
 let server: http.Server | null = null
 let serverPort = 0
 
@@ -618,7 +619,7 @@ async function ensureServer(): Promise<number> {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const token = url.pathname.replace(/^\/t\//, '').replace(/\.(mp4|stream)$/i, '')
         const entry = served.get(token)
-        if (!entry) { res.writeHead(404, CORS_HEADERS); res.end('not found'); return }
+        if (!entry || !isLiveTorrentFile(entry.torrent, entry.file)) { res.writeHead(404, CORS_HEADERS); res.end('not found'); return }
         const { file, audioLang, audioStreamIndex } = entry
         const startSec = Math.max(0, parseFloat(url.searchParams.get('start') || '0') || 0)
         const totalDur = Math.max(0, parseFloat(url.searchParams.get('dur') || '0') || 0)
@@ -652,6 +653,10 @@ async function ensureServer(): Promise<number> {
     server.maxConnections = MAX_CONNECTIONS
     server.listen(0, '127.0.0.1', () => {
       serverPort = (server!.address() as { port: number }).port
+      bindTorrentDownloadSource(serverPort, (token) => {
+        const entry = served.get(token)
+        return !!server?.listening && !!entry && isLiveTorrentFile(entry.torrent, entry.file)
+      })
       log(`stream server on 127.0.0.1:${serverPort}`)
       resolve()
     })
@@ -780,7 +785,10 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   }
 
   const token = `${torrent.infoHash}-${torrent.files.indexOf(file)}-${audioLang || "default"}`
-  served.set(token, { file, audioLang, audioStreamIndex: selectedAudioStreamIndex })
+  served.set(token, { torrent, file, audioLang, audioStreamIndex: selectedAudioStreamIndex })
+  const unregister = () => served.delete(token)
+  torrent.once('close', unregister)
+  torrent.once('error', unregister)
   const port = await ensureServer()
   // MP4/WebM play directly (seekable); other containers are remuxed to MP4 by the server. The
   // .mp4 suffix keeps the player's isDirectVideo (native <video>) path happy either way.

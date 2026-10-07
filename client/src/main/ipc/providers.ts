@@ -49,6 +49,7 @@ import {
   withLocalMediaCapability,
 } from '../providers/local-media-capability.js'
 import { trustedIpcHandler } from './security.js'
+import { isTrustedTorrentDownloadSource } from '../providers/torrent-download-source.js'
 
 // Some ISPs (especially in regions that block piracy CDNs — VixSrc's `*.vix-content.net` is a
 // prime example) return NXDOMAIN for stream segment hosts even though those domains resolve
@@ -320,7 +321,7 @@ const HOP_BY_HOP_HEADERS = new Set([
 // The response is only finished once every promised byte has been sent; if we truly
 // can't recover we reset the connection so the player retries the whole fragment
 // cleanly instead of caching a short read.
-function streamSegment(
+export function streamSegment(
   initialUrl: string,
   headers: Record<string, string>,
   req: nodeHttp.IncomingMessage,
@@ -448,10 +449,21 @@ function streamSegment(
 
       // Follow redirects (without writing anything to the client yet).
       if ([301, 302, 303, 307, 308].includes(statusCode) && clientRes.headers.location) {
-        const absoluteLocation = resolveValidatedRedirect(url, clientRes.headers.location).toString()
+        // The redirected body is discarded, but draining can emit a late error.
+        clientRes.on('error', () => {})
         clientRes.resume() // drain the redirect body
         settled = true // this attempt has handed off to the redirect target
-        makeRequest(absoluteLocation, rangeHeader, redirects + 1)
+        try {
+          const absoluteLocation = resolveValidatedRedirect(url, clientRes.headers.location).toString()
+          makeRequest(absoluteLocation, rangeHeader, redirects + 1)
+        } catch {
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Access-Control-Allow-Origin': '*' })
+            finish(true)
+          } else {
+            finish(false)
+          }
+        }
         return
       }
 
@@ -603,7 +615,7 @@ function srtToVtt(raw: string, offsetSecs = 0): string {
   text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}),(\d{3})/g, '$1.$3')
 
   if (offsetSecs !== 0) {
-    text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}\.\d{3})/g, (match, start, _, end) => {
+    text = text.replace(/((\d{1,2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}\.\d{3})/g, (_match, start, _, end) => {
       return `${formatTimestamp(parseTimestamp(start) + offsetSecs)} --> ${formatTimestamp(parseTimestamp(end) + offsetSecs)}`
     })
   }
@@ -864,7 +876,7 @@ export async function startStreamProxy(): Promise<void> {
               .replace(/\r/g, '\n')
 
             if (offsetSecs !== 0) {
-              rewritten = rewritten.replace(/((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})/g, (match, start, _, end) => {
+              rewritten = rewritten.replace(/((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})\s*-->\s*((\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3})/g, (_match, start, _, end) => {
                 return `${formatTimestamp(parseTimestamp(start) + offsetSecs)} --> ${formatTimestamp(parseTimestamp(end) + offsetSecs)}`
               })
             }
@@ -1000,6 +1012,7 @@ export async function startStreamProxy(): Promise<void> {
 // Relative URLs in HLS manifests (like "segment0.ts") resolve correctly because
 // the path structure mirrors the original URL hierarchy.
 export function validateDownloadSourceUrl(rawUrl: string): void {
+  if (isTrustedTorrentDownloadSource(rawUrl)) return
   const url = new URL(rawUrl)
   const hostname = url.hostname.toLowerCase()
   const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
