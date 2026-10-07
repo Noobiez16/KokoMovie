@@ -68,8 +68,8 @@ describe('hero stream discovery', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     mount()
     await waitFor(() => expect(confirm).toHaveBeenCalledWith('player.camWarning'))
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('state').textContent!)).not.toHaveProperty('autoPlay'))
     expect(screen.queryByRole('heading', { name: 'Playback' })).toBeNull()
-    expect(JSON.parse(screen.getByTestId('state').textContent!)).not.toHaveProperty('autoPlay')
   })
   it('cancels pending discovery when leaving the detail route', async () => {
     vi.mocked(catalogApi.getContent).mockResolvedValue({ data: movie } as any)

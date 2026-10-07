@@ -19,6 +19,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Electron release tests now provision the pinned LGPL FFmpeg build in their own CI job. Media fixtures create their temporary parent independently, so fresh checkouts and individual test runs do not depend on earlier tests.
+- The CAM-cancellation regression awaits the rendered consumed navigation state, eliminating an early assertion race under concurrent test load.
 - Automatic discovery prioritizes validated non-CAM sources by available resolution: 2160p/4K, 1440p, 1080p, then 720p. It waits for pending sources below the top tier, resolves a validated non-CAM 4K candidate immediately in progressive mode, and retains the 40-second deadline and explicit CAM/TS fallback warning.
 - HLS resolution probes now read the validated public upstream manifest rather than a rejected localhost proxy URL. Dimensionless media remains Unknown until measurable; failed probes no longer receive guessed 720p/1080p labels. Corrected main-process cinematic/540p tier thresholds.
 - Media probes have bounded response size and elapsed time, propagate discovery cancellation, preserve redirected manifest paths and scope credentials to the correct origin. Terminal discovery snapshots ignore late results. Fresh searches re-extract sources; current playback/manual quality and HLS AUTO remain intact.

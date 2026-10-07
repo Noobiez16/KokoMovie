@@ -5,6 +5,11 @@ Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s)
 TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
 ENOENT in both media tests and a missing FFmpeg prerequisite in the Electron CI job;
 all three setup checks pass after correction. README screenshots use live catalog data.
+The first merged run under simultaneous native-test load exposed an early DOM assertion
+in the CAM-cancellation test (661/662). The regression now waits for the consumed router
+state to render before checking that playback was rejected; the application logic is unchanged.
+The corrected focused suite passes 6/6 and the full suite passes 662/662. The merged
+native suite also passes 17/17 (52.1s); final TypeScript and lint checks pass.
 Final source checks: 662 deterministic tests and seventeen real Electron tests passed (40.3s);
 renderer/main/E2E TypeScript, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.
