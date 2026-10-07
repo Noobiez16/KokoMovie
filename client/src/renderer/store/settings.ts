@@ -3,6 +3,8 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { useAuthStore } from './auth'
 
 interface SettingsState {
+  watchCountry: string
+  setWatchCountry: (country: string) => void
   tmdbApiKey: string
   // True once the per-account key has been loaded from the OS keychain on
   // login (see App.tsx). Lets the UI distinguish "still loading the key" from
@@ -17,6 +19,8 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
+      watchCountry: '',
+      setWatchCountry: (country) => set({ watchCountry: /^[A-Z]{2}$/.test(country) ? country : '' }),
       tmdbApiKey: '',
       tmdbKeyHydrated: false,
 

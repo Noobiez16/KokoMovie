@@ -1,6 +1,8 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0 interface block.
+**Current verification:** 2026-10-07, v2.0.0. Final source checks: 471 deterministic tests
+and eight real Electron tests passed; both TypeScript targets, lint, build and licenses
+passed. The interface/core counts below record earlier completed blocks.
 
 - 366 deterministic tests passed. Renderer/main TypeScript, lint (zero errors/warnings), and production build passed.
 - Six real Electron tests passed on Windows: five privileged boundary tests and a desktop UI flow with isolated SQLite and credentials intercepted before application startup.
@@ -23,6 +25,37 @@ are retained and do not imply every live/manual scenario has been repeated for v
 - Callback tests exercise invalid/private/prohibited redirects, late response errors, valid public redirects and same-origin sensitive-header isolation. They use synthetic fixtures rather than external providers or peers.
 - Audit CLI tests cover malformed/operational/error reports, signal/spawn failures, exit/count consistency, and severity policy. The actual external production audit returned exit 0 with all vulnerability counts zero.
 - Both TypeScript targets, zero-error/zero-warning lint, production build, license gate, and npm ci --dry-run passed. No installer signature, upgrade, live swarm or long-duration playback is implied.
+
+### v2.0.0 storage, security and regional discovery
+
+- Full suite: 471 passed. Eight Electron tests passed against the built renderer/main.
+- Download regressions execute real IPC handlers with SQLite and staging directories;
+  controlled FFmpeg children cover blocked stdin, pause/resume ordering, artwork waits,
+  cancellation/deletion, shutdown recovery, equal-title collisions, sidecar exclusivity,
+  unrelated directory preservation and expiry racing a completed transfer.
+- P2P tests include the installed fs-chunk-store and callback ordering. Audio probe tests
+  distinguish normal EOF from interruption and retain the child until actual close.
+- The native portable test generates H.264/AAC with bundled FFmpeg, downloads a movie and
+  episode through a registered process-owned local fixture, checks distinct MP4/metadata
+  outputs and removed staging, stops the origin, blocks HTTP and verifies offline Range,
+  video decoding, seek and play in Electron. It does not join a torrent swarm.
+- Native CSP checks inject an inline script, load an ordinary external local eval probe,
+  and run a blob worker. DevTools evaluation alone bypasses CSP and is not the eval proof.
+- Where to watch tests cover both media types, explicit country selection, grouping,
+  saved/outdated notices, malformed response/link rejection, retry and title isolation.
+  Native fixtures switch countries and verify preference persistence after reload.
+- Fresh production audit returned zero info/low/moderate/high/critical findings.
+  License check passed for 227 production packages and three FFmpeg targets.
+- Windows x64 unpacked packaging completed with `--publish never`; version/resources,
+  native modules, FFmpeg and production CSP were inspected. Actual executable fuses were
+  read using `node scripts/verify-electron-fuses.cjs <path-to-KokoMovie.exe>`; the argument
+  mode is read-only. Signing status was NotSigned. No installer/upgrade was executed.
+
+Repeat native checks from `client` after `npm run build`, with TEMP/TMP under
+`client/.codex/tmp`, using `node ../node_modules/@playwright/test/cli.js test`.
+Live provider/swarm startup, long-duration seek/audio stability, installed upgrades and
+other platform packages still need their own verification. Availability fixtures do not
+establish today's regional service availability.
 
 ## Existing commands
 

@@ -1,4 +1,15 @@
 const enUS = {
+  watchAvailability: {
+    title: 'Where to watch', country: 'Country', chooseCountry: 'Choose a country',
+    prompt: 'Choose a country to see viewing options.',
+    loadingCountries: 'Loading countries…', loading: 'Loading viewing options…',
+    countriesError: 'Could not load countries.', error: 'Could not load viewing options.',
+    noInformation: 'No viewing information for this country.',
+    saved: 'Saved information. Confirm current availability on TMDB.',
+    outdated: 'Saved information may be outdated. Confirm availability on TMDB.',
+    viewOptions: 'View options on TMDB', attribution: 'Availability data: JustWatch via TMDB.',
+    groups: { flatrate: 'Subscription', free: 'Free', ads: 'With ads', rent: 'Rent', buy: 'Buy' },
+  },
   ui: {
     skipContent: "Skip to content",
     mainNavigation: "Main navigation",
@@ -191,6 +202,8 @@ const enUS = {
     server: 'Server', auto: 'Auto', skipIntro: 'Skip Intro', playbackSettings: 'Playback settings', dubLanguages: 'Audio dub languages', noSubtitles: 'No subtitles found for this title', size: 'Size', syncing: 'Listening & syncing…', synced: 'Synced ✓', syncFailed: 'Couldn’t auto-sync — adjust below', autoSync: 'Auto-sync subtitles', autoSyncDescription: 'Keep playing for a few seconds while KokoMovie matches subtitles to the dialogue.', manualDelay: 'Manual delay', resetDelay: 'Reset to 0', reset: 'Reset', subtitlesEarlier: 'Show subtitles 0.5s earlier', subtitlesLater: 'Show subtitles 0.5s later', delayHint: '− earlier if subtitles lag · + later if they are ahead', chooseAnotherSource: 'Choose Another Source', loadingVideo: 'Loading video…', fetchingStream: 'Fetching the stream; this can take a few seconds', findingAnotherSource: 'Finding another working source…', switchingSource: 'Switching server source…',
   },
   downloads: {
+    retained: 'Saved until you remove it',
+    retentionPolicy: 'Completed downloads stay until you choose Remove. Unfinished downloads are cleaned up 30 days after they were added.',
     title: 'Downloads',
     itemCount_one: '{{count}} download',
     itemCount_other: '{{count}} downloads',

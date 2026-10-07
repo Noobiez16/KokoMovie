@@ -4,7 +4,7 @@
 
 # KokoMovie
 
-**All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
+**A local movie and TV library with catalog discovery, playback and offline files.**
 
 [![Version](https://img.shields.io/badge/version-2.0.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
@@ -42,20 +42,23 @@ artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` �
 The **2.0.0 development branch** introduces grouped navigation with a visible local library,
 one URL-based search with movie/series filters and pagination, responsive desktop layouts,
 and consistent recovery actions. The existing purple theme and logo are preserved.
+It also adds regional viewing information, permanent completed downloads, controlled
+transfer teardown and a stricter renderer script policy.
 This source version has not been published as an installer; release downloads below may
 still contain an earlier version. See [current state](docs/current-state.md) for verified scope.
 
-KokoMovie is a desktop app that brings movies and TV shows together in one place,
-with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
-working stream for you automatically — no juggling websites, pop-ups, or sign-ups.
+KokoMovie brings catalog discovery, local library records and playback into one desktop
+interface. Search titles, review their details, choose a source or play saved media.
+External catalog access uses your TMDB credential; source availability depends on providers.
 
 - **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
-- **One-click play** — KokoMovie finds a working stream and starts playing
+- **Source discovery** — automatic and manual source selection with visible errors and retries
 - **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - **On-device storage** — watchlists, history, and preferences are stored locally on your machine
-- **Watch offline** — save portable 1080p MP4 files, including language-selected torrent dubs, for when you are without internet
-- **Always up to date** — the app updates itself in the background
-- **English, Español, Français** — switch the complete interface instantly in Settings, with no restart
+- **Watch offline** — completed portable MP4 files stay until you remove them; equal-title downloads receive distinct filenames
+- **Where to watch** — choose a country to view subscription, free, advertising, rental and purchase information from JustWatch via TMDB; links open external viewing options
+- **Release updates** — optional update checks for published builds
+- **English, Español, Français** — switch the localised interface in Settings, with no restart
 - **Built-in diagnostics** — advanced users can open Developer Tools from the View menu to inspect console errors
 
 ---

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { createServer, type Server } from 'node:https'
 import { tmpdir } from 'node:os'
@@ -12,10 +12,13 @@ let page: Page
 let userDataDirectory: string
 let invalidTlsServer: Server
 let invalidTlsUrl: string
+const cspProbePath = join(process.cwd(), 'dist', 'csp-eval-probe.js')
 
 const execFileAsync = promisify(execFile)
 
 test.beforeAll(async () => {
+  // A local external script executes normally; DevTools evaluations can bypass unsafe-eval.
+  await writeFile(cspProbePath, `try { new Function('return 42')(); window.cspDynamicCode = 'allowed' } catch { window.cspDynamicCode = 'blocked' }`)
   userDataDirectory = await mkdtemp(join(tmpdir(), 'kokomovie-e2e-'))
   const keyPath = join(userDataDirectory, 'invalid-tls-key.pem')
   const certPath = join(userDataDirectory, 'invalid-tls-cert.pem')
@@ -51,6 +54,7 @@ test.afterAll(async () => {
   await application?.close()
   await new Promise<void>((resolve) => invalidTlsServer?.close(() => resolve()))
   if (userDataDirectory) await rm(userDataDirectory, { recursive: true, force: true })
+  await rm(cspProbePath, { force: true })
 })
 
 test('launches the real isolated renderer on Electron 43.4.1', async () => {
@@ -79,6 +83,34 @@ test('rejects malformed IPC and persists a valid preference', async () => {
 
   await page.evaluate(() => window.electronAPI.prefsSet({ autoplay: false }))
   expect(await page.evaluate(async () => (await window.electronAPI.prefsGet()).autoplay)).toBe(0)
+})
+
+test('enforces production script policy while allowing the media worker', async () => {
+  const result = await page.evaluate(async () => {
+    const probe = window as unknown as { cspInlineProbe?: number }
+    probe.cspInlineProbe = 0
+    const script = document.createElement('script')
+    script.textContent = 'window.cspInlineProbe = 1'
+    document.head.append(script)
+    script.remove()
+    const dynamicCode = await new Promise<string>((resolve) => {
+      const external = document.createElement('script')
+      external.src = new URL('./csp-eval-probe.js', window.location.href).toString()
+      external.onload = () => { external.remove(); resolve((window as unknown as { cspDynamicCode: string }).cspDynamicCode) }
+      external.onerror = () => { external.remove(); resolve('load-error') }
+      document.head.append(external)
+    })
+    const workerUrl = URL.createObjectURL(new Blob(['postMessage("worker-ready")'], { type: 'text/javascript' }))
+    const workerResult = await new Promise<string>((resolve) => {
+      const worker = new Worker(workerUrl)
+      const finish = (value: string) => { clearTimeout(timer); worker.terminate(); URL.revokeObjectURL(workerUrl); resolve(value) }
+      const timer = setTimeout(() => finish('timeout'), 3000)
+      worker.onmessage = (event) => finish(String(event.data))
+      worker.onerror = () => finish('error')
+    })
+    return { inline: probe.cspInlineProbe, dynamicCode, workerResult }
+  })
+  expect(result).toEqual({ inline: 0, dynamicCode: 'blocked', workerResult: 'worker-ready' })
 })
 
 test('requires the per-session capability on the loopback media service', async () => {

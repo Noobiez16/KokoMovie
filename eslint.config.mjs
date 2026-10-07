@@ -9,6 +9,7 @@ export default [
       '**/dist/**',
       '**/dist-electron/**',
       '**/release/**',
+      '**/.codex/**',
       'client/src/renderer/vite-env.d.ts',
     ],
   },

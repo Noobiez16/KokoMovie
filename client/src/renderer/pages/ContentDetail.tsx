@@ -12,6 +12,7 @@ import { providersApi, torrentApi } from '../api/providers'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { WhereToWatch } from '../components/catalog/WhereToWatch'
 import type { ContentSummary } from '../api/catalog'
 import { sanitizeMediaUrl } from '../lib/media-url'
 import { downloadErrorTranslationKey } from '../lib/download-error-policy'
@@ -911,6 +912,7 @@ export function ContentDetailPage() {
           {content.description && (
             <p className="text-white/75 text-base leading-relaxed max-w-3xl mb-10">{content.description}</p>
           )}
+          <WhereToWatch contentId={content.id} />
 
           {content.cast.length > 0 && (
             <div className="mb-8">

@@ -143,6 +143,7 @@ describe('main-process security boundaries', () => {
 
 describe('torrent streaming boundaries', () => {
   const torrent = readFileSync(resolve(process.cwd(), 'src/main/ipc/torrent.ts'), 'utf8')
+  const probe = readFileSync(resolve(process.cwd(), 'src/main/providers/torrent-cache-lifecycle.ts'), 'utf8')
 
   it('keeps media probes bodyless and stream cleanup response-scoped', () => {
     expect(torrent).toContain("req.method === 'HEAD'")
@@ -180,15 +181,16 @@ describe('torrent streaming boundaries', () => {
   it('verifies the advertised dub against the file real audio streams', () => {
     expect(torrent).toContain('function probeAudioTracks(')
     // Only audio counts — a Spanish SUBTITLE track must never be read as a Spanish dub.
-    expect(torrent).toContain(': Audio:')
+    expect(torrent).toContain('return probeTorrentAudio(')
+    expect(probe).toContain(': Audio:')
     expect(torrent).toContain('probedTracks.find((track) => track.lang === requestedLang)')
     expect(torrent).toContain("if (audioStreamIndex !== null) return ['-map', '0:v:0?', '-map', `0:${audioStreamIndex}`]")
     expect(torrent).toContain('return { url, transcoded, audioLang: effectiveLang, requestedLang, audioLangs: probedLangs }')
   })
 
   it('does not claim a dub when the real audio tracks cannot verify it', () => {
-    expect(torrent).toContain('const timer = setTimeout(() => finish([]), timeoutMs)')
-    expect(torrent).toContain("ff.on('error', () => finish([]))")
+    expect(probe).toContain('const timer = setTimeout(() => finish([]), timeoutMs)')
+    expect(probe).toContain("child.on('error', () => finish([]))")
     expect(torrent).toContain("throw new Error('Release does not contain verified '")
   })
 

@@ -18,7 +18,7 @@ offline matches to page 1. Catalog failures expose actual query retries.
 
 The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
 base palette values are unchanged. Locale persistence accepts both canonical and legacy
-codes. Six real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+codes. Eight real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
 search/navigation and privileged boundaries. See [testing](testing.md) for limits.
 
 The next core block repaired source/downloader contracts and callback redirects. Torrent
@@ -27,9 +27,38 @@ hostnames were exercised through a real local HTTP server. Production audit now 
 js-yaml 4.3.2 and ip-address 10.7.3 yielded a fresh report with zero findings. Weekly trending
 collections preserve scope and pagination instead of treating trending as an unknown genre.
 
-Remaining audit blocks: finalization/cancellation/collision/retention/P2P cleanup;
-distribution verification and discovery. Live peer playback and packaged upgrades remain
-unverified by the deterministic source tests.
+## Verified storage, security and first discovery addition
+
+Per-download jobs serialize pause/resume, settle requests and FFmpeg children, and check
+cancellation after asynchronous finalization/artwork. Portable publication and sidecars use
+exclusive creation; rollback tracks owned files. Expiration claims only live unfinished
+rows, preventing a stale cleanup snapshot from removing a newly completed download.
+Completed files remain until explicit removal; unfinished work has the visible 30-day policy.
+
+Torrent caches are allocated per torrent, registered by the main process and removed only
+after consumers and filesystem stores close. Audio probes preserve successful EOF and are
+retained until FFmpeg closes. Application quit awaits both download and P2P teardown.
+
+Production renderer scripts prohibit inline code and evaluation, with build-time file CSP
+and blob media-worker support. Trusted-frame headers do not replace third-party policies.
+Existing frame/media/network permissions remain broad for compatibility; this is targeted
+script hardening, not a complete removal of third-party media risk.
+
+Where to watch is separate from playback source selection. Users explicitly select and
+locally remember a country. TMDB/JustWatch information is grouped by subscription, free,
+ads, rental and purchase, with validated landing links, attribution and cache notices.
+The country preference is stored locally; existing SQLite library export does not include it.
+
+Final checks passed: 471 deterministic tests, eight Electron tests, TypeScript, lint, build,
+licenses and a zero-finding production audit. The native download test used a generated
+H.264/AAC fixture and real FFmpeg; movie/episode outputs had different names and offline
+video decoding, seek and play worked with HTTP blocked.
+
+A Windows x64 unpacked package was prepared and inspected, including native resources,
+version, fuses, file CSP and bundled FFmpeg. It is unsigned, unpublished and not installed.
+Authenticode needs a signing identity; installed upgrades, Linux/macOS packaging and live
+peer/provider endurance were not repeated here. Title alerts, personal collections,
+history-based recommendations and a marathon planner remain future roadmap items.
 
 ## Historical architecture and phase notes
 

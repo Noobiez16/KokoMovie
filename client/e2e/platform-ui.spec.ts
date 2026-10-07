@@ -29,6 +29,17 @@ test.beforeAll(async () => {
       const items = Array.from({ length: 8 }, (_, i) => ({ id: number * 100 + i, title: `Fixture Movie ${number}-${i + 1}`, overview: 'A deterministic catalog fixture for desktop layout verification.', poster_path: '/fixture.jpg', backdrop_path: '/fixture.jpg', release_date: '2026-01-01', vote_average: 8.1, media_type: 'movie', original_language: 'en', runtime: 110 }))
       let result: unknown = { results: items, total_pages: 3, total_results: 24 }
       if (/\/movie\/\d+$/.test(input.path)) result = { ...items[0], genres: [], credits: { cast: [] }, external_ids: { imdb_id: null }, release_dates: { results: [] }, videos: { results: [] } }
+      if (input.path === '/configuration/countries') result = [
+        { iso_3166_1: 'BO', english_name: 'Bolivia', native_name: 'Bolivia' },
+        { iso_3166_1: 'FR', english_name: 'France', native_name: 'France' },
+      ]
+      if (/\/movie\/\d+\/watch\/providers$/.test(input.path)) {
+        const id = Number(input.path.split('/')[2])
+        result = { id, results: {
+          BO: { link: `https://www.themoviedb.org/movie/${id}/watch?locale=BO`, flatrate: [{ provider_id: 1, provider_name: 'Fixture Subscription', logo_path: '/fixture.jpg', display_priority: 1 }] },
+          FR: { link: `https://www.themoviedb.org/movie/${id}/watch?locale=FR`, rent: [{ provider_id: 2, provider_name: 'Fixture Rental', logo_path: '/fixture.jpg', display_priority: 1 }] },
+        } }
+      }
       if (input.path.endsWith('/release_dates') || input.path.endsWith('/content_ratings')) result = { results: [] }
       return { body: JSON.stringify(result), source: 'network', stale: false }
     })
@@ -61,6 +72,19 @@ test('desktop navigation, URL search state, library and translated settings', as
   await page.getByRole('button', { name: 'More Info', exact: true }).click()
   await expect(page).toHaveURL(/content\//)
   await expect(page.getByRole('heading', { name: 'Fixture Movie 1-1', exact: true })).toBeVisible()
+  const country = page.getByRole('combobox', { name: 'Country', exact: true })
+  await expect(country).toHaveValue('')
+  await expect(country.getByRole('option', { name: 'Bolivia', exact: true })).toBeAttached()
+  await country.selectOption('BO')
+  await expect(page.getByRole('group', { name: 'Subscription', exact: true })).toContainText('Fixture Subscription')
+  await expect(page.getByText('JustWatch', { exact: false }).first()).toBeVisible()
+  await country.selectOption('FR')
+  await expect(page.getByRole('group', { name: 'Rent', exact: true })).toContainText('Fixture Rental')
+  await expect(page.getByText('Fixture Subscription', { exact: true })).toHaveCount(0)
+  await country.selectOption('BO')
+  await page.reload()
+  await expect(country).toHaveValue('BO')
+  await expect(page.getByText('Fixture Subscription', { exact: true })).toBeVisible()
   await screenshot('detail')
   await screenshot('detail', 1024, 768)
   await nav.getByRole('link', { name: 'Home', exact: true }).click()

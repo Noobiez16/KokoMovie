@@ -24,9 +24,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / divisor).toFixed(2)} ${unit}`
 }
 
-function daysUntil(iso: string): number {
-  return Math.ceil((new Date(iso).getTime() - Date.now()) / (86400 * 1000))
-}
+
 
 export function DownloadsPage() {
   const { t } = useTranslation()
@@ -108,6 +106,7 @@ export function DownloadsPage() {
           </div>
         )}
 
+        <p className="text-xs text-white/50 mb-4">{t('downloads.retentionPolicy')}</p>
         {loadError && <p role="alert" className="py-6 text-red-300">{t('ui.downloadsLoadError')}</p>}
         {!loading && !loadError && items.length === 0 && (
           <EmptyState title={t('downloads.empty')} description={t('downloads.emptyDescription')} action={<button className="km-button-secondary" onClick={() => navigate('/browse')}>{t('ui.exploreLibrary')}</button>} />
@@ -185,7 +184,6 @@ function DownloadCard({
   onOpenFolder?: () => void
 }) {
   const { t } = useTranslation()
-  const days = daysUntil(item.expires_at)
 
   return (
     <div className="bg-km-surface border border-white/10 rounded-2xl overflow-hidden shadow-lg transition-all duration-300  hover:bg-white/[0.08] hover:shadow-violet-500/5 group flex flex-col justify-between">
@@ -224,8 +222,8 @@ function DownloadCard({
 
           {item.status === 'completed' && <p className="text-xs text-white/60 mb-2 tabular-nums">{formatBytes(item.total_bytes || item.downloaded_bytes)}</p>}
 
-          {item.status === 'completed' && days > 0 && (
-            <p className="text-xs text-white/30 mb-2">{t('downloads.expiresIn', { count: days })}</p>
+          {item.status === 'completed' && (
+            <p className="text-xs text-white/30 mb-2">{t('downloads.retained')}</p>
           )}
         </div>
       </div>

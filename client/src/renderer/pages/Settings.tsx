@@ -773,7 +773,7 @@ export function SettingsPage() {
                       </button>
                     </div>
                     <p className="text-white/30 text-[11px] leading-relaxed">
-                      {t('settings.downloadFolderDescription')}
+                      {t('settings.downloadFolderDescription')} {' '}{t('downloads.retentionPolicy')}
                     </p>
                   </div>
                 </SectionCard>
