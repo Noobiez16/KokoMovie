@@ -10,7 +10,7 @@
 }
 @layer components {
   .km-shell { position: relative; height: 100vh; overflow: hidden; background: var(--km-bg); color: var(--km-text); }
-  .km-topbar { position: absolute; inset: 0 0 auto; z-index: 40; height: 76px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding-inline: var(--km-catalog-gutter); background: rgb(var(--km-bg-rgb) / .94); border-bottom: 1px solid rgb(var(--km-border-rgb) / .35); }
+  .km-topbar { position: absolute; inset: 0 0 auto; z-index: 40; height: 76px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding-inline: var(--km-catalog-gutter); background: rgb(var(--km-bg-rgb) / .94); border-bottom: 0; }
   .km-topbar[data-transparent='true'] { background: linear-gradient(rgb(var(--km-bg-rgb) / .8), rgb(var(--km-bg-rgb) / .04)); border-color: transparent; }
   .km-primary-nav { display: flex; align-items: center; gap: 4px; }
   .km-primary-link { padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; color: rgb(243 232 255 / .75); }

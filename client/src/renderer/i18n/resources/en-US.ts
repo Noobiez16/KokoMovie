@@ -11,6 +11,9 @@ const enUS = {
     groups: { flatrate: 'Subscription', free: 'Free', ads: 'With ads', rent: 'Rent', buy: 'Buy' },
   },
   ui: {
+    myLibrary: 'My Library',
+    myLibraryDescription: 'Your saved titles and viewing history, on this device.',
+    searchSuggestions: 'Suggested titles',
     desktopRequiredTitle: 'Open KokoMovie in the desktop app',
     desktopRequiredDescription: 'This address serves the development interface. Playback, your local library and settings require the desktop app connection, which is unavailable in this browser.',
     desktopRequiredDevHint: 'If you started {{command}}, use the KokoMovie window that opened.',

@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi, type ContentSummary } from '../api/catalog'
-import { userApi } from '../api/user'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { HeroBanner } from '../components/catalog/HeroBanner'
@@ -64,16 +63,9 @@ export function BrowsePage() {
     enabled: isCategory,
   })
 
-  const { data: cwData } = useQuery({
+  const { data: cwData, isLoading: isCwLoading } = useQuery({
     queryKey: ['continue-watching', profileId, tmdbApiKey],
     queryFn: () => playbackApi.getContinueWatching(profileId),
-    refetchOnWindowFocus: 'always',
-    enabled: !isCategory,
-  })
-
-  const { data: watchlistData, isLoading: isWatchlistLoading } = useQuery({
-    queryKey: ['watchlist', profileId],
-    queryFn: () => userApi.getWatchlist(profileId),
     refetchOnWindowFocus: 'always',
     enabled: !isCategory,
   })
@@ -173,7 +165,7 @@ export function BrowsePage() {
     )
   }
 
-  if (isError && !cwData?.data?.length && !watchlistData?.data?.length && !isWatchlistLoading) {
+  if (isError && !cwData?.data?.length && !isCwLoading) {
     return (
       <AppLayout>
         <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />
@@ -204,15 +196,7 @@ export function BrowsePage() {
     episodeId: item.episodeId,
   })) as unknown as ContentSummary[]
 
-  const savedItems: ContentSummary[] = (watchlistData?.data ?? []).map(item => ({
-    id: item.contentId, title: item.title ?? item.contentId,
-    type: item.contentType === 'series' || item.contentType === 'tv' ? 'series' : 'movie',
-    releaseYear: item.releaseYear ?? null, s3Thumbnail: item.s3Thumbnail ?? null,
-    backdropUrl: item.backdropUrl ?? null, rating: null, imdbScore: null,
-    durationMins: null, imdbId: null, tmdbId: null, planMinimum: 'basic',
-  }))
-
-  const hasContent = savedItems.length > 0 || mappedCw.length > 0 || featured || trending.length > 0 || (homeData?.rows?.length ?? 0) > 0
+  const hasContent = mappedCw.length > 0 || featured || trending.length > 0 || (homeData?.rows?.length ?? 0) > 0
 
   if (!hasContent) {
     return (
@@ -237,8 +221,6 @@ export function BrowsePage() {
             onRemove={handleRemoveFromHistory}
           />
         )}
-
-        {savedItems.length > 0 && <ContentRow title={t('history.myList')} items={savedItems} onViewAll={() => navigate('/history?tab=list')} />}
 
         {isError && <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />}
 

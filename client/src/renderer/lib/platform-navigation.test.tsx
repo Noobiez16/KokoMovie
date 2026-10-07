@@ -3,17 +3,20 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Link, MemoryRouter, useLocation } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from '../components/layout/AppLayout'
 import { GlobalSearch } from '../components/layout/GlobalSearch'
 import { LibraryMenu } from '../components/layout/LibraryMenu'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('../api/user', () => ({ userApi: { getPreferences: vi.fn().mockResolvedValue({ success: true, data: { maturityRating: 'TV-MA' } }) } }))
+vi.mock('../api/catalog', () => ({ catalogApi: { search: vi.fn() } }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals() })
 function Contents() {
   const location = useLocation()
   return <><output data-testid="location">{location.pathname + location.search}</output>{location.pathname === '/search' && <GlobalSearch />}<button>Outside</button></>
 }
 function setup(path = '/browse', state?: unknown) {
-  return render(<MemoryRouter initialEntries={[{ pathname: path.split('?')[0], search: path.includes('?') ? '?' + path.split('?')[1] : '', state }]}><AppLayout><Contents /></AppLayout></MemoryRouter>)
+  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter initialEntries={[{ pathname: path.split('?')[0], search: path.includes('?') ? '?' + path.split('?')[1] : '', state }]}><AppLayout><Contents /></AppLayout></MemoryRouter></QueryClientProvider>)
 }
 describe('platform navigation', () => {
   it('cancels the closing timer when reopened before 160ms', () => {
@@ -34,7 +37,7 @@ describe('platform navigation', () => {
     expect(cancelled).toHaveBeenCalledWith(closeTimer)
     act(() => vi.advanceTimersByTime(160))
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByRole('link', { name: 'history.myList' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'ui.myLibrary' })).toBeTruthy()
     expect(container.querySelector('.km-menu-panel')?.getAttribute('data-closing')).toBe('false')
   })
   it('clears the closing panel and timer immediately on navigation', () => {
@@ -74,16 +77,16 @@ describe('platform navigation', () => {
     fireEvent.click(toggle)
     act(() => vi.advanceTimersByTime(160))
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByRole('link', { name: 'history.myList' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'ui.myLibrary' })).toBeTruthy()
   })
-  it('reveals all existing local destinations and distinguishes list from history', async () => {
+  it('reveals one library destination for both list and history deep links', async () => {
     const user = userEvent.setup(); setup('/history?tab=list')
     await user.click(screen.getByRole('button', { name: 'ui.libraryMenu' }))
-    for (const [label, href] of [['history.myList', '/history?tab=list'], ['catalog.continueWatching', '/continue-watching'], ['nav.history', '/history'], ['nav.downloads', '/downloads'], ['nav.providers', '/providers'], ['nav.settings', '/settings']]) {
+    for (const [label, href] of [['ui.myLibrary', '/history'], ['catalog.continueWatching', '/continue-watching'], ['nav.downloads', '/downloads'], ['nav.providers', '/providers'], ['nav.settings', '/settings']]) {
       expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe(href)
     }
-    expect(screen.getByRole('link', { name: 'history.myList' }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByRole('link', { name: 'nav.history' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('link', { name: 'ui.myLibrary' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.queryByRole('link', { name: 'nav.history' })).toBeNull()
   })
   it('returns focus after Escape closes the disclosure', async () => {
     const user = userEvent.setup(); setup()
@@ -91,7 +94,7 @@ describe('platform navigation', () => {
     await user.click(toggle); await user.tab(); await user.keyboard('{Escape}')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(toggle)
-    expect(screen.queryByRole('link', { name: 'history.myList' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'ui.myLibrary' })).toBeNull()
   })
   it('closes on outside interaction and navigation', async () => {
     const user = userEvent.setup(); setup()
@@ -123,20 +126,21 @@ describe('platform navigation', () => {
       }
     }
   })
-  it('keeps search out of the shell and exposes a search link', async () => {
+  it('opens inline search from the shell button without changing the route', async () => {
     const user = userEvent.setup(); setup()
     expect(screen.queryByRole('searchbox')).toBeNull()
-    await user.click(screen.getByRole('link', { name: 'nav.search' }))
-    expect(screen.getAllByRole('searchbox')).toHaveLength(1)
-    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+    await user.click(screen.getByRole('button', { name: 'nav.search' }))
+    expect(screen.getAllByRole('combobox')).toHaveLength(1)
+    expect(screen.getByTestId('location').textContent).toBe('/browse')
+    expect(document.activeElement).toBe(screen.getByRole('combobox'))
   })
-  it.each(['{Control>}k{/Control}', '{Meta>}k{/Meta}'])('navigates and focuses Search with %s', async (keys) => {
+  it.each(['{Control>}k{/Control}', '{Meta>}k{/Meta}'])('opens and focuses inline Search with %s', async (keys) => {
     const user = userEvent.setup(); setup()
     await user.keyboard(keys)
-    expect(screen.getByTestId('location').textContent).toBe('/search')
-    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+    expect(screen.getByTestId('location').textContent).toBe('/browse')
+    expect(document.activeElement).toBe(screen.getByRole('combobox'))
     await user.click(screen.getByText('Outside')); await user.keyboard(keys)
-    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+    expect(document.activeElement).toBe(screen.getByRole('combobox'))
   })
   it('encodes search text and preserves selected type while resetting page', async () => {
     const user = userEvent.setup(); setup('/search?q=Alien&type=movie&page=2')

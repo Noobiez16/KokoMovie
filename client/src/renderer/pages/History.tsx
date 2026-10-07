@@ -97,7 +97,7 @@ export function HistoryPage() {
   return (
     <AppLayout>
       <div className="km-page">
-        <PageHeader title={t(activeTab === 'list' ? 'history.myList' : 'history.title')} description={t(activeTab === 'list' ? 'ui.myListDescription' : 'ui.historyDescription')} />
+        <PageHeader title={t('ui.myLibrary')} description={t('ui.myLibraryDescription')} />
 
         {/* Glassmorphic Tabs — Viewing History (unified) vs the saved Watchlist */}
         <div className="flex gap-2 mb-6">
