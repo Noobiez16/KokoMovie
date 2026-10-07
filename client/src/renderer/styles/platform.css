@@ -42,6 +42,7 @@
 @keyframes km-content-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes km-menu-enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes km-menu-leave { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-8px); } }
+@layer components {
 @media (max-width: 1100px) {
   .km-topbar { grid-template-columns: 1fr auto 1fr; }
   .km-primary-nav { display: none; }
@@ -52,6 +53,7 @@
 @media (max-width: 480px) {
   .km-brand span { display: none; }
   .km-topbar { padding-inline: 16px; }
+}
 }
 @media (prefers-reduced-motion: reduce) {
   .km-route-content, .km-menu-panel { animation: none !important; }
@@ -71,7 +73,8 @@
   .km-hero-title { font-size: clamp(32px, 4.4vw, 64px); max-width: 650px; }
   .km-hero-copy > p { font-size: 15px; }
   .km-hero-copy button { transition: transform var(--km-motion-press) var(--km-motion-ease), background-color var(--km-motion-hover) ease-out; }
-  .km-genre-navigation { display: flex; gap: 24px; overflow-x: auto; align-items: center; min-height: 72px; scrollbar-width: thin; margin-block: 8px 24px; }
+  .km-genre-navigation { display: flex; gap: 24px; overflow-x: auto; align-items: center; min-height: 72px; scrollbar-width: none; margin-block: 8px 24px; }
+  .km-genre-navigation::-webkit-scrollbar { display: none; }
   .km-genre-link { white-space: nowrap; padding: 14px 0; border-bottom: 2px solid transparent; font-size: 14px; color: var(--km-text-muted); }
   .km-genre-link[aria-current='page'] { border-color: var(--km-accent); color: var(--km-text); }
   .km-genre-link:hover { color: var(--km-text); }
@@ -89,10 +92,12 @@
   .km-content-card--landscape.km-content-card--lg { width: 340px; }
   .km-content-card--landscape .km-card-artwork { aspect-ratio: 16 / 9; }
 }
+@layer components {
 @media (max-width: 640px) {
   .km-hero { height: 60vh; min-height: 440px; }
   .km-hero-copy { padding-bottom: 28px; }
   .km-hero-copy > p { max-width: 90%; font-size: 14px; }
+}
 }
 @media (prefers-reduced-motion: reduce) {
   .km-shell *, .km-shell *::before, .km-shell *::after { animation: none !important; transition-duration: 0s !important; }
