@@ -37,7 +37,9 @@
 - [x] Update native expectations for consolidated menu and removed Home watchlist; preserve SQLite library/history workflows.
 - [x] Test real Electron inline search route stability, actual suggestions/details, keyboard/closing, normal/reduced animation, clean header and width geometry; capture screenshots.
 - [x] Run full unit suite, renderer/main TypeScript, lint, build and native suite once on final implementation; investigate failures before changing code.
-- [ ] Review task diff using a fresh reviewer, fix Important/Critical issues, then broad final branch review.
+- [x] Review task diff using a fresh reviewer, fix Important/Critical issues, then broad final branch review.
 - [x] Update v2.0.0 documents with verified results and regenerate/check local Windows package. Original installed shortcut is not replaced.
-- [ ] Commit scoped files, preserve unrelated workflow modification and recovery branches; finish on local branch.
+- [x] Commit scoped files, preserve unrelated workflow modification and recovery branches; finish on local branch.
+
+Final verification: 531 units, 14 native tests, both TypeScript targets, full lint zero errors/warnings and build passed. Task and whole-change reviews approved with no Critical/Important findings. Local Windows package verified; all 28 renderer assets match the tested build. Existing infrastructure warnings remain recorded separately. Work stays on the local branch; no install, publish, merge or push.
 
