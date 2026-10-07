@@ -40,14 +40,20 @@ for (const height of [720, 1080]) {
         return withLocalMediaCapability(`http://localhost:${port}/t/fullscreen-file.mp4`)
       }, address.port)
       const contentId = '00000001-0000-4000-8000-000000000064'
-      const download = await page.evaluate(({ url, directory, contentId }) => window.electronAPI.downloadContent({ contentId, title: 'Fullscreen Fixture', contentType: 'movie', manifestUrl: url, customDownloadPath: directory }), { url, directory, contentId })
-      await expect.poll(() => page.evaluate(() => window.electronAPI.listDownloads()), { timeout: 15000 }).toEqual(expect.arrayContaining([expect.objectContaining({ id: download.id, status: 'completed' })]))
+      const download = await page.evaluate(({ url, directory, contentId }) => {
+        if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+        return window.electronAPI.downloadContent({ contentId, title: 'Fullscreen Fixture', contentType: 'movie', manifestUrl: url, customDownloadPath: directory })
+      }, { url, directory, contentId })
+      await expect.poll(() => page.evaluate(() => {
+        if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+        return window.electronAPI.listDownloads()
+      }), { timeout: 15000 }).toEqual(expect.arrayContaining([expect.objectContaining({ id: download.id, status: 'completed' })]))
       await new Promise<void>(done => source.close(() => done()))
       await page.goto(page.url().split('#')[0] + `#/player/${contentId}?offline=${download.id}`)
       const video = page.locator('video')
       await expect(video).toHaveCount(1)
-      await expect.poll(() => video.evaluate(element => ({ width: element.videoWidth, height: element.videoHeight }))).toEqual({ width, height })
-      await video.evaluate(element => {
+      await expect.poll(() => video.evaluate((element: HTMLVideoElement) => ({ width: element.videoWidth, height: element.videoHeight }))).toEqual({ width, height })
+      await video.evaluate((element: HTMLVideoElement) => {
         element.pause()
         element.currentTime = 2
         Object.assign(window, { fullscreenFixtureVideo: element, fullscreenFixtureSrc: element.currentSrc, fullscreenFixtureReloads: 0 })
@@ -60,21 +66,21 @@ for (const height of [720, 1080]) {
       await expect(page.getByRole('button', { name: new RegExp(`^${height === 720 ? 1080 : 720}p`) })).toBeDisabled()
       await page.mouse.click(200, 200)
       await expect(page.getByRole('button', { name: new RegExp(`^${height}p`) })).toHaveCount(0)
-      await video.evaluate(element => { element.muted = true; return element.play() })
+      await video.evaluate((element: HTMLVideoElement) => { element.muted = true; return element.play() })
       await page.getByTitle('Fullscreen', { exact: true }).click()
       await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true)
-      const metrics = await video.evaluate(element => {
+      const metrics = await video.evaluate((element: HTMLVideoElement) => {
         const fixture = window as unknown as { fullscreenFixtureVideo: HTMLVideoElement; fullscreenFixtureSrc: string; fullscreenFixtureReloads: number }
         return { sameVideo: element === fixture.fullscreenFixtureVideo, sameSource: element.currentSrc === fixture.fullscreenFixtureSrc, reloads: fixture.fullscreenFixtureReloads, width: element.videoWidth, height: element.videoHeight, position: element.currentTime, fit: getComputedStyle(element).objectFit }
       })
       expect(metrics).toMatchObject({ sameVideo: true, sameSource: true, reloads: 0, width, height, fit: 'contain' })
-      await expect.poll(() => video.evaluate(element => element.currentTime)).toBeGreaterThan(metrics.position)
+      await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(metrics.position)
       await page.evaluate(() => document.exitFullscreen())
       await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false)
       await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setFullScreen(true))
       await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isFullScreen())).toBe(true)
-      await expect.poll(() => video.evaluate(element => ({ width: element.videoWidth, height: element.videoHeight }))).toEqual({ width, height })
-      expect(await video.evaluate(element => element === (window as unknown as { fullscreenFixtureVideo: HTMLVideoElement }).fullscreenFixtureVideo)).toBe(true)
+      await expect.poll(() => video.evaluate((element: HTMLVideoElement) => ({ width: element.videoWidth, height: element.videoHeight }))).toEqual({ width, height })
+      expect(await video.evaluate((element: HTMLVideoElement) => element === (window as unknown as { fullscreenFixtureVideo: HTMLVideoElement }).fullscreenFixtureVideo)).toBe(true)
       expect(await page.evaluate(() => (window as unknown as { fullscreenFixtureReloads: number }).fullscreenFixtureReloads)).toBe(0)
       await page.mouse.move(300, 300)
       await page.getByRole('button', { name: 'Playback settings', exact: true }).click()

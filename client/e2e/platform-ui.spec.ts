@@ -126,7 +126,10 @@ test('desktop navigation, URL search state, library and translated settings', as
   await expect(page.getByRole('button', { name: 'Library and tools', exact: true })).toBeFocused()
   await screenshot('library')
   await screenshot('library', 1024, 768)
-  await page.evaluate(() => window.electronAPI.watchlistAdd('00000001-0000-4000-8000-000000000064', 'movie'))
+  await page.evaluate(() => {
+    if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+    return window.electronAPI.watchlistAdd('00000001-0000-4000-8000-000000000064', 'movie')
+  })
   await page.reload()
   await expect(page.getByText('Fixture Movie 1-1').first()).toBeVisible()
   await screenshot('library-saved')
@@ -136,7 +139,10 @@ test('desktop navigation, URL search state, library and translated settings', as
   await expect(page.getByText('Nothing to resume yet')).toBeVisible()
   await screenshot('continue')
   await screenshot('continue', 1024, 768)
-  await page.evaluate(() => window.electronAPI.positionSave({ contentId: '00000001-0000-4000-8000-000000000064', contentType: 'movie', positionSeconds: 120, durationSeconds: 600, completed: false }))
+  await page.evaluate(() => {
+    if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+    return window.electronAPI.positionSave({ contentId: '00000001-0000-4000-8000-000000000064', contentType: 'movie', positionSeconds: 120, durationSeconds: 600, completed: false })
+  })
   await page.reload()
   await expect(page.getByText('Fixture Movie 1-1').first()).toBeVisible()
   await screenshot('continue-saved')
@@ -308,6 +314,7 @@ test('desktop motion preserves focus and honors reduced movement', async () => {
 
 test('catalog without a featured hero keeps local records and genres below the topbar', async () => {
   await page.evaluate(async () => {
+    if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
     await window.electronAPI.watchlistAdd('00000001-0000-4000-8000-000000000064', 'movie')
     await window.electronAPI.positionSave({ contentId: '00000001-0000-4000-8000-000000000064', contentType: 'movie', positionSeconds: 120, durationSeconds: 600, completed: false })
   })

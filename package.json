@@ -25,7 +25,7 @@
     "dist:linux": "npm run dist:linux --workspace=client",
     "dist:win": "npm run dist:win --workspace=client",
     "dist:mac": "npm run dist:mac --workspace=client",
-    "typecheck": "tsc -p client/tsconfig.json --noEmit && npm run build:main --workspace=client",
+    "typecheck": "tsc -p client/tsconfig.json --noEmit && tsc -p client/tsconfig.e2e.json --noEmit && npm run build:main --workspace=client",
     "audit:production": "node scripts/audit-production.mjs",
     "check:licenses": "node scripts/check-licenses.mjs",
     "vendor:ffmpeg": "npm run vendor:ffmpeg --workspace=client"

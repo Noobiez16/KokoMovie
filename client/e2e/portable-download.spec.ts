@@ -33,12 +33,29 @@ test('downloads an equal-title movie and episode through real FFmpeg and plays o
       bindTorrentDownloadSource(port, (token: string) => token === 'selected-file')
       return withLocalMediaCapability(`http://localhost:${port}/t/selected-file.mp4`)
     }, address.port)
-    const started = await page.evaluate(async ({ url, directory }) => Promise.all([1, 2].map(index => window.electronAPI.downloadContent({
-      contentId: 'portable-fixture-' + index, title: 'Equal Title', contentType: index === 1 ? 'movie' : 'series', episodeId: index === 2 ? 'ep-11-1-2' : undefined, manifestUrl: url, customDownloadPath: directory,
-    }))), { url, directory })
-    await expect.poll(() => page.evaluate(() => window.electronAPI.listDownloads()), { timeout: 15000 }).toEqual(expect.arrayContaining(started.map(({ id }) => expect.objectContaining({ id, status: 'completed', progress_percent: 100 }))))
-    const rows = await page.evaluate(() => window.electronAPI.listDownloads())
-    const paths = rows.map(row => row.manifest_path!)
+    const started = await page.evaluate(async ({ url, directory }) => {
+      const api = window.electronAPI
+      if (!api) throw new Error('Desktop preload bridge is required')
+      return Promise.all([1, 2].map(index => api.downloadContent({
+        contentId: 'portable-fixture-' + index, title: 'Equal Title', contentType: index === 1 ? 'movie' : 'series', episodeId: index === 2 ? 'ep-11-1-2' : undefined, manifestUrl: url, customDownloadPath: directory,
+      })))
+    }, { url, directory })
+    await expect.poll(() => page.evaluate(() => {
+      if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+      return window.electronAPI.listDownloads()
+    }), { timeout: 15000 }).toEqual(expect.arrayContaining(started.map(({ id }) => expect.objectContaining({ id, status: 'completed', progress_percent: 100 }))))
+    const rows = await page.evaluate(async () => {
+      if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+      return (await window.electronAPI.listDownloads()).map(row => {
+        if (!row || typeof row !== 'object' || !('id' in row) || typeof row.id !== 'string'
+          || !('manifest_path' in row) || typeof row.manifest_path !== 'string'
+          || !('episode_id' in row) || (row.episode_id !== null && typeof row.episode_id !== 'string')) {
+          throw new Error('Invalid completed download row')
+        }
+        return { id: row.id, manifest_path: row.manifest_path, episode_id: row.episode_id }
+      })
+    })
+    const paths = rows.map(row => row.manifest_path)
     expect(new Set(paths).size).toBe(2)
     for (const path of paths) {
       expect((await readFile(path)).subarray(4, 8).toString()).toBe('ftyp')
@@ -50,6 +67,7 @@ test('downloads an equal-title movie and episode through real FFmpeg and plays o
     // Removing the origin and blocking HTTP proves the saved movie supplies the video bytes.
     await application.evaluate(({ session }) => session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://*/*', 'http://*/*'] }, (_details, callback) => callback({ cancel: true })))
     const result = await page.evaluate(async id => {
+      if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
       const manifest = await window.electronAPI.getOfflineManifest(id)
       const url = manifest!.manifestContent.slice('direct:'.length)
       const range = await fetch(url, { headers: { Range: 'bytes=0-63' } })
@@ -71,7 +89,10 @@ test('downloads an equal-title movie and episode through real FFmpeg and plays o
     expect(result).toMatchObject({ status: 206, length: 64, playing: true })
     expect(result.duration).toBeGreaterThan(2.5)
     expect(result.position).toBeGreaterThanOrEqual(1.5)
-    await page.evaluate(async ids => { for (const id of ids) await window.electronAPI.deleteDownload(id) }, started.map(item => item.id))
+    await page.evaluate(async ids => {
+      if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+      for (const id of ids) await window.electronAPI.deleteDownload(id)
+    }, started.map(item => item.id))
     for (const path of paths) expect(await readdir(directory)).not.toContain(path.split(/[\\/]/).at(-1))
   } finally {
     await application.close()
