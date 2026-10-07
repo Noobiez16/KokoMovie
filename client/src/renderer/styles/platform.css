@@ -103,3 +103,46 @@
   .km-shell *, .km-shell *::before, .km-shell *::after { animation: none !important; transition-duration: 0s !important; }
   .km-content-card:hover, .km-content-card:focus-within { transform: none !important; }
 }
+/* Selected content and real, on-demand season episodes. */
+@layer components {
+  .km-detail-hero { position: relative; height: auto; min-height: 560px; max-height: none; isolation: isolate; }
+  .km-detail-artwork { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
+  .km-detail-artwork-fallback { background: linear-gradient(120deg, var(--km-bg), var(--km-surface-2)); }
+  .km-detail-shade { position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgb(var(--km-bg-rgb) / .97) 0%, rgb(var(--km-bg-rgb) / .8) 35%, rgb(var(--km-bg-rgb) / .12) 85%), linear-gradient(0deg, var(--km-bg), transparent 55%); }
+  .km-detail-back { position: absolute; z-index: 2; top: 92px; left: var(--km-catalog-gutter); display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: rgb(var(--km-bg-rgb) / .45); color: var(--km-text-muted); font-size: 13px; }
+  .km-detail-back:hover { color: var(--km-text); background: rgb(var(--km-surface-2-rgb) / .65); }
+  .km-detail-copy { position: relative; padding-top: 158px; padding-bottom: 48px; }
+  .km-detail-synopsis { max-width: 590px; color: var(--km-text-muted); line-height: 1.65; margin-bottom: 24px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .km-detail-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+  .km-detail-sections { padding-top: 12px; padding-bottom: 32px; }
+  .km-detail-episodes { margin-bottom: 40px; }
+  .km-season-tabs { display: flex; gap: 28px; overflow-x: auto; scrollbar-width: thin; margin-bottom: 24px; }
+  .km-season-tabs button { flex-shrink: 0; padding: 12px 0; color: var(--km-text-muted); border-bottom: 2px solid transparent; font-size: 15px; }
+  .km-season-tabs button[aria-selected='true'] { color: var(--km-text); border-color: var(--km-accent); }
+  .km-season-tabs button:hover { color: var(--km-text); }
+  .km-season-tabs button:focus-visible, .km-episode-visual:focus-visible, .km-episode-download:focus-visible, .km-detail-back:focus-visible { outline: 2px solid var(--km-accent-hover); outline-offset: 3px; }
+  .km-episode-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px 20px; animation: km-content-enter 200ms var(--km-motion-ease); }
+  .km-episode-card { min-width: 0; }
+  .km-episode-visual { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: rgb(var(--km-surface-2-rgb) / .6); }
+  .km-episode-visual img { width: 100%; height: 100%; object-fit: cover; }
+  .km-episode-placeholder { display: grid; place-items: center; height: 100%; font-size: 32px; color: var(--km-text-muted); opacity: .35; }
+  .km-episode-play { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28px; background: rgb(var(--km-bg-rgb) / .2); color: var(--km-text); opacity: 0; transition: opacity var(--km-motion-hover) ease-out; }
+  .km-episode-visual:hover .km-episode-play, .km-episode-visual:focus-visible .km-episode-play { opacity: 1; }
+  .km-episode-heading { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; }
+  .km-episode-heading h4 { flex: 1; font-weight: 600; font-size: 14px; line-height: 1.5; color: var(--km-text); }
+  .km-episode-download { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; color: var(--km-text-muted); background: rgb(var(--km-surface-2-rgb) / .5); }
+  .km-episode-download:hover { background: rgb(var(--km-accent-rgb) / .2); color: var(--km-text); }
+  .km-episode-download:disabled { opacity: .5; }
+  .km-episode-runtime { color: var(--km-text-muted); font-size: 12px; margin-block: 4px; }
+  .km-episode-description { color: var(--km-text-muted); font-size: 13px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .km-episode-progress { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgb(var(--km-bg-rgb) / .6); }
+  .km-episode-progress > span { display: block; height: 100%; background: var(--km-accent); }
+  .km-episode-loading { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
+  @media (max-width: 1200px) { .km-episode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 1050px) {
+    .km-episode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .km-detail-hero { min-height: 540px; }
+    .km-detail-shade { background: linear-gradient(90deg, rgb(var(--km-bg-rgb) / .95), rgb(var(--km-bg-rgb) / .65) 55%, rgb(var(--km-bg-rgb) / .3)), linear-gradient(0deg, var(--km-bg), transparent); }
+  }
+  @media (max-width: 640px) { .km-detail-copy { padding-top: 150px; padding-bottom: 32px; } .km-season-tabs { gap: 20px; } .km-episode-grid { gap: 24px 16px; } }
+}

@@ -12,9 +12,10 @@ describe('keyboard and menu accessibility boundaries', () => {
     expect(history).toContain("aria-label={item.title || t('history.unknownTitle')}")
   })
 
-  it('exposes episode menu state and menu roles', () => {
+  // Episode controls are covered through the real parent in hbo-series-detail.test.tsx.
+  it('exposes global detail menu state and menu roles', () => {
     expect(detail).toContain('aria-haspopup="menu"')
-    expect(detail).toContain('aria-expanded={activeEpisodeDropdownId === ep.id}')
+    expect(detail).toContain('aria-expanded={showActionsDropdown}')
     expect(detail).toContain('role="menu"')
     expect(detail).toContain('role="menuitem"')
   })

@@ -12,6 +12,8 @@ import { providersApi, torrentApi } from '../api/providers'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { SeasonTabs } from '../components/catalog/SeasonTabs'
+import { EpisodeCard } from '../components/catalog/EpisodeCard'
 import { WhereToWatch } from '../components/catalog/WhereToWatch'
 import type { ContentSummary } from '../api/catalog'
 import { sanitizeMediaUrl } from '../lib/media-url'
@@ -223,7 +225,6 @@ export function ContentDetailPage() {
   const [downloadDone, setDownloadDone] = useState(false)
 
   const [showActionsDropdown, setShowActionsDropdown] = useState(false)
-  const [activeEpisodeDropdownId, setActiveEpisodeDropdownId] = useState<string | null>(null)
   const [episodeDownloadingMap, setEpisodeDownloadingMap] = useState<Record<string, boolean>>({})
   const [episodeDownloadDoneMap, setEpisodeDownloadDoneMap] = useState<Record<string, boolean>>({})
   const [downloadPicker, setDownloadPicker] = useState<{ kind: "movie" | "series" | "episode"; episode?: Episode; seasonNumber?: number } | null>(null)
@@ -751,23 +752,16 @@ export function ContentDetailPage() {
   const thumbnail = content.backdropUrl ?? content.s3Thumbnail
 
   return (
-    <AppLayout>
-      {/* Backdrop */}
-      <div className="relative">
-        {thumbnail ? (
-          <div className="relative h-[38vh] min-h-[240px] max-h-[380px] overflow-hidden">
-            <img src={sanitizeUrl(thumbnail)} alt={content.title} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-km-bg/60 to-km-bg" />
-          </div>
-        ) : (
-          <div className="h-16" />
-        )}
+    <AppLayout transparentNav>
+      <section className="km-hero km-detail-hero">
+        {thumbnail ? <img src={sanitizeUrl(thumbnail)} alt="" className="km-detail-artwork km-hero-artwork" /> : <div className="km-detail-artwork km-detail-artwork-fallback" />}
+        <div className="km-detail-shade" />
 
         {/* Back button — overlays the top-left of the backdrop */}
         <button
           onClick={() => navigate(-1)}
           aria-label={t('common.back')}
-          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-white/90 hover:text-white px-3 py-2 text-sm font-medium backdrop-blur-md transition-colors"
+          className="km-detail-back"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
@@ -775,8 +769,8 @@ export function ContentDetailPage() {
           {t('common.back')}
         </button>
 
-        <div className={thumbnail ? 'px-6 lg:px-10 -mt-20 relative z-10 pb-10' : 'px-6 lg:px-10 pt-8 pb-10'}>
-          <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-4 max-w-3xl">{content.title}</h1>
+        <div className="km-hero-copy km-detail-copy km-catalog-gutter">
+          <h1 className="km-hero-title font-bold tracking-tight text-white mb-4">{content.title}</h1>
 
           <div className="flex flex-wrap items-center gap-3 mb-5 text-sm text-white/75">
             {content.releaseYear && <span>{content.releaseYear}</span>}
@@ -804,14 +798,15 @@ export function ContentDetailPage() {
             </div>
           )}
 
+          {content.description && <p className="km-detail-synopsis">{content.description}</p>}
           {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3 mb-7">
+          <div className="km-detail-actions">
             <button
               onClick={() => handleAutoStream(
                 content.type === 'series' ? sortedEpisodes[0] : undefined,
                 content.type === 'series' ? season?.seasonNumber : undefined,
               )}
-              className="flex items-center gap-2 bg-white text-black font-semibold px-6 py-3 rounded-xl hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
+              className="flex items-center gap-2 bg-white text-black font-semibold px-6 py-3 rounded-full hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
             >
               <span>▶</span> {t('detail.watchNow')}
             </button>
@@ -826,7 +821,7 @@ export function ContentDetailPage() {
                     handleAutoStreamRef.current(undefined, undefined, resumeItem.positionSeconds)
                   }
                 }}
-                className="flex items-center gap-2 bg-km-accent text-white font-semibold px-6 py-3 rounded-xl hover:bg-km-accent-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                className="flex items-center gap-2 bg-km-accent text-white font-semibold px-6 py-3 rounded-full hover:bg-km-accent-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 <span>▶</span>
                 <span>
@@ -842,7 +837,7 @@ export function ContentDetailPage() {
             <button
               onClick={() => inWatchlist ? removeMutation.mutate() : addMutation.mutate()}
               disabled={addMutation.isPending || removeMutation.isPending}
-              className={`flex items-center gap-2 font-semibold px-5 py-3 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent disabled:opacity-50 ${
+              className={`flex items-center gap-2 font-semibold px-5 py-3 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent disabled:opacity-50 ${
                 inWatchlist
                   ? 'bg-white/20 border-white/40 text-white hover:bg-white/30'
                   : 'bg-transparent border-white/40 text-white hover:bg-white/10'
@@ -860,7 +855,7 @@ export function ContentDetailPage() {
                   aria-label={t('detail.options')}
                   aria-haspopup="menu"
                   aria-expanded={showActionsDropdown}
-                  className="flex items-center justify-center w-12 h-12 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
+                  className="flex items-center justify-center w-12 h-12 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent bg-white/[0.03] hover:bg-white/10 border border-white/20 text-white transition-all duration-200 active:scale-95"
                   title={t('detail.options')}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white/70 hover:text-white transition-colors">
@@ -909,9 +904,28 @@ export function ContentDetailPage() {
             )}
           </div>
 
-          {content.description && (
-            <p className="text-white/75 text-base leading-relaxed max-w-3xl mb-10">{content.description}</p>
-          )}
+        </div>
+      </section>
+      <div className="km-detail-sections km-catalog-gutter">
+        {content.type === 'series' && sortedSeasons.length > 0 && (
+          <section className="km-detail-episodes" aria-label={t('detail.episodes')}>
+            <h3 className="text-white font-semibold mb-3">{t('detail.episodes')}</h3>
+            <SeasonTabs seasons={sortedSeasons} selectedIndex={selectedSeason} onSelect={selectedIndex => {
+              setSelectedSeason(selectedIndex)
+              prefetchSeason(selectedIndex - 1)
+              prefetchSeason(selectedIndex + 1)
+            }} />
+            <div key={`${content.id}-${season?.seasonNumber}-${sortedEpisodes.length ? 'ready' : 'loading'}`} id={`season-panel-${content.id}-${season?.id}`} role="tabpanel" aria-label={t('detail.season', { number: season?.seasonNumber })} className="km-episode-grid" data-season-number={season?.seasonNumber} aria-busy={isSeasonLoading && sortedEpisodes.length === 0}>
+              {isSeasonLoading && sortedEpisodes.length === 0 && <div className="km-episode-loading" role="status" aria-label={t('common.loading')}><div className="w-6 h-6 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" /></div>}
+              {sortedEpisodes.map(ep => <EpisodeCard key={ep.id} episode={ep}
+                onPlay={() => handleAutoStream(ep, season?.seasonNumber)}
+                onDownload={() => openDownloadPicker({ kind: 'episode', episode: ep, seasonNumber: season?.seasonNumber })}
+                downloadState={episodeDownloadDoneMap[ep.id] ? 'queued' : episodeDownloadingMap[ep.id] ? 'pending' : 'idle'}
+                progressPercent={resumeItem?.episodeId === ep.id && resumeItem.durationSeconds > 0 ? resumeItem.positionSeconds / resumeItem.durationSeconds * 100 : undefined}
+              />)}
+            </div>
+          </section>
+        )}
           <WhereToWatch contentId={content.id} />
 
           {content.cast.length > 0 && (
@@ -928,129 +942,6 @@ export function ContentDetailPage() {
             </div>
           )}
 
-          {/* Series — seasons & episodes */}
-          {content.type === 'series' && sortedSeasons.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-4 mb-4">
-                <h3 className="text-white font-semibold">{t('detail.episodes')}</h3>
-                {sortedSeasons.length > 1 && (
-                  <select
-                    value={selectedSeason}
-                    onChange={(e) => {
-                      const selectedIndex = Number(e.target.value)
-                      setSelectedSeason(selectedIndex)
-                      prefetchSeason(selectedIndex - 1)
-                      prefetchSeason(selectedIndex + 1)
-                    }}
-                    className="bg-km-surface-2 border border-km-border text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer"
-                  >
-                    {sortedSeasons.map((s, i) => {
-                      const isRedundant = s.title && s.title.toLowerCase().trim() === `season ${s.seasonNumber}`;
-                      const titleSuffix = s.title && !isRedundant ? ` — ${s.title}` : '';
-                      return (
-                        <option key={s.id} value={i} className="bg-[#1b1333] text-white">
-                          {t('detail.season', { number: s.seasonNumber })}{titleSuffix}
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-              </div>
-
-              <div className="space-y-2 max-w-3xl">
-                {isSeasonLoading && sortedEpisodes.length === 0 && (
-                  <div className="flex items-center justify-center py-8" role="status" aria-label={t('common.loading')}>
-                    <div className="w-6 h-6 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
-                  </div>
-                )}
-                {sortedEpisodes.map((ep) => (
-                  <div
-                    key={ep.id}
-                    className="flex items-center gap-4 bg-km-card rounded-lg p-3 hover:bg-white/10 transition-colors group"
-                  >
-                    <button
-                      type="button"
-                      aria-label={ep.title}
-                      onClick={() => handleAutoStream(ep, season?.seasonNumber)}
-                      className="flex items-center gap-4 flex-1 min-w-0 text-left rounded-md cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-                    >
-                    <div className="w-8 text-center text-white/40 text-sm font-medium flex-shrink-0">
-                      {ep.episodeNumber}
-                    </div>
-                    {ep.s3ThumbnailKey ? (
-                      <img src={sanitizeUrl(ep.s3ThumbnailKey)} alt={ep.title} className="w-24 h-14 object-cover rounded flex-shrink-0" />
-                    ) : (
-                      <div className="w-24 h-14 bg-white/5 rounded flex-shrink-0 flex items-center justify-center">
-                        <span className="text-white/20 text-2xl">▶</span>
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-medium text-sm">{ep.title}</p>
-                      {ep.description && (
-                        <p className="text-white/50 text-xs mt-0.5 line-clamp-2">{ep.description}</p>
-                      )}
-                    </div>
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                      {ep.durationMins && <span className="text-white/40 text-xs mr-2">{ep.durationMins}m</span>}
-                      
-                      <span className="text-white/20 group-hover:text-white/60 transition-colors">▶</span>
-                    </div>
-                    </button>
-
-                      {true && (
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setActiveEpisodeDropdownId(activeEpisodeDropdownId === ep.id ? null : ep.id)
-                            }}
-                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-white/50 hover:text-white"
-                            title={t('detail.episodeOptions')}
-                            aria-label={t('detail.episodeOptions')}
-                            aria-haspopup="menu"
-                            aria-expanded={activeEpisodeDropdownId === ep.id}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                              <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                            </svg>
-                          </button>
-
-                          {activeEpisodeDropdownId === ep.id && (
-                            <>
-                              <div 
-                                className="fixed inset-0 z-10" 
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setActiveEpisodeDropdownId(null)
-                                }}
-                              />
-                              <div role="menu" className="absolute right-0 mt-1 w-36 rounded bg-km-surface-2 shadow-2xl z-20 overflow-hidden py-1 border border-white/10">
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setActiveEpisodeDropdownId(null)
-                                    openDownloadPicker({ kind: "episode", episode: ep, seasonNumber: season?.seasonNumber })
-                                  }}
-                                  disabled={episodeDownloadingMap[ep.id] || episodeDownloadDoneMap[ep.id]}
-                                  className="w-full text-left px-3 py-2 text-xs font-semibold text-white/80 hover:bg-violet-600/30 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                                >
-                                  <span>{episodeDownloadDoneMap[ep.id] ? '✓' : '⬇'}</span>
-                                  <span>{episodeDownloadDoneMap[ep.id] ? t('detail.queued') : episodeDownloadingMap[ep.id] ? t('detail.queuing') : t('common.download')}</span>
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* More Like This */}
