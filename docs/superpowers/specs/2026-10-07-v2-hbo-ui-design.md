@@ -1,6 +1,6 @@
 # KokoMovie v2.0.0 — segunda propuesta de UI/UX
 
-Fecha: 2026-10-07. Estado: aprobado por el usuario; implementación en curso.
+Fecha: 2026-10-07. Estado: implementado, revisado y validado localmente en v2.0.0.
 Punto de recuperación: `c465dbb`, rama `codex/kokomovie-v2-0-0`.
 
 ## Solicitud y referencias inspeccionadas

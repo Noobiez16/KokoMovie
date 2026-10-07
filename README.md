@@ -39,9 +39,12 @@ artifact whose architecture matches `uname -m` (`x86_64` â†’ `x64`, `aarch64` â†
 
 ## What is KokoMovie?
 
-The **2.0.0 development branch** introduces grouped navigation with a visible local library,
-one URL-based search with movie/series filters and pagination, responsive desktop layouts,
-and consistent recovery actions. The existing purple theme and logo are preserved.
+The **2.0.0 development branch** introduces an HBO Max-inspired desktop composition:
+top navigation with the original centered logo, cinematic title artwork, a landscape
+Continue Watching row, My List posters, genre navigation and keyboard-operated season tabs.
+Library and tools remain available in the header menu. Search has one dedicated input with
+URL-based filters and pagination. The existing purple palette and logo bytes are preserved;
+motion respects the system's reduced-motion preference. Login and profiles are not added.
 It also adds regional viewing information, permanent completed downloads, controlled
 transfer teardown and a stricter renderer script policy.
 This source version has not been published as an installer; release downloads below may

@@ -8,7 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [2.0.0] — Unreleased
 
 ### Added
-- Grouped Explore, Library and Tools navigation, persistent compact layout, keyboard search shortcut, and a direct Continue Watching page using existing local records.
+-Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
+- Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, My List posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
 - A single URL-based search field with movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
 - Shared page headings and empty/error states with real retry actions; a separate Library tab for existing import/export controls.
 - Deterministic UI behavior tests and real Electron desktop smoke coverage with temporary SQLite data and credentials intercepted before startup.
@@ -16,7 +17,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Actual IPC/SQLite lifecycle regression coverage and a real FFmpeg/Electron test that publishes equal-title movie/episode fixtures and decodes, seeks and plays saved media with HTTP blocked.
 
 ### Changed
-- Refined hero, cards, rows, details and operational pages while preserving the logo bytes and original base palette.
+- Refined hero, cards, rows and details around the five approved reference compositions while preserving the logo bytes and original base palette. Shared header space remains reserved when the optional hero is absent.
+- Added scoped card/menu/route and valid Search/season entry motion with reduced-motion support. Same-route results remount only behind existing valid-data guards; loading episode placeholders do not receive the data-entry animation.
 - Movie hero Play runs existing source discovery after approved metadata; series opens episodes. Playback intent is consumed once, retaining cancellation, maturity and CAM checks.
 - Locale preference validation now accepts the interface's en-US/es-ES/fr-FR codes and legacy values, fixing language changes reverting to English.
 - Torrent downloads now accept only the main process's live selected file on its actual IPv4 server, with the session capability; ordinary outbound DNS/TLS guards remain in place.
@@ -33,11 +35,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
 
 ### Verification and remaining work
+- Final HBO-inspired UI block: 518 deterministic tests and twelve real Electron tests passed, alongside both TypeScript targets, zero-error/zero-warning lint, production build and licenses. Native checks cover 1440/1152/1024 episode geometry, EN/ES/FR, no-hero header space, same-route results, keyboard seasons and reduced motion.
+- Inspected motion belongs to KokoMovie; exact HBO Max macOS timings remain unverified. The selected Behance concept is static and unofficial. Existing Vite/SQLite/build warnings remain documented separately from clean lint.
 - UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).
 - Desktop layouts were inspected at 1440×900 and 1024×768 with synthetic catalog artwork; EN/ES/FR and local watchlist/resume persistence were exercised.
 - Core block: 417 tests and six real Electron tests passed; final IPv4 contract refinement passed 25 targeted tests. Renderer/main checks, lint, build, license gate and a dry-run locked install passed. Fresh production audit reports zero findings at every severity.
 - Storage/security/discovery block passed 471 deterministic tests. Final ownership correction passed 487 deterministic tests and eight real Electron tests; both TypeScript targets, zero-error/zero-warning lint and build passed again. License checks passed, and the production audit reports zero findings at all severities.
-- A local Windows x64 unpacked package was generated with publication disabled; version, resources, native modules, bundled FFmpeg, file CSP and executable fuses were inspected. It remains unsigned and was not installed. Signed release/installed upgrade and live peer/provider endurance remain unverified.
+- The local Windows x64 unpacked package was regenerated with the final UI and publication disabled; version 2.0.0, resources, native modules, bundled FFmpeg, file CSP and executable fuses were inspected. It remains unsigned and was not installed. Signed release/installed upgrade and live peer/provider endurance remain unverified.
 - Country availability tests use deterministic TMDB fixtures, not an assurance of current regional service availability. Source HTTP and redirect tests retain their fixture boundaries; real FFmpeg/offline playback adds coverage beyond those mocks.
 - A fully buffered player after HTTP EOF and the 60-second handoff reservation is eligible for idle eviction; a later media request can require fresh resolution. Persistent player-session ownership remains outside this block.
 

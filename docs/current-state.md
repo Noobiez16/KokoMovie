@@ -1,15 +1,30 @@
 # KokoMovie Current State
 
 **Current review:** 2026-10-07
-**Source target:** v2.0.0, branch `codex/kokomovie-v2-0-0`, based on `a0f7531`.
+**Source target:** v2.0.0, branch `codex/kokomovie-v2-hbo-ui`, based on `c465dbb`.
+**Recovery point:** `codex/kokomovie-v2-0-0` remains at `c465dbb`.
 **Release status:** development source; no v2.0.0 installer published or installed by this work.
 
 ## Verified v2.0.0 interface
 
-The desktop shell exposes Explore, Library and Tools, a persistent compact sidebar, one
-global URL-based search, and a shared content scroll area. My List, Continue Watching,
-History and Downloads access the existing local records. Library import/export has its
-own Settings tab; language, playback, storage and advanced controls retain their APIs.
+The desktop shell follows the approved five-screen HBO Max-inspired composition: a 76px
+topbar with Home/Movies/Series, the original centered logo, Search and a Library/tools menu.
+Compact windows move the primary links into that disclosure. The single Search input lives
+on SearchPage and retains URL filters, pagination, history and Ctrl+K/Cmd+K focus. The shared
+scroll area and single PlayerHost outside Routes are preserved. No login or profiles were added.
+
+Home prioritizes real Continue Watching records in 16:9 cards and My List in 2:3 posters,
+followed by catalog rows. Movies/Series expose actual genre and trending destinations.
+Integrated detail artwork, keyboard season tabs and independent episode play/download
+buttons retain the existing source, resume and demand-loading workflows. Episodes form
+four/three/two columns at 1440/1152/1024px. Without a featured hero, content keeps the header
+space so local library rows and genre controls remain accessible.
+
+Compiled Electron checks verify card zoom, menu entry, 200ms valid Search/season entry and
+reduced motion without displacement or loss of focus. These are KokoMovie motion values;
+exact HBO Max macOS timings were not verified. The Behance reference is an unofficial static
+concept, limited to Wireframe, Home, Series Selected, Search and Movies Featured.
+Library import/export retains its Settings tab and all existing operational APIs.
 
 Movie hero Play enters source discovery through approved content details rather than
 opening an empty player. Series opens episode selection. Search uses complete typed
@@ -18,10 +33,11 @@ offline matches to page 1. Catalog failures expose actual query retries.
 
 The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
 base palette values are unchanged. Locale persistence accepts both canonical and legacy
-codes. Eight real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
-search/navigation and privileged boundaries. See [testing](testing.md) for limits.
+codes. Twelve real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+search/navigation, compiled layout/motion and privileged boundaries. See [testing](testing.md)
+for limits. This UI refinement changes no privileged process, player or dependency contracts.
 
-The next core block repaired source/downloader contracts and callback redirects. Torrent
+The preceding core block repaired source/downloader contracts and callback redirects. Torrent
 downloads require the actual IPv4 endpoint, live selected file and capability. Both accepted
 hostnames were exercised through a real local HTTP server. Production audit now fails closed;
 js-yaml 4.3.2 and ip-address 10.7.3 yielded a fresh report with zero findings. Weekly trending
@@ -55,8 +71,10 @@ locally remember a country. TMDB/JustWatch information is grouped by subscriptio
 ads, rental and purchase, with validated landing links, attribution and cache notices.
 The country preference is stored locally; existing SQLite library export does not include it.
 
-Final checks passed: 487 deterministic tests, eight Electron tests, TypeScript, lint, build,
-licenses and a zero-finding production audit. The native download test used a generated
+Final UI checks passed: 518 deterministic tests, twelve Electron tests, both TypeScript
+targets, zero-error/zero-warning lint, build and licenses (227 packages/three FFmpeg targets).
+The preceding core block returned a zero-finding production audit; dependencies did not
+change during this UI refinement. The native download test used a generated
 H.264/AAC fixture and real FFmpeg; movie/episode outputs had different names and offline
 video decoding, seek and play worked with HTTP blocked.
 

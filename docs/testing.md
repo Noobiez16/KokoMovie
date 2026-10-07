@@ -1,8 +1,44 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0. Final source checks: 487 deterministic tests
-and eight real Electron tests passed; both TypeScript targets, lint, build and licenses
-passed. The interface/core counts below record earlier completed blocks.
+**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-hbo-ui`.
+Final source checks: 518 deterministic tests and twelve real Electron tests passed;
+both TypeScript targets, lint (zero errors/warnings), build and licenses passed.
+The interface/core counts below record earlier completed blocks.
+
+### HBO-inspired UI refinement
+
+- Native tests retain SQLite, country persistence, URL search/type/page/Back, operational
+  routes and EN/ES/FR. The header has a single Search link/input destination, accessible
+  library disclosure, compact primary links and both Ctrl+K/Cmd+K focus.
+- Home, Movies Featured, Search, movie detail, selected series and menu captures were
+  inspected at 1440×900 and 1024×768 using synthetic artwork and isolated catalog records.
+  Episode geometry also passes at 1152×820: four/three/two columns with 16:9 visuals.
+  Keyboard season changes show the correct requested episodes.
+- A native RED/GREEN case confirmed a no-hero Home heading at y=24 under the 76px header;
+  the corrected Home library and Movies/Series genre controls reserve header space.
+  Local records are explicitly seeded for this independent test.
+- Chromium metrics verify hover scale approximately 1.035, menu entry 220ms, and valid
+  Search/season entry 200ms. Same-route Search identity remounts without stale results.
+  Reduced motion removes animations/zoom and retains arrow position, focus and actions.
+  Representative resting/hover/menu/reduced screenshots form a local motion sequence.
+- Focused regressions cover delayed season data and menu close/reopen, navigation and
+  unmount timer cancellation. PlayerHost remains outside Routes; main/player/API and
+  dependency files are unchanged from the prior verified checkpoint.
+- Logo SHA-256 and palette match `c465dbb`; root/client/lock versions remain 2.0.0.
+  License gate: 227 production packages and three LGPL FFmpeg targets. The prior core
+  production audit was clean; no dependency change required an additional external audit.
+- The final Windows x64 unpacked package was regenerated with `--publish never` and
+  verified for version 2.0.0, production CSP, actual executable fuses, SQLite/keychain
+  bindings, filesystem store and bundled FFmpeg. Authenticode is NotSigned; no installer
+  or installed upgrade was executed.
+- The reference is an unofficial static Behance concept. This verifies KokoMovie on
+  Windows, not exact HBO Max macOS timings, live providers, peers or current availability.
+  Existing Vite migration/deprecation, SQLite experimental and large-player-chunk warnings
+  remain; lint itself reports zero warnings. One native resize request was lost in an
+  intermediate run; the final full suite passed its actual-width assertions without a
+  product change or weakening the checks.
+
+### Initial v2.0.0 interface milestone (historical)
 
 - 366 deterministic tests passed. Renderer/main TypeScript, lint (zero errors/warnings), and production build passed.
 - Six real Electron tests passed on Windows: five privileged boundary tests and a desktop UI flow with isolated SQLite and credentials intercepted before application startup.
