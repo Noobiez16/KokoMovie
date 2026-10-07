@@ -70,6 +70,17 @@
 @layer components {
   .km-hero { height: auto; min-height: max(360px, min(64dvh, 56.25vw)); display: flex; align-items: flex-end; background: var(--km-bg); }
   .km-hero-artwork { object-fit: contain; object-position: right center; transition-duration: var(--km-motion-hero); }
+  /* Feather the rendered picture's edge, including when contain leaves blank space. */
+  img.km-hero-artwork, img.km-detail-artwork {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 18%);
+    mask-image: linear-gradient(to right, transparent, #000 18%);
+    -webkit-mask-size: var(--km-artwork-width, 100%) 100%;
+    mask-size: var(--km-artwork-width, 100%) 100%;
+    -webkit-mask-position: right center;
+    mask-position: right center;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
   .km-hero-copy { width: 100%; }
   .km-hero-copy { padding-bottom: 48px; padding-top: 100px; }
   .km-hero-title { font-size: clamp(32px, 4.4vw, 64px); max-width: 650px; }

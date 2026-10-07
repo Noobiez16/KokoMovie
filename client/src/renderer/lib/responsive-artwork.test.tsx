@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { HeroBanner } from '../components/catalog/HeroBanner'
+import { ResponsiveArtwork } from '../components/catalog/ResponsiveArtwork'
 import type { ContentSummary } from '../api/catalog'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
@@ -32,6 +33,40 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('responsive fullscreen artwork', () => {
+  it('tracks the contained artwork width in CSS pixels across frame and density changes', () => {
+    vi.stubGlobal('devicePixelRatio', 2)
+    const { container } = mount()
+    const artworkWidth = () => parseFloat(image(container).style.getPropertyValue('--km-artwork-width'))
+    expect(artworkWidth()).toBeCloseTo(height * 16 / 9)
+    width = 960; height = 800
+    resize()
+    expect(artworkWidth()).toBe(width)
+    vi.stubGlobal('devicePixelRatio', 1)
+    width = 2000; height = 600
+    resize()
+    expect(artworkWidth()).toBeCloseTo(height * 16 / 9)
+  })
+  it('aligns the feather width with the loaded source aspect and resets for the next source', () => {
+    width = 2000; height = 800
+    const { container, rerender } = render(<div><ResponsiveArtwork src={cached} className="km-detail-artwork km-hero-artwork" /></div>)
+    const artworkWidth = () => parseFloat(image(container).style.getPropertyValue('--km-artwork-width'))
+    Object.defineProperties(image(container), { naturalWidth: { value: 800 }, naturalHeight: { value: 1200 } })
+    fireEvent.load(image(container))
+    expect(artworkWidth()).toBeCloseTo(height * 2 / 3)
+    rerender(<div><ResponsiveArtwork src="/next.jpg" className="km-detail-artwork km-hero-artwork" /></div>)
+    expect(artworkWidth()).toBeCloseTo(height * 16 / 9)
+  })
+  it('uses a full-width feather fallback for a zero-size frame and updates once measurable', () => {
+    width = 0; height = 0
+    const { container } = mount()
+    expect(image(container).style.getPropertyValue('--km-artwork-width')).toBe('100%')
+    width = 3440; height = 922
+    resize()
+    expect(parseFloat(image(container).style.getPropertyValue('--km-artwork-width'))).toBeCloseTo(height * 16 / 9)
+    height = 0
+    resize()
+    expect(image(container).style.getPropertyValue('--km-artwork-width')).toBe('100%')
+  })
   it('upgrades the contained ultrawide artwork through the catalog cache', () => {
     const { container } = mount()
     expect(image(container).getAttribute('src')).toBe('catalog-cache://image/original/backdrop.jpg')

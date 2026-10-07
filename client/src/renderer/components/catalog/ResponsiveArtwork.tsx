@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 interface Props {
   src: string
@@ -15,6 +15,7 @@ function originalArtworkUrl(src: string): string | null {
 export function ResponsiveArtwork({ src, className }: Props) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [requiredWidth, setRequiredWidth] = useState(0)
+  const [containedWidth, setContainedWidth] = useState(0)
   const [aspect, setAspect] = useState({ src, ratio: 16 / 9 })
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const ratio = aspect.src === src ? aspect.ratio : 16 / 9
@@ -25,7 +26,9 @@ export function ResponsiveArtwork({ src, className }: Props) {
     const measure = () => {
       const { width, height } = container.getBoundingClientRect()
       // Contain sizing: blank space around the image does not need extra pixels.
-      setRequiredWidth(Math.min(width, height * ratio) * (window.devicePixelRatio || 1))
+      const fittedWidth = Math.min(width, height * ratio)
+      setContainedWidth(fittedWidth)
+      setRequiredWidth(fittedWidth * (window.devicePixelRatio || 1))
     }
     measure()
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
@@ -39,6 +42,7 @@ export function ResponsiveArtwork({ src, className }: Props) {
 
   const original = requiredWidth > 1280 && failedSource !== src ? originalArtworkUrl(src) : null
   return <img ref={imageRef} src={original ?? src} alt="" className={className}
+    style={{ '--km-artwork-width': containedWidth > 0 ? `${containedWidth}px` : '100%' } as CSSProperties}
     onLoad={event => {
       const { naturalWidth, naturalHeight } = event.currentTarget
       if (naturalWidth > 0 && naturalHeight > 0) {
