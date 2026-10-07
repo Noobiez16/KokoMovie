@@ -12,6 +12,7 @@ import { providersApi, torrentApi } from '../api/providers'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { ResponsiveArtwork } from '../components/catalog/ResponsiveArtwork'
 import { SeasonTabs } from '../components/catalog/SeasonTabs'
 import { EpisodeCard } from '../components/catalog/EpisodeCard'
 import type { ContentSummary } from '../api/catalog'
@@ -753,7 +754,7 @@ export function ContentDetailPage() {
   return (
     <AppLayout transparentNav>
       <section className="km-hero km-detail-hero">
-        {thumbnail ? <img src={sanitizeUrl(thumbnail)} alt="" className="km-detail-artwork km-hero-artwork" /> : <div className="km-detail-artwork km-detail-artwork-fallback" />}
+        {thumbnail ? <ResponsiveArtwork key={thumbnail} src={sanitizeUrl(thumbnail)} className="km-detail-artwork km-hero-artwork" /> : <div className="km-detail-artwork km-detail-artwork-fallback" />}
         <div className="km-detail-shade" />
 
         {/* Back button — overlays the top-left of the backdrop */}

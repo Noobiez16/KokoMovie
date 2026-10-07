@@ -68,8 +68,9 @@
 
 /* Cinematic catalog. Components share the shell gutter and motion tokens. */
 @layer components {
-  .km-hero { height: 64vh; min-height: 360px; max-height: 620px; }
-  .km-hero-artwork { object-position: 72% center; transition-duration: var(--km-motion-hero); }
+  .km-hero { height: auto; min-height: max(360px, min(64dvh, 56.25vw)); display: flex; align-items: flex-end; background: var(--km-bg); }
+  .km-hero-artwork { object-fit: contain; object-position: right center; transition-duration: var(--km-motion-hero); }
+  .km-hero-copy { width: 100%; }
   .km-hero-copy { padding-bottom: 48px; padding-top: 100px; }
   .km-hero-title { font-size: clamp(32px, 4.4vw, 64px); max-width: 650px; }
   .km-hero-copy > p { font-size: 15px; }
@@ -95,7 +96,6 @@
 }
 @layer components {
 @media (max-width: 640px) {
-  .km-hero { height: 60vh; min-height: 440px; }
   .km-hero-copy { padding-bottom: 28px; }
   .km-hero-copy > p { max-width: 90%; font-size: 14px; }
 }
@@ -106,8 +106,8 @@
 }
 /* Selected content and real, on-demand season episodes. */
 @layer components {
-  .km-detail-hero { position: relative; height: auto; min-height: 560px; max-height: none; isolation: isolate; }
-  .km-detail-artwork { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
+  .km-detail-hero { position: relative; height: auto; min-height: max(540px, min(64dvh, 56.25vw)); isolation: isolate; }
+  .km-detail-artwork { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: -2; }
   .km-detail-artwork-fallback { background: linear-gradient(120deg, var(--km-bg), var(--km-surface-2)); }
   .km-detail-shade { position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgb(var(--km-bg-rgb) / .97) 0%, rgb(var(--km-bg-rgb) / .8) 35%, rgb(var(--km-bg-rgb) / .12) 85%), linear-gradient(0deg, var(--km-bg), transparent 55%); }
   .km-detail-back { position: absolute; z-index: 2; top: 92px; left: var(--km-catalog-gutter); display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: rgb(var(--km-bg-rgb) / .45); color: var(--km-text-muted); font-size: 13px; }
@@ -142,7 +142,6 @@
   @media (max-width: 1200px) { .km-episode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 1050px) {
     .km-episode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .km-detail-hero { min-height: 540px; }
     .km-detail-shade { background: linear-gradient(90deg, rgb(var(--km-bg-rgb) / .95), rgb(var(--km-bg-rgb) / .65) 55%, rgb(var(--km-bg-rgb) / .3)), linear-gradient(0deg, var(--km-bg), transparent); }
   }
   @media (max-width: 640px) { .km-detail-copy { padding-top: 150px; padding-bottom: 32px; } .km-season-tabs { gap: 20px; } .km-episode-grid { gap: 24px 16px; } }

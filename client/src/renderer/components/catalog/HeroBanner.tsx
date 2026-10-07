@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ContentDetail, ContentSummary } from '../../api/catalog'
 import { useTranslation } from 'react-i18next'
+import { ResponsiveArtwork } from './ResponsiveArtwork'
 
 interface Props {
   content: ContentSummary & Partial<Pick<ContentDetail, 'trailerKey' | 'genres'>>
@@ -54,41 +55,26 @@ export function HeroBanner({ content }: Props) {
 
     const handleResize = () => {
       const { width, height } = container.getBoundingClientRect()
-      const containerRatio = width / height
       const videoRatio = 16 / 9
-
-      if (containerRatio > videoRatio) {
-        // Container is wider than 16:9 - fit width, scale height up
-        const targetHeight = width / videoRatio
-        setDimensions({
-          width: `${width}px`,
-          height: `${targetHeight}px`,
-        })
-      } else {
-        // Container is taller than 16:9 - fit height, scale width up
-        const targetWidth = height * videoRatio
-        setDimensions({
-          width: `${targetWidth}px`,
-          height: `${height}px`,
-        })
-      }
+      const fittedWidth = Math.min(width, height * videoRatio)
+      setDimensions({ width: `${fittedWidth}px`, height: `${fittedWidth / videoRatio}px` })
     }
 
     handleResize()
-    const observer = new ResizeObserver(handleResize)
-    observer.observe(container)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(handleResize)
+    observer?.observe(container)
 
-    return () => observer.disconnect()
+    return () => observer?.disconnect()
   }, [])
 
   return (
     <div ref={containerRef} className="km-hero relative w-full overflow-hidden flex-shrink-0">
       {/* Backdrop */}
       {bg ? (
-        <img
+        <ResponsiveArtwork
+          key={bg}
           src={bg}
-          alt=""
-          className={`absolute inset-0 w-full h-full km-hero-artwork object-cover transition-opacity motion-reduce:transition-none z-0 ${
+          className={`absolute inset-0 w-full h-full km-hero-artwork transition-opacity motion-reduce:transition-none z-0 ${
             showTrailer ? 'opacity-0' : 'opacity-100'
           }`}
         />
@@ -105,8 +91,9 @@ export function HeroBanner({ content }: Props) {
             style={{
               width: dimensions.width,
               height: dimensions.height,
+              right: 0,
             }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-[1.15] transition-opacity duration-1000 motion-reduce:transition-none"
+            className="absolute top-1/2 -translate-y-1/2 transition-opacity duration-1000 motion-reduce:transition-none"
             allow="autoplay; encrypted-media"
             title={t('catalog.trailer')}
           />
@@ -120,9 +107,9 @@ export function HeroBanner({ content }: Props) {
       <div className="absolute inset-0 bg-gradient-to-t from-km-bg via-transparent to-black/20 z-20 pointer-events-none" />
 
       {/* Content */}
-      <div className="km-hero-copy absolute bottom-0 left-0 right-0 km-catalog-gutter z-30">
+      <div className="km-hero-copy relative km-catalog-gutter z-30">
         {/* Type label */}
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className={`text-xs font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${
             content.type === 'movie'
               ? 'text-violet-400 bg-violet-500/10 border-violet-500/20'
