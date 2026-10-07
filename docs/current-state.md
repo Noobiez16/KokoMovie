@@ -1,9 +1,21 @@
 # KokoMovie Current State
 
 **Current review:** 2026-10-07
-**Source target:** v2.0.0, branch `codex/kokomovie-v2-source-priority`, based on `7e1c219`.
+**Source target:** v2.0.0; release integration into `main` with annotated tag `v2.0.0`. The development branch is `codex/kokomovie-v2-source-priority`, based on `7e1c219`.
 **Recovery points:** `codex/kokomovie-v2-fullscreen-polish` remains at `7e1c219`; `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
-**Release status:** development source; no v2.0.0 installer published or installed by this work.
+**Release status:** release prepared on 2026-10-07. The tag-triggered [release workflow](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml) builds and publishes installers after all gates succeed; consult [Releases](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.0.0) for publication status. No installer was installed by this work.
+
+## Release integration and screenshots
+
+README previews capture the actual Electron renderer with a live TMDB catalog: Home,
+genre galleries, title details/recommendations and inline search. Images retain the
+original logo and palette. Catalog content is time-dependent.
+
+Fresh-checkout verification reproduced missing FFmpeg in the separate Electron CI job
+and missing media-fixture parent directories. The job now vendors its pinned Linux x64
+LGPL build before tests; both media tests initialize their own parent. Fresh setup checks
+pass, together with 662 deterministic tests, 17 native Electron tests, all TypeScript
+targets, lint and the production audit policy. Installer publication remains a CI result.
 
 ## Verified source priority and native typing
 

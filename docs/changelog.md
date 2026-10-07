@@ -5,9 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [2.0.0] — Unreleased
+## [2.0.0] — 2026-10-07
 
 ### Added
+- README screenshots show the real desktop Home, genre galleries, title details and inline search with live catalog artwork.
 - Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
 - Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, saved-library posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
 - Inline header search expands left and progressively suggests real posters/titles below the field, without leaving the current page while typing. Selection opens details; keyboard navigation, Escape, shortcuts, retries and stale-response protection are included.
@@ -17,6 +18,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Actual IPC/SQLite lifecycle regression coverage and a real FFmpeg/Electron test that publishes equal-title movie/episode fixtures and decodes, seeks and plays saved media with HTTP blocked.
 
 ### Changed
+- Electron release tests now provision the pinned LGPL FFmpeg build in their own CI job. Media fixtures create their temporary parent independently, so fresh checkouts and individual test runs do not depend on earlier tests.
 - Automatic discovery prioritizes validated non-CAM sources by available resolution: 2160p/4K, 1440p, 1080p, then 720p. It waits for pending sources below the top tier, resolves a validated non-CAM 4K candidate immediately in progressive mode, and retains the 40-second deadline and explicit CAM/TS fallback warning.
 - HLS resolution probes now read the validated public upstream manifest rather than a rejected localhost proxy URL. Dimensionless media remains Unknown until measurable; failed probes no longer receive guessed 720p/1080p labels. Corrected main-process cinematic/540p tier thresholds.
 - Media probes have bounded response size and elapsed time, propagate discovery cancellation, preserve redirected manifest paths and scope credentials to the correct origin. Terminal discovery snapshots ignore late results. Fresh searches re-extract sources; current playback/manual quality and HLS AUTO remain intact.

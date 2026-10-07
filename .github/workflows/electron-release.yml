@@ -20,7 +20,7 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
-      - name: Typecheck renderer and main process
+      - name: Typecheck renderer, main process and Electron tests
         run: npm run typecheck
       - name: Deterministic tests
         run: npm test
@@ -48,6 +48,8 @@ jobs:
           cache: 'npm'
       - name: Install locked dependencies
         run: npm ci
+      - name: Vendor LGPL FFmpeg for media playback tests
+        run: npm run vendor:ffmpeg --workspace=client -- linux-x64
       - name: Production build
         run: npm run build --workspace=client
       - name: Real Electron security boundary tests

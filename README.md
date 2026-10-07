@@ -39,7 +39,7 @@ artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` �
 
 ## What is KokoMovie?
 
-The **2.0.0 development branch** introduces an HBO Max-inspired desktop composition:
+**KokoMovie 2.0.0** introduces an HBO Max-inspired desktop composition:
 top navigation with the original centered logo, cinematic title artwork, a landscape
 Continue Watching row, genre navigation and keyboard-operated season tabs. The clean header
 has no separator line; My Library joins saved titles and viewing history under one menu entry.
@@ -53,8 +53,10 @@ The existing purple palette and logo bytes are preserved;
 motion respects the system's reduced-motion preference. Login and profiles are not added.
 It also adds permanent completed downloads, controlled
 transfer teardown and a stricter renderer script policy.
-This source version has not been published as an installer; release downloads below may
-still contain an earlier version. See [current state](docs/current-state.md) for verified scope.
+The `v2.0.0` tag runs installer builds and publication through
+[GitHub Actions](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml).
+Downloads become available when the release workflow succeeds. See
+[current state](docs/current-state.md) for verified scope.
 
 KokoMovie brings catalog discovery, local library records and playback into one desktop
 interface. Search titles, review their details, choose a source or play saved media.
@@ -68,6 +70,34 @@ External catalog access uses your TMDB credential; source availability depends o
 - **Release updates** — optional update checks for published builds
 - **English, Español, Français** — switch the localised interface in Settings, with no restart
 - **Built-in diagnostics** — advanced users can open Developer Tools from the View menu to inspect console errors
+
+---
+
+## Desktop preview
+
+Actual screenshots of KokoMovie 2.0.0 with the live catalog. Titles and artwork change
+with catalog availability and the selected interface language.
+
+**Home — featured artwork and trending titles**
+
+![KokoMovie home with cinematic artwork and a gallery of trending posters](docs/screenshots/home.png)
+
+<details>
+<summary>Explore the catalog galleries, title details and instant search</summary>
+
+**Catalog galleries**
+
+![KokoMovie catalog with poster galleries organized by genre](docs/screenshots/catalog-gallery.png)
+
+**Title details and recommendations**
+
+![KokoMovie title details with synopsis, cast and recommended titles](docs/screenshots/title-details.png)
+
+**Instant search**
+
+![KokoMovie expanded header search with live poster and title suggestions](docs/screenshots/inline-search.png)
+
+</details>
 
 ---
 

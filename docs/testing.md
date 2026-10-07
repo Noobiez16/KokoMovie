@@ -1,6 +1,10 @@
 # Testing and Regression Baseline
 
 **Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
+Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s),
+TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
+ENOENT in both media tests and a missing FFmpeg prerequisite in the Electron CI job;
+all three setup checks pass after correction. README screenshots use live catalog data.
 Final source checks: 662 deterministic tests and seventeen real Electron tests passed (40.3s);
 renderer/main/E2E TypeScript, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.

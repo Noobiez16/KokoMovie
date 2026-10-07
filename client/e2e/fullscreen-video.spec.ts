@@ -8,6 +8,7 @@ import { isolatedCredentials } from './isolated-credentials'
 
 for (const height of [720, 1080]) {
   test(`actual ${height}p playback preserves decoded pixels and media session in fullscreen`, async () => {
+    await mkdir(resolve('.codex/tmp'), { recursive: true })
     const directory = await mkdtemp(resolve('.codex/tmp/fullscreen-media-'))
     const visual = resolve('.codex/visual')
     await mkdir(visual, { recursive: true })

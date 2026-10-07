@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, readdir, mkdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { join, resolve } from 'node:path'
@@ -7,6 +7,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { isolatedCredentials } from './isolated-credentials'
 
 test('downloads an equal-title movie and episode through real FFmpeg and plays offline', async () => {
+  await mkdir(resolve('.codex/tmp'), { recursive: true })
   const directory = await mkdtemp(resolve('.codex/tmp/portable-'))
   const fixture = join(directory, 'source.mp4')
   const ffmpeg = resolve('vendor/ffmpeg', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
