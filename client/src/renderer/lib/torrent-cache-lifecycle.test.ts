@@ -9,11 +9,12 @@ vi.mock('fs/promises', async (original) => {
 })
 import { mkdtempSync, existsSync, mkdirSync, rmdirSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'node:os'
 import { TorrentCacheLifecycle } from '../../main/providers/torrent-cache-lifecycle'
 
 describe('owned torrent cache lifecycle', () => {
   it('retains cache until asynchronous store destruction and resources close', async () => {
-    const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+    const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
     const caches = new TorrentCacheLifecycle(root)
     const cache = caches.allocate()
     let callback!: (err?: Error) => void
@@ -40,9 +41,9 @@ describe('owned torrent cache lifecycle', () => {
     expect(existsSync(root)).toBe(false)
   })
   it('denies deletion of unallocated paths and cleans partial allocations', async () => {
-    const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+    const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
     const caches = new TorrentCacheLifecycle(root)
-    const outside = mkdtempSync(join(process.env.TEMP!, 'km-user-test-'))
+    const outside = mkdtempSync(join(tmpdir(), 'km-user-test-'))
     await expect(caches.discard(outside)).rejects.toThrow('unowned')
     expect(existsSync(outside)).toBe(true)
     const child = join(root, 'unregistered'); mkdirSync(child)
@@ -54,7 +55,7 @@ describe('owned torrent cache lifecycle', () => {
 })
 
 it('waits for internal WebTorrent store teardown after close has already fired', async () => {
-  const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
   const caches = new TorrentCacheLifecycle(root)
   const path = caches.allocate()
   let complete!: () => void
@@ -74,7 +75,7 @@ it('waits for internal WebTorrent store teardown after close has already fired',
   await caches.shutdown()
 })
 it('preserves the owned directory on teardown failure and allows cleanup retry', async () => {
-  const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
   const caches = new TorrentCacheLifecycle(root)
   const path = caches.allocate()
   const torrent = { destroyed: false, destroy(_: any, callback: any) { this.destroyed = true; callback(new Error('store failure')) } }
@@ -87,7 +88,7 @@ it('preserves the owned directory on teardown failure and allows cleanup retry',
 })
 
 it('keeps deletion failures controlled and retries only the owned cache', async () => {
-  const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
   const caches = new TorrentCacheLifecycle(root)
   const path = caches.allocate()
   const torrent = { destroyed: false, destroy(_: any, cb: any) { this.destroyed = true; cb() } }
@@ -104,7 +105,7 @@ it('keeps deletion failures controlled and retries only the owned cache', async 
 it('closes the installed filesystem chunk store before removing its allocated directory', async () => {
   // @ts-expect-error fs-chunk-store 5.0.1 ships no declarations; this test verifies its real runtime API.
   const { default: Store } = await import('fs-chunk-store')
-  const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
   const caches = new TorrentCacheLifecycle(root)
   const path = caches.allocate()
   const OwnedStore = caches.storeConstructor(path, Store)
@@ -155,7 +156,7 @@ it('waits for the probe child to close after abnormal input closure', async () =
   expect(release).toHaveBeenCalledOnce()
 })
 it('keeps cache during cancelled audio probing until FFmpeg actually closes', async () => {
-  const root = mkdtempSync(join(process.env.TEMP!, 'km-cache-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'km-cache-test-'))
   const caches = new TorrentCacheLifecycle(root)
   const path = caches.allocate()
   const torrent = { destroyed: false, destroy(_: any, cb: any) { this.destroyed = true; cb() } }

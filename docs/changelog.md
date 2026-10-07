@@ -18,6 +18,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Actual IPC/SQLite lifecycle regression coverage and a real FFmpeg/Electron test that publishes equal-title movie/episode fixtures and decodes, seeks and plays saved media with HTTP blocked.
 
 ### Changed
+- Linux CI uses the OS temporary-directory API for torrent fixtures and runs native fullscreen tests with a ready Openbox window manager inside Xvfb; fullscreen geometry checks remain enabled.
+- Native inline-search verification awaits Home navigation and the rendered header's exact separator style, avoiding a detached-element read during route replacement.
 - Electron release tests now provision the pinned LGPL FFmpeg build in their own CI job. Media fixtures create their temporary parent independently, so fresh checkouts and individual test runs do not depend on earlier tests.
 - The CAM-cancellation regression awaits the rendered consumed navigation state, eliminating an early assertion race under concurrent test load.
 - Automatic discovery prioritizes validated non-CAM sources by available resolution: 2160p/4K, 1440p, 1080p, then 720p. It waits for pending sources below the top tier, resolves a validated non-CAM 4K candidate immediately in progressive mode, and retains the 40-second deadline and explicit CAM/TS fallback warning.
@@ -44,7 +46,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Torrent resolution serializes allocation within four slots and evicts only idle entries. Active consumers, issued URL handoff and accepted queued downloads retain ownership; failed audio lookup preserves shared torrents. All-busy responses explain the retry in EN/ES/FR, and job leases release on completion, failure, removal, expiry and shutdown.
 - Production renderer scripts permit only local modules; inline scripts and dynamic evaluation are blocked. Build-time file CSP permits media workers and retains existing media/frame compatibility. Development HMR permissions remain separate.
 - Fuse verification can inspect a supplied packaged executable without modifying it.
-- All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
+- All current package versions target 2.0.0. Installer publication is handled by the tag-triggered release workflow after all gates succeed.
 
 ### Fixed
 - Opening the development renderer in a regular browser now shows localized desktop guidance instead of crashing on absent Electron subscriptions. App and PlayerHost mount only when the preload bridge exists; no desktop API is exposed through HTTP.

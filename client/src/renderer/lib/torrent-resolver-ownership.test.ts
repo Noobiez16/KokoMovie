@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'node:os'
 import { TorrentCacheLifecycle } from '../../main/providers/torrent-cache-lifecycle'
 
 function pool() {
-  const caches = new TorrentCacheLifecycle(mkdtempSync(join(process.env.TEMP!, 'km-pool-')), 2)
+  const caches = new TorrentCacheLifecycle(mkdtempSync(join(tmpdir(), 'km-pool-')), 2)
   const torrents: any[] = []
   const acquire = (hash: string) => caches.acquire(
     async () => torrents.find(t => t.hash === hash && !t.destroyed),

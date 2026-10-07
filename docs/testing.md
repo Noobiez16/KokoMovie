@@ -1,6 +1,36 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
+## v2.0.0 Linux CI recovery
+
+The first tag run (`37695253042`) stopped before packaging or publication. Quality
+had 650 passing tests and 12 failures: torrent fixtures accessed Windows-only `TEMP`.
+Electron had 16 passing tests and one native-fullscreen geometry failure: bare Xvfb
+reported a fullscreen flag without resizing the window to its 1280x1024 display.
+
+Both fixture suites now use `node:os.tmpdir()`. Removing `TEMP` locally reproduced
+12 failures before the change; the focused suites pass 14/14 afterward. The Electron
+job installs Openbox and waits for its X11 window-manager property before running
+the unchanged native fullscreen assertions in a 3840x2160 Xvfb display. The startup
+wait is bounded to ten seconds and the job cleans up its own window-manager process.
+Version remains 2.0.0; the failed tag will be recreated after verification.
+
+Recovery run `37696411498` passed the complete Linux quality/security job and the
+native fullscreen geometry and 720p/1080p playback checks. It exposed a separate
+inline-search test synchronization failure: a one-shot computed-style read returned
+an empty value during Home navigation. The test now awaits the Home URL and uses
+Playwright's retrying CSS assertion against the rendered header, still requiring
+exactly `0px`. No application style or fullscreen assertion is relaxed.
+
+Recovery run [37697214096](https://github.com/Noobiez16/KokoMovie/actions/runs/37697214096)
+passed the complete Linux quality/security gate (662 deterministic tests, TypeScript,
+lint, production audit, licences, build and fuses) and all 17 native Electron tests.
+The corrected native suite also passes locally on Windows (39.5s), with clean lint
+and renderer/main/E2E TypeScript. Installer packaging is verified separately by the
+release workflow: this recovery run also passed Windows NSIS and Linux x64/ARM64
+AppImage/deb packaging with native architecture and LGPL resource checks. Publication
+was correctly skipped for the branch dispatch; the replacement tag triggers it.
+
+**Original release preparation verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
 Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s),
 TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
 ENOENT in both media tests and a missing FFmpeg prerequisite in the Electron CI job;
