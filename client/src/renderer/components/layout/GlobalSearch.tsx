@@ -13,12 +13,8 @@ export function GlobalSearch() {
     if (location.pathname === '/search') setQuery(new URLSearchParams(location.search).get('q') ?? '')
   }, [location.pathname, location.search])
   useEffect(() => {
-    const focusSearch = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); ref.current?.focus() }
-    }
-    window.addEventListener('keydown', focusSearch)
-    return () => window.removeEventListener('keydown', focusSearch)
-  }, [])
+    if ((location.state as { focusSearch?: boolean } | null)?.focusSearch) ref.current?.focus()
+  }, [location.state])
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (query.trim()) {
@@ -39,7 +35,7 @@ export function GlobalSearch() {
   }
   return <form role="search" onSubmit={submit} className="km-search">
     <span className="pointer-events-none absolute left-3.5 text-purple-200/60"><Icon name="search" className="h-4 w-4" /></span>
-    <input ref={ref} type="search" aria-label={t('ui.searchLabel')} value={query} onChange={(event) => change(event.target.value)} placeholder={t('catalog.searchPlaceholder')} className="km-search-input" autoComplete="off" maxLength={200} />
+    <input ref={ref} data-global-search type="search" aria-label={t('ui.searchLabel')} value={query} onChange={(event) => change(event.target.value)} placeholder={t('catalog.searchPlaceholder')} className="km-search-input" autoComplete="off" maxLength={200} />
     <kbd className="pointer-events-none absolute right-3 hidden rounded border border-km-border px-1.5 py-0.5 text-[10px] text-purple-200/60 xl:block">Ctrl K</kbd>
   </form>
 }

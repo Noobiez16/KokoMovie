@@ -11,6 +11,7 @@ const enUS = {
     groups: { flatrate: 'Subscription', free: 'Free', ads: 'With ads', rent: 'Rent', buy: 'Buy' },
   },
   ui: {
+    libraryMenu: "Library and tools",
     skipContent: "Skip to content",
     mainNavigation: "Main navigation",
     expandNavigation: "Expand navigation",

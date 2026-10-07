@@ -1,3 +1,4 @@
+@import "./platform.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -54,7 +55,8 @@
 
 @layer components {
   .km-card {
-    @apply rounded-xl overflow-hidden bg-[var(--km-surface)] border border-[var(--km-border)]/50 transition-all duration-300 ease-out;
+    @apply rounded-xl overflow-hidden bg-[var(--km-surface)] border border-[var(--km-border)]/50;
+    transition: transform var(--km-motion-hover) var(--km-motion-ease), opacity var(--km-motion-hover) var(--km-motion-ease);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
   }
   .km-card:hover {
@@ -93,29 +95,7 @@
 }
 
 @layer components {
-  .km-sidebar { @apply z-40 flex w-52 shrink-0 flex-col border-r border-km-border/60 bg-km-surface/60; }
-  .km-brand { @apply flex h-[76px] shrink-0 items-center gap-3 px-5 text-sm; }
-  .km-navigation { @apply flex-1 space-y-5 overflow-y-auto px-3 py-4; }
-  .km-nav-section { @apply mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-purple-200/60; }
-  .km-nav-link { @apply flex min-h-10 w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm font-medium text-purple-100/70 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400; }
-  .km-nav-link svg { @apply shrink-0; }
-  .km-nav-active { @apply border-violet-500/20 bg-violet-500/15 text-violet-100; }
-  .km-nav-active svg { @apply text-violet-300; }
-  .km-sidebar-footer { @apply shrink-0 border-t border-km-border/60 px-3 py-4; }
-  .km-header { @apply z-30 flex h-[76px] shrink-0 items-center gap-3 border-b border-km-border/40 px-6 backdrop-blur-xl; }
-  .km-icon-button { @apply flex h-10 w-10 items-center justify-center rounded-lg border border-km-border/60 bg-km-surface-2/40 text-purple-100/70 transition-colors hover:bg-km-surface-2 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400; }
-  .km-search { @apply relative flex w-full max-w-xl items-center; }
-  .km-search-input { @apply h-10 w-full rounded-lg border border-km-border/70 bg-km-surface-2/40 pl-10 pr-4 text-sm text-white placeholder-purple-200/60 outline-none transition-colors hover:border-violet-500/30 focus:border-violet-400 focus:ring-1 focus:ring-violet-400 xl:pr-20; }
-  .km-page { @apply mx-auto w-full max-w-[1600px] px-6 py-8 lg:px-8; }
   .km-empty-state { @apply rounded-2xl border border-km-border/70 bg-km-surface/60 px-6 py-16 text-center; }
   .km-button-secondary { @apply inline-flex items-center justify-center rounded-lg border border-km-border bg-km-surface-2/60 px-4 py-2.5 text-sm font-semibold text-violet-100 hover:bg-km-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400; }
   .km-skip-link { @apply fixed left-4 top-2 z-[100] -translate-y-20 rounded-lg bg-km-accent px-4 py-3 text-white focus:translate-y-0; }
-  .km-sidebar[data-compact='true'] { @apply w-20; }
-  .km-sidebar[data-compact='true'] .km-nav-label { display: none; }
-  .km-sidebar[data-compact='true'] .km-nav-group + .km-nav-group { @apply border-t border-km-border/60 pt-4; }
-  .km-sidebar[data-compact='true'] .km-nav-link { @apply justify-center px-2; }
-}
-@media (max-width: 700px) {
-  .km-header { padding-inline: 12px; height: 64px; gap: 8px; }
-  .km-page { padding-inline: 16px; }
 }

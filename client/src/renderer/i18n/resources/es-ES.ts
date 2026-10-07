@@ -11,6 +11,7 @@ const esES = {
     groups: { flatrate: 'Suscripción', free: 'Gratis', ads: 'Con anuncios', rent: 'Alquiler', buy: 'Compra' },
   },
   ui: {
+    libraryMenu: "Biblioteca y herramientas",
     skipContent: "Ir al contenido",
     mainNavigation: "Navegación principal",
     expandNavigation: "Expandir navegación",

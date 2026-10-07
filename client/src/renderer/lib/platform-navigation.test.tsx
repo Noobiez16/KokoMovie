@@ -4,61 +4,68 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
-
+import { GlobalSearch } from '../components/layout/GlobalSearch'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
-function LocationProbe() {
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+function Contents() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname + location.search}</output>
+  return <><output data-testid="location">{location.pathname + location.search}</output>{location.pathname === '/search' && <GlobalSearch />}<button>Outside</button></>
 }
-function setup(path = '/browse') {
-  return render(<MemoryRouter initialEntries={[path]}><AppLayout><LocationProbe /></AppLayout></MemoryRouter>)
+function setup(path = '/browse', state?: unknown) {
+  return render(<MemoryRouter initialEntries={[{ pathname: path.split('?')[0], search: path.includes('?') ? '?' + path.split('?')[1] : '', state }]}><AppLayout><Contents /></AppLayout></MemoryRouter>)
 }
 describe('platform navigation', () => {
-  it('keeps the chosen navigation size across page layouts', async () => {
-    const user = userEvent.setup()
-    const first = setup()
-    await user.click(screen.getByRole('button', { name: 'ui.collapseNavigation' }))
-    first.unmount()
-    setup('/downloads')
-    expect(screen.getByRole('button', { name: 'ui.expandNavigation' }).getAttribute('aria-expanded')).toBe('false')
-  })
-  it('starts compact on a narrow window but permits explicit expansion', async () => {
-    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const user = userEvent.setup()
-    setup()
-    await user.click(screen.getByRole('button', { name: 'ui.expandNavigation' }))
-    expect(screen.getByRole('button', { name: 'ui.collapseNavigation' }).getAttribute('aria-expanded')).toBe('true')
-  })
-  it('makes local library destinations directly available', () => {
-    setup()
-    expect(screen.getByRole('link', { name: 'history.myList' }).getAttribute('href')).toBe('/history?tab=list')
-    expect(screen.getByRole('link', { name: 'catalog.continueWatching' }).getAttribute('href')).toBe('/continue-watching')
-    expect(screen.getByRole('link', { name: 'nav.history' }).getAttribute('href')).toBe('/history')
-    expect(screen.getAllByRole('link', { name: 'nav.downloads' }).some((link) => link.getAttribute('href') === '/downloads')).toBe(true)
-  })
-  it('distinguishes list and history despite their shared pathname', () => {
-    setup('/history?tab=list')
+  it('reveals all existing local destinations and distinguishes list from history', async () => {
+    const user = userEvent.setup(); setup('/history?tab=list')
+    await user.click(screen.getByRole('button', { name: 'ui.libraryMenu' }))
+    for (const [label, href] of [['history.myList', '/history?tab=list'], ['catalog.continueWatching', '/continue-watching'], ['nav.history', '/history'], ['nav.downloads', '/downloads'], ['nav.providers', '/providers'], ['nav.settings', '/settings']]) {
+      expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe(href)
+    }
     expect(screen.getByRole('link', { name: 'history.myList' }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByRole('link', { name: 'nav.history' }).getAttribute('aria-current')).toBeNull()
   })
-  it('encodes a search and keeps its value after submitting', async () => {
-    const user = userEvent.setup()
-    setup()
+  it('returns focus after Escape closes the disclosure', async () => {
+    const user = userEvent.setup(); setup()
+    const toggle = screen.getByRole('button', { name: 'ui.libraryMenu' })
+    await user.click(toggle); await user.tab(); await user.keyboard('{Escape}')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(toggle)
+    expect(screen.queryByRole('link', { name: 'history.myList' })).toBeNull()
+  })
+  it('closes on outside interaction and navigation', async () => {
+    const user = userEvent.setup(); setup()
+    const toggle = screen.getByRole('button', { name: 'ui.libraryMenu' })
+    await user.click(toggle); await user.click(screen.getByText('Outside'))
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await user.click(toggle); await user.click(screen.getByRole('link', { name: 'nav.downloads' }))
+    expect(screen.getByTestId('location').textContent).toBe('/downloads')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  })
+  it.each([['/movies', undefined, 'nav.movies'], ['/series', undefined, 'nav.series'], ['/content/00000002-0000-4000-8000-00000000002a', undefined, 'nav.series'], ['/content/42', { tmdbType: 'movie' }, 'nav.movies']])('marks the primary destination for %s', (path, state, label) => {
+    setup(path as string, state)
+    expect(screen.getByRole('link', { name: label as string }).getAttribute('aria-current')).toBe('page')
+  })
+  it('keeps search out of the shell and exposes a search link', async () => {
+    const user = userEvent.setup(); setup()
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    await user.click(screen.getByRole('link', { name: 'nav.search' }))
+    expect(screen.getAllByRole('searchbox')).toHaveLength(1)
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+  })
+  it.each(['{Control>}k{/Control}', '{Meta>}k{/Meta}'])('navigates and focuses Search with %s', async (keys) => {
+    const user = userEvent.setup(); setup()
+    await user.keyboard(keys)
+    expect(screen.getByTestId('location').textContent).toBe('/search')
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+    await user.click(screen.getByText('Outside')); await user.keyboard(keys)
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+  })
+  it('encodes search text and preserves selected type while resetting page', async () => {
+    const user = userEvent.setup(); setup('/search?q=Alien&type=movie&page=2')
     const input = screen.getByRole('searchbox')
-    await user.type(input, 'Wall-E & friends{Enter}')
-    expect(screen.getByTestId('location').textContent).toBe('/search?q=Wall-E+%26+friends')
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Wall-E & friends')
-  })
-  it('hydrates the global search from the URL', () => {
-    setup('/search?q=Interstellar')
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Interstellar')
-  })
-  it('preserves the selected type when submitting an existing search', async () => {
-    const user = userEvent.setup()
-    setup('/search?q=Alien&type=movie&page=2')
-    await user.type(screen.getByRole('searchbox'), '{Enter}')
-    expect(screen.getByTestId('location').textContent).toContain('type=movie')
-    expect(screen.getByTestId('location').textContent).not.toContain('page=2')
+    expect((input as HTMLInputElement).value).toBe('Alien')
+    await user.clear(input); await user.type(input, 'Wall-E & friends{Enter}')
+    expect(screen.getByTestId('location').textContent).toBe('/search?q=Wall-E+%26+friends&type=movie')
+    expect((input as HTMLInputElement).value).toBe('Wall-E & friends')
   })
 })

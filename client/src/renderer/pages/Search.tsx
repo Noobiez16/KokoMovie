@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '../store/settings'
 import { catalogApi } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
+import { GlobalSearch } from '../components/layout/GlobalSearch'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/CategoryPagination'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -13,6 +14,7 @@ import { CatalogFallbackBanner } from '../components/catalog/CatalogFallbackBann
 
 export function SearchPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const tmdbApiKey = useSettingsStore((state) => state.tmdbApiKey)
   const [params, setParams] = useSearchParams()
   const query = (params.get('q') ?? '').trim()
@@ -48,8 +50,10 @@ export function SearchPage() {
     setParams(next)
     scrollCatalogToTop()
   }
-  return <AppLayout><div className="km-page">
+  return <AppLayout><div className="km-page km-search-page">
+    <button type="button" className="km-button-secondary mb-5" onClick={() => navigate(-1)}>{t('common.back')}</button>
     <PageHeader title={t('ui.searchTitle')} description={t('ui.searchDescription')} eyebrow={t('nav.discover')} />
+    <GlobalSearch />
     <div className="mb-8 flex flex-wrap gap-2" aria-label={t('ui.searchTitle')}>
       {([[undefined, 'ui.allTitles'], ['movie', 'nav.movies'], ['series', 'nav.series']] as const).map(([value, label]) =>
         <button key={label} type="button" aria-pressed={type === value} onClick={() => update({ type: value })} className={'rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ' + (type === value ? 'border-violet-500/40 bg-violet-500/20 text-violet-100' : 'border-km-border bg-km-surface text-purple-100/70 hover:text-white')}>{t(label)}</button>)}

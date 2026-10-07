@@ -11,6 +11,7 @@ const frFR = {
     groups: { flatrate: 'Abonnement', free: 'Gratuit', ads: 'Avec publicités', rent: 'Location', buy: 'Achat' },
   },
   ui: {
+    libraryMenu: "Bibliothèque et outils",
     skipContent: "Aller au contenu",
     mainNavigation: "Navigation principale",
     expandNavigation: "Développer la navigation",
