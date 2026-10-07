@@ -44,10 +44,14 @@ top navigation with the original centered logo, cinematic title artwork, a lands
 Continue Watching row, genre navigation and keyboard-operated season tabs. The clean header
 has no separator line; My Library joins saved titles and viewing history under one menu entry.
 Search expands left in the header and suggests titles below the field as you type, keeping
-the current page until you select a detail. Existing `/search` links retain filters and pagination.
+the current page until you select a detail. It contracts right when dismissed; an empty or
+one-character field shows no instructional panel. Existing `/search` links retain filters and pagination.
+Hero/detail artwork shows its complete frame on large and ultrawide screens, with fluid height
+and higher-resolution trusted artwork when needed. Playback exposes real 720p/1080p choices;
+unavailable variants are disabled, and direct videos report their decoded quality.
 The existing purple palette and logo bytes are preserved;
 motion respects the system's reduced-motion preference. Login and profiles are not added.
-It also adds regional viewing information, permanent completed downloads, controlled
+It also adds permanent completed downloads, controlled
 transfer teardown and a stricter renderer script policy.
 This source version has not been published as an installer; release downloads below may
 still contain an earlier version. See [current state](docs/current-state.md) for verified scope.
@@ -61,7 +65,6 @@ External catalog access uses your TMDB credential; source availability depends o
 - **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - **On-device storage** — watchlists, history, and preferences are stored locally on your machine
 - **Watch offline** — completed portable MP4 files stay until you remove them; equal-title downloads receive distinct filenames
-- **Where to watch** — choose a country to view subscription, free, advertising, rental and purchase information from JustWatch via TMDB; links open external viewing options
 - **Release updates** — optional update checks for published builds
 - **English, Español, Français** — switch the localised interface in Settings, with no restart
 - **Built-in diagnostics** — advanced users can open Developer Tools from the View menu to inspect console errors

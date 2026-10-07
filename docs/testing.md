@@ -1,11 +1,44 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-inline-search`.
-Final source checks: 531 deterministic tests and fourteen real Electron tests passed;
+**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-fullscreen-polish`.
+Final source checks: 616 deterministic tests and seventeen real Electron tests passed (37.3s);
 both TypeScript targets, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.
 
-### Integrated search and library refinement
+### Search exit, feature removal and fullscreen polish
+
+- Search lifecycle RED/GREEN verifies rightward 160ms closure, immediate inactive/inert state,
+  canceled exit on reopen/unmount, all dismissal paths, quiet short input and reduced motion.
+  Real Electron confirms the compiled collapse animation and absence of the empty panel.
+- Availability removal regressions deny retired endpoints, mount both detail types without
+  country/provider requests, discard old country/unknown persisted properties and retain
+  keychain updates, generic catalog cache semantics and maturity routes. Obsolete feature tests
+  were removed rather than retained as a positive product baseline.
+- Artwork RED reproduced cover framing; source inspection found the 620px ceiling. Focused tests cover trusted
+  original upgrades, contained width/DPR, intrinsic aspect, latched cached fallback, cleanup,
+  malicious protocol paths, offline cache and both byte limits. Native geometry/screenshot
+  checks pass at 3840x2160, 3440x1440, 1024x768 and actual native fullscreen. A hard contain edge
+  found in visual QA was feathered at the measured picture boundary; final captures were inspected.
+- Quality tests execute actual VideoPlayer lifecycle and controls: real tiers/original indices,
+  disabled unavailable 720p/1080p, direct decoded tiers, AUTO/manual intent, source transitions,
+  intrinsic resize/emptied, replacement video nodes and corrected540/cinematic classifications.
+- Real Electron decodes generated 1280x720 and 1920x1080 portable files through production
+  PlayerHost/VideoPlayer. Both DOM and window fullscreen preserve identity, source, decoded
+  pixels and menu quality; playback advances with no loadstart/emptied restart. Initial native
+  failures were caused by the test clicking a covered gear; the corrected click-away interaction
+  passed both focused tests and the fresh complete 17-test suite without product changes.
+- An isolated live Spider-Man probe selected VixSrc and measured 1282x534 before/during DOM
+  fullscreen, with identical video/source. This was one source at one time; no user credentials
+  or preferences were accessed, and all-provider 1080p availability was not established.
+- Final gates: 616/616 units, 17/17 Electron, renderer/main TypeScript, lint 0 errors/0 warnings,
+  build, 227 production licenses/three FFmpeg targets, unchanged logo/palette and version 2.0.0.
+- Local Windows x64 package client/.codex/package-windows-fullscreen/win-unpacked passes
+  resources/native modules/FFmpeg/CSP/actual executable fuses; all 28 renderer assets match
+  tested source. Unsigned, unpublished and not installed. Existing Vite/plugin deprecations,
+  SQLite experimental notice, player chunk size and ASAR/duplicate-reference packaging notices
+  remain separate tooling debt; validation output is not claimed to be warning-free.
+
+### Integrated search and library refinement (historical)
 
 - Native RED reproduced the old 1px topbar separator; the compiled header now has no border.
   Home has one Continue Watching row with real SQLite positions and no saved-list row/query.
@@ -121,9 +154,10 @@ are retained and do not imply every live/manual scenario has been repeated for v
   video decoding, seek and play in Electron. It does not join a torrent swarm.
 - Native CSP checks inject an inline script, load an ordinary external local eval probe,
   and run a blob worker. DevTools evaluation alone bypasses CSP and is not the eval proof.
-- Where to watch tests cover both media types, explicit country selection, grouping,
+- At this earlier milestone, Where to watch tests covered both media types, country selection, grouping,
   saved/outdated notices, malformed response/link rejection, retry and title isolation.
-  Native fixtures switch countries and verify preference persistence after reload.
+  Native fixtures switched countries and verified persistence. The later polish block removes
+  this feature and its positive tests; current coverage verifies absence and migration instead.
 - Fresh production audit returned zero info/low/moderate/high/critical findings.
   License check passed for 227 production packages and three FFmpeg targets.
 - Windows x64 unpacked packaging completed with `--publish never`; version/resources,

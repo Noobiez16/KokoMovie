@@ -1,8 +1,8 @@
 # KokoMovie Current State
 
 **Current review:** 2026-10-07
-**Source target:** v2.0.0, branch `codex/kokomovie-v2-inline-search`, based on `2d9ec65`.
-**Recovery points:** `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
+**Source target:** v2.0.0, branch `codex/kokomovie-v2-fullscreen-polish`, based on `1cc797a`.
+**Recovery points:** `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
 **Release status:** development source; no v2.0.0 installer published or installed by this work.
 
 ## Verified v2.0.0 interface
@@ -13,6 +13,9 @@ Compact windows move the primary links into that disclosure. Search expands left
 showing up to eight real poster/title suggestions beneath the field after a 300ms debounce and
 at least two characters. Typing keeps the current route; selecting opens details. Keyboard selection,
 Escape focus, outside/Tab closure, Ctrl+K/Cmd+K and stale-response suppression are covered.
+Dismissal contracts right over 160ms while the field/panel immediately become inactive.
+Reopening cancels closure; reduced motion closes immediately. Empty or one-character input
+has no panel or minimum-length instruction.
 Legacy `/search` links retain their single page field, URL filters, pagination and history; the
 redundant header control is omitted there. The shared
 scroll area and single PlayerHost outside Routes are preserved. No login or profiles were added.
@@ -25,6 +28,21 @@ Integrated detail artwork, keyboard season tabs and independent episode play/dow
 buttons retain the existing source, resume and demand-loading workflows. Episodes form
 four/three/two columns at 1440/1152/1024px. Without a featured hero, content keeps the header
 space so local library rows and genre controls remain accessible.
+
+Hero/detail artwork contains the complete image with a feathered transition to the existing
+background. Fluid height replaces the 620px hero ceiling and allows copy/actions to grow.
+Only hero/detail trusted w1280 artwork upgrades to original when contained size and density
+require it, with cached w1280 fallback. Original image requests retain fixed-host/path validation,
+15 MiB limits and timeout. Native layout checks cover 3840x2160, 3440x1440 and 1024x768.
+Measured monitors are 3440x1440 and 1440x2560, both at scale 1.
+
+Quality exposes actual HLS variants and AUTO; 720p/1080p missing from a source are disabled.
+Direct video reports its measured nominal tier and cannot change encoded resolution. Intrinsic
+metadata/resize events update that measurement; real source changes clear old variant data.
+Fullscreen retains the video, URL, decoded pixels and quality intent. Real generated 720p/1080p
+files passed DOM and native-window fullscreen checks. One isolated live Spider-Man: Brand New Day
+probe selected VixSrc: 1282x534 cinematic frames (nominal 720p) remained identical during fullscreen.
+That observation applies to the tested source and time, not every provider or the user's selected source.
 
 Compiled Electron checks verify card zoom, menu entry, 200ms valid Search/season entry and
 reduced motion without displacement or loss of focus. These are KokoMovie motion values;
@@ -39,9 +57,10 @@ offline matches to page 1. Catalog failures expose actual query retries.
 
 The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
 base palette values are unchanged. Locale persistence accepts both canonical and legacy
-codes. Thirteen real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+codes. Seventeen real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
 search/navigation, compiled layout/motion and privileged boundaries. See [testing](testing.md)
-for limits. This UI refinement changes no privileged process, player or dependency contracts.
+for limits. Dependencies and playback-provider contracts are unchanged; this block retires
+specific availability endpoints and extends validated artwork sizing and player quality presentation.
 
 The renderer entry checks for Electron's preload bridge before mounting App/PlayerHost.
 A regular browser at the development URL now receives localized desktop guidance instead
@@ -77,12 +96,12 @@ and blob media-worker support. Trusted-frame headers do not replace third-party 
 Existing frame/media/network permissions remain broad for compatibility; this is targeted
 script hardening, not a complete removal of third-party media risk.
 
-Where to watch is separate from playback source selection. Users explicitly select and
-locally remember a country. TMDB/JustWatch information is grouped by subscription, free,
-ads, rental and purchase, with validated landing links, attribution and cache notices.
-The country preference is stored locally; existing SQLite library export does not include it.
+Where to watch has been removed completely: UI/API, translations, country persistence and
+specific country/watch-provider endpoints. Older km-settings payloads migrate to an empty
+durable state while runtime keychain handling remains. Actual playback providers and regional
+maturity certifications are preserved.
 
-Final source checks passed: 531 deterministic tests, fourteen Electron tests, both TypeScript
+Final source checks passed: 616 deterministic tests, seventeen Electron tests (37.3s), both TypeScript
 targets, zero-error/zero-warning lint, build and licenses (227 packages/three FFmpeg targets).
 The preceding core block returned a zero-finding production audit; dependencies did not
 change during this UI refinement. The native download test used a generated
@@ -90,7 +109,10 @@ H.264/AAC fixture and real FFmpeg; movie/episode outputs had different names and
 video decoding, seek and play worked with HTTP blocked.
 
 A Windows x64 unpacked package was prepared and inspected, including native resources,
-version, fuses, file CSP and bundled FFmpeg. It is unsigned, unpublished and not installed.
+version, fuses, file CSP and bundled FFmpeg. All 28 renderer assets match the tested build.
+The package is at client/.codex/package-windows-fullscreen/win-unpacked; it is unsigned,
+unpublished and not installed. Existing Vite/plugin deprecations, Node SQLite experimental
+notice, player chunk size and packaging ASAR/duplicate-reference notices remain tooling debt.
 Authenticode needs a signing identity; installed upgrades, Linux/macOS packaging and live
 peer/provider endurance were not repeated here. Title alerts, personal collections,
 history-based recommendations and a marathon planner remain future roadmap items.

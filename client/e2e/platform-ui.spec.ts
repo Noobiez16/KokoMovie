@@ -47,18 +47,7 @@ test.beforeAll(async () => {
         const n = Number(input.path.split('/')[4])
         result = { id: n, season_number: n, name: `Season ${n}`, episodes: Array.from({ length: 4 }, (_, i) => ({ id: n * 1000 + i, episode_number: i + 1, season_number: n, show_id: Number(input.path.split('/')[2]), name: `Fixture Episode ${n}-${i + 1}`, overview: 'A deterministic episode description for season selection and desktop layout verification.', runtime: 45 + i, still_path: '/fixture.jpg', air_date: '2026-01-01' })) }
       }
-      if (input.path === '/configuration/countries') result = [
-        { iso_3166_1: 'BO', english_name: 'Bolivia', native_name: 'Bolivia' },
-        { iso_3166_1: 'FR', english_name: 'France', native_name: 'France' },
-      ]
-      if (/\/(movie|tv)\/\d+\/watch\/providers$/.test(input.path)) {
-        const id = Number(input.path.split('/')[2])
-        const type = input.path.split('/')[1]
-        result = { id, results: {
-          BO: { link: `https://www.themoviedb.org/${type}/${id}/watch?locale=BO`, flatrate: [{ provider_id: 1, provider_name: 'Fixture Subscription', logo_path: '/fixture.jpg', display_priority: 1 }] },
-          FR: { link: `https://www.themoviedb.org/${type}/${id}/watch?locale=FR`, rent: [{ provider_id: 2, provider_name: 'Fixture Rental', logo_path: '/fixture.jpg', display_priority: 1 }] },
-        } }
-      }
+      if (input.path === '/configuration/countries' || input.path.endsWith('/watch/providers')) throw new Error('Removed viewing-availability feature must not request these endpoints')
       if (input.path.endsWith('/release_dates') || input.path.endsWith('/content_ratings')) result = { results: [] }
       if (process.env.KOKOMOVIE_UI_FIXTURE_EMPTY === '1' && /\/(?:trending|discover|search)\//.test(input.path)) result = { results: [], total_pages: 1, total_results: 0 }
       return { body: JSON.stringify(result), source: 'network', stale: false }
@@ -97,19 +86,10 @@ test('desktop navigation, URL search state, library and translated settings', as
   await page.getByRole('button', { name: 'More Info', exact: true }).click()
   await expect(page).toHaveURL(/content\//)
   await expect(page.getByRole('heading', { name: 'Fixture Movie 1-1', exact: true })).toBeVisible()
-  const country = page.getByRole('combobox', { name: 'Country', exact: true })
-  await expect(country).toHaveValue('')
-  await expect(country.getByRole('option', { name: 'Bolivia', exact: true })).toBeAttached()
-  await country.selectOption('BO')
-  await expect(page.getByRole('group', { name: 'Subscription', exact: true })).toContainText('Fixture Subscription')
-  await expect(page.getByText('JustWatch', { exact: false }).first()).toBeVisible()
-  await country.selectOption('FR')
-  await expect(page.getByRole('group', { name: 'Rent', exact: true })).toContainText('Fixture Rental')
-  await expect(page.getByText('Fixture Subscription', { exact: true })).toHaveCount(0)
-  await country.selectOption('BO')
+  await expect(page.getByRole('combobox', { name: 'Country', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Where to watch', exact: true })).toHaveCount(0)
   await page.reload()
-  await expect(country).toHaveValue('BO')
-  await expect(page.getByText('Fixture Subscription', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Fixture Movie 1-1', exact: true })).toBeVisible()
   await screenshot('detail')
   await screenshot('detail', 1024, 768)
   await primary('Home')
@@ -392,6 +372,7 @@ test('inline search expands left, suggests current titles and preserves catalog 
   await control.click()
   await expect(field).toBeFocused()
   await field.fill('i')
+  await expect(suggestions).toHaveCount(0)
   await expect(suggestions.getByRole('option')).toHaveCount(0)
   await field.fill('inline slow')
   await expect.poll(() => application.evaluate(() => process.env.KOKOMOVIE_INLINE_PENDING)).toBe('1')
@@ -419,7 +400,14 @@ test('inline search expands left, suggests current titles and preserves catalog 
     expect(geometry.panel.right).toBeLessThanOrEqual(width)
     expect(geometry.panel.top).toBeGreaterThanOrEqual(geometry.field.bottom)
   }
-  await page.keyboard.press('Escape')
+  const closing = await field.evaluate(element => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    return new Promise(resolve => requestAnimationFrame(() => {
+      const disclosure = document.querySelector('.km-header-search-expanded')!
+      resolve({ closing: disclosure.getAttribute('data-closing'), hidden: disclosure.getAttribute('aria-hidden'), inert: disclosure.hasAttribute('inert'), disabled: (element as HTMLInputElement).disabled, animation: getComputedStyle(element).animationName })
+    }))
+  })
+  expect(closing).toEqual({ closing: 'true', hidden: 'true', inert: true, disabled: true, animation: 'km-search-collapse' })
   await expect(suggestions).toHaveCount(0)
   await expect(control).toBeFocused()
   await page.keyboard.press('Control+k')
@@ -448,4 +436,46 @@ test('inline search expands left, suggests current titles and preserves catalog 
   await page.keyboard.press('Escape')
   await writeFile(join(visual, 'inline-search-metrics.json'), JSON.stringify({ normalDuration, reducedAnimation: 'none', widths: [1440, 1024, 960], routeStableWhileTyping: true, delayedOldResponseSuppressed: true }, null, 2))
   await page.emulateMedia({ reducedMotion: 'no-preference' })
+})
+
+test('large desktop and native fullscreen show complete hero artwork with adaptive height', async () => {
+  const displays = await application.evaluate(({ screen }) => screen.getAllDisplays().map(display => ({ width: display.bounds.width, height: display.bounds.height, scaleFactor: display.scaleFactor, physicalWidth: Math.round(display.bounds.width * display.scaleFactor), physicalHeight: Math.round(display.bounds.height * display.scaleFactor) })))
+  await writeFile(join(visual, 'display-metrics.json'), JSON.stringify(displays, null, 2))
+  await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '0' })
+  await primary('Home')
+  const artwork = page.locator('.km-hero-artwork').first()
+  await expect(artwork).toBeVisible()
+  for (const [width, height] of [[3840, 2160], [3440, 1440], [1024, 768]]) {
+    await screenshot('fullscreen-hero', width, height)
+    const frame = await artwork.evaluate(element => {
+      const image = element as HTMLImageElement
+      const rect = image.getBoundingClientRect()
+      return { fit: getComputedStyle(image).objectFit, height: rect.height, source: image.currentSrc, complete: image.complete, naturalWidth: image.naturalWidth }
+    })
+    expect(frame.fit).toBe('contain')
+    expect(frame.complete && frame.naturalWidth > 0).toBe(true)
+    expect(frame.height).toBeGreaterThanOrEqual(height * .6)
+    if (width > 3000) expect(frame.source).toContain('/original/')
+    await expect(page.getByRole('button', { name: 'More Info', exact: true })).toBeVisible()
+  }
+  try {
+    const display = await application.evaluate(({ BrowserWindow, screen }) => {
+      const window = BrowserWindow.getAllWindows()[0]!
+      const bounds = window.getBounds()
+      const display = screen.getDisplayNearestPoint({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+      window.setFullScreen(true)
+      return display.bounds
+    })
+    await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isFullScreen())).toBe(true)
+    await expect.poll(() => page.evaluate(() => ({ width: innerWidth, height: innerHeight }))).toEqual({ width: display.width, height: display.height })
+    await expect(artwork).toHaveCSS('object-fit', 'contain')
+    await page.screenshot({ path: join(visual, 'fullscreen-hero-native.png'), animations: 'disabled' })
+    await writeFile(join(visual, 'fullscreen-viewport.json'), JSON.stringify(await page.evaluate(() => ({ width: innerWidth, height: innerHeight, pixelRatio: devicePixelRatio })), null, 2))
+    await page.getByRole('button', { name: 'More Info', exact: true }).click()
+    await expect(page.locator('.km-detail-artwork')).toHaveCSS('object-fit', 'contain')
+    await page.screenshot({ path: join(visual, 'fullscreen-detail-native.png'), animations: 'disabled' })
+  } finally {
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setFullScreen(false))
+    await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isFullScreen())).toBe(false)
+  }
 })
