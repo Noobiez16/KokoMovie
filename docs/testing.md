@@ -1,9 +1,20 @@
 # Testing and Regression Baseline
 
 **Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-hbo-ui`.
-Final source checks: 518 deterministic tests and twelve real Electron tests passed;
+Final source checks: 520 deterministic tests and thirteen real Electron tests passed;
 both TypeScript targets, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.
+
+### Desktop runtime guidance
+
+- Reproduced the development browser crash on missing `onStreamsCollected`. The entry
+  now mounts App only when the preload bridge exists; otherwise it renders EN/ES/FR
+  desktop guidance. The live development browser was reloaded and inspected successfully.
+- Entry regressions verify both missing-bridge guidance and normal desktop mounting.
+  A sandboxed native Chromium window with no preload verifies the compiled guidance;
+  the existing real-app navigation, persistence, playback and security tests still pass.
+- Final gate: 520 units, thirteen native tests, both TypeScript targets, zero-error/zero-warning
+  lint and build passed. Main-process contracts and dependencies remain unchanged.
 
 ### HBO-inspired UI refinement
 

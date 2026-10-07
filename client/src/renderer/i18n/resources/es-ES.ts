@@ -11,6 +11,9 @@ const esES = {
     groups: { flatrate: 'Suscripción', free: 'Gratis', ads: 'Con anuncios', rent: 'Alquiler', buy: 'Compra' },
   },
   ui: {
+    desktopRequiredTitle: 'Abre KokoMovie en la aplicación de escritorio',
+    desktopRequiredDescription: 'Esta dirección sirve la interfaz de desarrollo. La reproducción, tu biblioteca local y los ajustes requieren la conexión con la aplicación de escritorio, que no está disponible en este navegador.',
+    desktopRequiredDevHint: 'Si ejecutaste {{command}}, utiliza la ventana de KokoMovie que se abrió.',
     libraryMenu: "Biblioteca y herramientas",
     skipContent: "Ir al contenido",
     mainNavigation: "Navegación principal",

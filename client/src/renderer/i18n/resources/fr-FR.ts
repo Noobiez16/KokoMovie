@@ -11,6 +11,9 @@ const frFR = {
     groups: { flatrate: 'Abonnement', free: 'Gratuit', ads: 'Avec publicités', rent: 'Location', buy: 'Achat' },
   },
   ui: {
+    desktopRequiredTitle: 'Ouvrez KokoMovie dans l’application de bureau',
+    desktopRequiredDescription: 'Cette adresse sert l’interface de développement. La lecture, votre bibliothèque locale et les paramètres nécessitent la connexion à l’application de bureau, indisponible dans ce navigateur.',
+    desktopRequiredDevHint: 'Si vous avez lancé {{command}}, utilisez la fenêtre KokoMovie qui s’est ouverte.',
     libraryMenu: "Bibliothèque et outils",
     skipContent: "Aller au contenu",
     mainNavigation: "Navigation principale",

@@ -152,6 +152,10 @@ npm run dev:client
 ```
 
 This starts the main compiler in watch mode and launches the Electron application on your desktop.
+Keep the terminal running and use that KokoMovie window. Opening `http://localhost:5173/`
+in a regular browser only serves the development renderer; playback, local records and
+settings require Electron's preload connection. Without that connection, the page shows
+desktop guidance instead of mounting privileged flows and leaving a blank screen.
 
 ### Project structure
 

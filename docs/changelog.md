@@ -34,7 +34,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fuse verification can inspect a supplied packaged executable without modifying it.
 - All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
 
+### Fixed
+- Opening the development renderer in a regular browser now shows localized desktop guidance instead of crashing on absent Electron subscriptions. App and PlayerHost mount only when the preload bridge exists; no desktop API is exposed through HTTP.
+
 ### Verification and remaining work
+- Renderer runtime correction: 520 deterministic tests and thirteen real Electron tests passed, with both TypeScript targets, zero-error/zero-warning lint and build. The development browser and compiled no-preload Chromium guidance were verified.
 - Final HBO-inspired UI block: 518 deterministic tests and twelve real Electron tests passed, alongside both TypeScript targets, zero-error/zero-warning lint, production build and licenses. Native checks cover 1440/1152/1024 episode geometry, EN/ES/FR, no-hero header space, same-route results, keyboard seasons and reduced motion.
 - Inspected motion belongs to KokoMovie; exact HBO Max macOS timings remain unverified. The selected Behance concept is static and unofficial. Existing Vite/SQLite/build warnings remain documented separately from clean lint.
 - UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).

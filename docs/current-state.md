@@ -33,9 +33,14 @@ offline matches to page 1. Catalog failures expose actual query retries.
 
 The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
 base palette values are unchanged. Locale persistence accepts both canonical and legacy
-codes. Twelve real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+codes. Thirteen real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
 search/navigation, compiled layout/motion and privileged boundaries. See [testing](testing.md)
 for limits. This UI refinement changes no privileged process, player or dependency contracts.
+
+The renderer entry checks for Electron's preload bridge before mounting App/PlayerHost.
+A regular browser at the development URL now receives localized desktop guidance instead
+of crashing on missing provider subscriptions. This is a desktop client, not a browser
+backend: no credentials, database, source or playback APIs are exposed over HTTP.
 
 The preceding core block repaired source/downloader contracts and callback redirects. Torrent
 downloads require the actual IPv4 endpoint, live selected file and capability. Both accepted
@@ -71,7 +76,7 @@ locally remember a country. TMDB/JustWatch information is grouped by subscriptio
 ads, rental and purchase, with validated landing links, attribution and cache notices.
 The country preference is stored locally; existing SQLite library export does not include it.
 
-Final UI checks passed: 518 deterministic tests, twelve Electron tests, both TypeScript
+Final source checks passed: 520 deterministic tests, thirteen Electron tests, both TypeScript
 targets, zero-error/zero-warning lint, build and licenses (227 packages/three FFmpeg targets).
 The preceding core block returned a zero-finding production audit; dependencies did not
 change during this UI refinement. The native download test used a generated

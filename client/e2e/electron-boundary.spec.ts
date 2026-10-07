@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { createServer, type Server } from 'node:https'
 import { tmpdir } from 'node:os'
@@ -83,6 +83,28 @@ test('rejects malformed IPC and persists a valid preference', async () => {
 
   await page.evaluate(() => window.electronAPI.prefsSet({ autoplay: false }))
   expect(await page.evaluate(async () => (await window.electronAPI.prefsGet()).autoplay)).toBe(0)
+})
+
+test('renders desktop guidance in a Chromium window without the preload bridge', async () => {
+  const nextWindow = application.waitForEvent('window')
+  const windowId = await application.evaluate(async ({ BrowserWindow }) => {
+    const primary = BrowserWindow.getAllWindows()[0]!
+    const browser = new BrowserWindow({ show: false, width: 1024, height: 768,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
+    await browser.loadURL(primary.webContents.getURL())
+    return browser.id
+  })
+  try {
+    const browser = await nextWindow
+    await expect(browser.getByRole('heading', { name: 'Open KokoMovie in the desktop app' })).toBeVisible()
+    expect(await browser.evaluate(() => typeof window.electronAPI)).toBe('undefined')
+    await expect(browser.getByText(/npm run dev/)).toBeVisible()
+    await expect(browser.locator('.km-topbar')).toHaveCount(0)
+    await mkdir(join(process.cwd(), '.codex', 'visual'), { recursive: true })
+    await browser.screenshot({ path: join(process.cwd(), '.codex', 'visual', 'runtime-desktop-required.png') })
+  } finally {
+    await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), windowId)
+  }
 })
 
 test('enforces production script policy while allowing the media worker', async () => {
