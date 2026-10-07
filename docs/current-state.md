@@ -5,6 +5,12 @@
 **Recovery points:** `codex/kokomovie-v2-fullscreen-polish` remains at `7e1c219`; `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
 **Release status:** release prepared on 2026-10-07. The tag-triggered [release workflow](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml) builds and publishes installers after all gates succeed; consult [Releases](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.0.0) for publication status. No installer was installed by this work.
 
+The first v2.0.0 tag run stopped in Linux test gates, with no installer publication.
+Recovery uses portable OS temporary directories for torrent fixtures and an Openbox
+window manager for real fullscreen geometry under Xvfb. Native geometry assertions
+are preserved, and the release stays at 2.0.0. See [testing](testing.md) for the failure
+evidence and validation scope.
+
 ## Release integration and screenshots
 
 README previews capture the actual Electron renderer with a live TMDB catalog: Home,

@@ -52,8 +52,28 @@ jobs:
         run: npm run vendor:ffmpeg --workspace=client -- linux-x64
       - name: Production build
         run: npm run build --workspace=client
+      - name: Install X11 window manager for native fullscreen tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openbox x11-utils
       - name: Real Electron security boundary tests
-        run: xvfb-run -a npm run test:e2e --workspace=client
+        shell: bash
+        run: |
+          xvfb-run -a --server-args="-screen 0 3840x2160x24" bash -euo pipefail <<'EOF'
+          openbox --sm-disable >"$RUNNER_TEMP/kokomovie-openbox.log" 2>&1 &
+          wm_pid=$!
+          trap 'kill "$wm_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..50}; do
+            if LC_ALL=C xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'; then
+              npm run test:e2e --workspace=client
+              exit 0
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/kokomovie-openbox.log"
+          printf '%s\n' 'X11 window manager did not become ready.' >&2
+          exit 1
+          EOF
         env:
           DEBUG: pw:browser
 
