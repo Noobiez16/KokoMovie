@@ -76,7 +76,7 @@ describe('source quality classification', () => {
 })
 
 describe('provider quality ranking', () => {
-  it('ranks standard releases first, unknown releases next, and CAM/TS last', () => {
+  it('ranks non-CAM sources by resolution, retaining CAM/TS as last resort', () => {
     const standard720 = result('standard-720', classifySourceQuality({
       url: 'https://cdn.example/web-dl/master.m3u8', resolution: 720, mediaValidated: true,
     }))
@@ -91,7 +91,33 @@ describe('provider quality ranking', () => {
     }))
 
     expect(rankProviderResults([cam1080, queryTs1080, unknown1080, standard720]).map((item) => item.providerId))
-      .toEqual(['standard-720', 'unknown-1080', 'cam-1080', 'query-ts-1080'])
+      .toEqual(['unknown-1080', 'standard-720', 'cam-1080', 'query-ts-1080'])
+  })
+
+  it('prefers validated media before unvalidated resolution or release claims', () => {
+    const validated = result('validated', classifySourceQuality({ url: 'https://x/a', resolution: 720, mediaValidated: true }))
+    const unvalidated = result('unvalidated', classifySourceQuality({ url: 'https://x/web-dl/a', resolution: 2160 }))
+    const cam = result('cam', classifySourceQuality({ url: 'https://x/cam/a', resolution: 2160, mediaValidated: true }))
+    expect(rankProviderResults([cam, unvalidated, validated]).map((item) => item.providerId))
+      .toEqual(['validated', 'unvalidated', 'cam'])
+  })
+
+  it('uses release evidence only to break equal resolution ties and preserves stable order', () => {
+    const unknown = result('unknown', classifySourceQuality({ url: 'https://x/a', resolution: 2160, mediaValidated: true }))
+    const standard = result('standard', classifySourceQuality({ url: 'https://x/web-dl/a', resolution: 2160, mediaValidated: true }))
+    const tied = { ...standard, providerId: 'tied' }
+    expect(rankProviderResults([unknown, standard, tied]).map((item) => item.providerId))
+      .toEqual(['standard', 'tied', 'unknown'])
+  })
+
+  it('compares legacy 4K and 2K labels as tiers without inventing media validation', () => {
+    const legacy = (providerId: string, quality: string): ProviderResult => ({
+      providerId, providerName: providerId, streams: [{ url: `https://x/${providerId}`, quality }],
+    })
+    expect(rankProviderResults([legacy('hd', '1080p'), legacy('qhd', '2K'), legacy('uhd', '4K')]).map((item) => item.providerId))
+      .toEqual(['uhd', 'qhd', 'hd'])
+    expect(rankProviderResults([legacy('legacy', '4K'), result('validated', classifySourceQuality({ url: 'https://x/a', resolution: 720, mediaValidated: true }))])[0].providerId)
+      .toBe('validated')
   })
 
   it('does not auto-fallback to a CAM that arrived before an available standard source', () => {

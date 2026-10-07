@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { setupCertPinning } from './cert-pinning'
 import { setupUpdater } from './updater'
 import { purgeAccountEraKeychainEntries, purgeLegacyCredentialFile, registerAuthIpc } from './ipc/auth'
-import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange, readOfflineArtwork, readOfflineSubtitle } from './ipc/download'
+import { registerDownloadIpc, decryptLocalSegment, purgeExpiredDownloads, decryptLocalDirectVideoRange, readOfflineArtwork, readOfflineSubtitle, shutdownDownloadJobs } from './ipc/download'
 import { registerAppIpc } from './ipc/app'
 import { registerApiProxy } from './ipc/api-proxy'
 import { registerLibraryIpc } from './ipc/library'
@@ -13,11 +13,12 @@ import { registerDiagnosticsIpc } from './ipc/diagnostics'
 import { registerTmdbRepositoryIpc } from './ipc/tmdb-repository'
 import { registerProvidersIpc, initStreamHeaderInjector, isStreamHost, startStreamProxy } from './ipc/providers'
 import { registerArtworkProtocol } from './catalog-artwork'
-import { registerTorrentIpc } from './ipc/torrent'
+import { registerTorrentIpc, shutdownTorrentService } from './ipc/torrent'
 import { destroyDiscordPresence, registerDiscordPresence } from './discord-presence'
 import { installApplicationMenu } from './app-menu'
 import { isTrustedRendererUrl, setTrustedRendererWebContentsId } from './ipc/security'
 import { isAuthorizedLocalMediaRequest, isPermittedLocalMediaMethod } from './providers/local-media-capability'
+import { rendererContentSecurityPolicy } from './content-security-policy'
 
 // Guard against EPIPE crashes — Electron sometimes writes to stdout/stderr after
 // the pipe has been closed (e.g. when the parent process exits or during rapid
@@ -143,29 +144,10 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders: Record<string, string[]> = {
       ...details.responseHeaders as Record<string, string[]>,
-      'Content-Security-Policy': [
-        isDev
-          ? [
-              "default-src 'self' 'unsafe-inline'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
-              "style-src 'self' 'unsafe-inline' https:",
-              "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
-              "media-src 'self' blob: https: http://localhost:* offline:",
-              "img-src 'self' data: blob: https: catalog-cache: offline:",
-              "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com",
-              "font-src 'self' data: https:",
-            ].join('; ')
-          : [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.youtube.com https://www.youtube.com https://s.ytimg.com https://static.doubleclick.net https://www.google.com",
-              "style-src 'self' 'unsafe-inline' https:",
-              "media-src 'self' blob: https: http: http://localhost:* offline:",
-              "connect-src 'self' http://localhost:* ws://localhost:* https: offline:",
-              "img-src 'self' data: blob: https: catalog-cache: offline:",
-              "frame-src 'self' https://*.youtube.com https://*.youtube-nocookie.com https://*.ytimg.com https:",
-              "font-src 'self' data: https:",
-            ].join('; '),
-      ],
+    }
+    // Never replace the security policy of a third-party frame or provider page.
+    if (details.resourceType === 'mainFrame' && isTrustedRendererUrl(details.url)) {
+      responseHeaders['Content-Security-Policy'] = [rendererContentSecurityPolicy(isDev)]
     }
 
     // Inject CORS headers for direct stream CDN fetches (fallback path).
@@ -312,7 +294,21 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', destroyDiscordPresence)
+let shutdownStarted = false
+let shutdownComplete = false
+app.on('before-quit', (event) => {
+  destroyDiscordPresence()
+  if (shutdownComplete) return
+  event.preventDefault()
+  if (shutdownStarted) return
+  shutdownStarted = true
+  void (async () => {
+    try { await shutdownDownloadJobs() } catch { console.error('[shutdown] Download teardown failed') }
+    try { await shutdownTorrentService() } catch { console.error('[shutdown] Torrent teardown failed') }
+    shutdownComplete = true
+    app.quit()
+  })()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

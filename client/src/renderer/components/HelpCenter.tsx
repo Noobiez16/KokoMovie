@@ -100,10 +100,12 @@ export function HelpCenter() {
 
   useEffect(() => {
     const off = window.electronAPI?.onHelpAction(setView)
+    const onLocalHelp = () => setView('documentation')
+    window.addEventListener('kokomovie:help', onLocalHelp)
     void checkFeedback()
     const onFocus = () => { void checkFeedback() }
     window.addEventListener('focus', onFocus)
-    return () => { off?.(); window.removeEventListener('focus', onFocus) }
+    return () => { off?.(); window.removeEventListener('focus', onFocus); window.removeEventListener('kokomovie:help', onLocalHelp) }
   }, [checkFeedback])
 
   const submitFeedback = async () => {

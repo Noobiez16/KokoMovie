@@ -1,13 +1,15 @@
 {
   "name": "kokomovie-pc",
-  "version": "1.5.5",
+  "version": "2.0.0",
   "private": true,
   "license": "GPL-3.0-or-later",
   "workspaces": [
     "client"
   ],
   "overrides": {
-    "fast-xml-parser": ">=4.4.1"
+    "fast-xml-parser": ">=4.4.1",
+    "js-yaml": "4.3.2",
+    "ip-address": "^10.7.1"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-arm64-gnu": "4.61.1",
@@ -23,7 +25,7 @@
     "dist:linux": "npm run dist:linux --workspace=client",
     "dist:win": "npm run dist:win --workspace=client",
     "dist:mac": "npm run dist:mac --workspace=client",
-    "typecheck": "tsc -p client/tsconfig.json --noEmit && npm run build:main --workspace=client",
+    "typecheck": "tsc -p client/tsconfig.json --noEmit && tsc -p client/e2e/tsconfig.json --noEmit && npm run build:main --workspace=client",
     "audit:production": "node scripts/audit-production.mjs",
     "check:licenses": "node scripts/check-licenses.mjs",
     "vendor:ffmpeg": "npm run vendor:ffmpeg --workspace=client"

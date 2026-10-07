@@ -24,6 +24,7 @@ const TMDB_MAX_PAGE = 500
 const TMDB_PAGES_PER_VIEW_MAX = 5
 
 export interface ContentSummary {
+  description?: string | null
   id: string
   title: string
   type: 'movie' | 'series'
@@ -135,6 +136,7 @@ function toSummary(item: TmdbItem): ContentSummary {
   return {
     id: tmdbContentId(type === 'series' ? 'tv' : 'movie', item.id),
     title: tmdbTitle(item),
+    description: item.overview ?? null,
     type,
     releaseYear: tmdbYear(item),
     rating: null,
@@ -273,15 +275,17 @@ export const catalogApi = {
   },
 
   browse: async (
-    params: { genre?: string; type?: string; year?: number; page?: number; limit?: number },
+    params: { genre?: string; collection?: 'trending'; type?: string; year?: number; page?: number; limit?: number },
     _profileId?: string,
   ) => {
     const c = client()
     const page = params.page ?? 1
     const g = params.genre ? GENRES.find((x) => x.slug === params.genre) : undefined
     const isTv = params.type === 'series'
+    const isTrending = params.collection === 'trending' || params.genre === 'trending'
+    const trendingType = isTv ? 'tv' : params.type === 'movie' ? 'movie' : 'all'
 
-    // TMDB discover pages are fixed at 20 results, so a larger page size means fetching several
+    // TMDB catalog pages are fixed at 20 results, so a larger page size means fetching several
     // consecutive TMDB pages and presenting them as one. `limit` used to be accepted and silently
     // ignored, which is why category views always showed 20 items no matter what was requested.
     const perTmdbPage = 20
@@ -293,7 +297,9 @@ export const catalogApi = {
         Array.from({ length: batch }, (_, offset) => {
           const tmdbPage = firstTmdbPage + offset
           if (tmdbPage > TMDB_MAX_PAGE) return null
-          const request = isTv
+          const request = isTrending
+            ? c.trending(trendingType, tmdbPage)
+            : isTv
             ? c.discoverTv(g?.tvId, tmdbPage, params.year)
             : c.discoverMovie(g?.movieId, tmdbPage, params.year)
           // A later page in the batch can legitimately fall past the end of the result set; that
@@ -306,8 +312,8 @@ export const catalogApi = {
     const [first] = responses
     if (!first) throw new Error('Could not load this category.')
 
-    // Consecutive discover pages can repeat a title as popularity shifts between requests.
-    const combined = [...new Map(responses.flatMap((res) => res.results).map((item) => [item.id, item])).values()]
+    // Consecutive catalog pages can repeat a title as popularity shifts between requests.
+    const combined = [...new Map(responses.flatMap((res) => res.results).map((item) => [tmdbContentId(tmdbType(item) === 'series' ? 'tv' : 'movie', item.id), item])).values()]
     const totalTmdbPages = Math.min(first.total_pages, TMDB_MAX_PAGE)
 
     return {
@@ -409,20 +415,26 @@ export const catalogApi = {
     const downloaded = window.electronAPI ? await window.electronAPI.searchDownloadedCatalog(q) : []
     let online: ContentSummary[] = []
     let onlineTotal = 0
+    let onlinePages = 1
+    let effectivePage = page
     let searchSource: CatalogSource = downloaded.length > 0 ? 'cache' : 'tmdb'
     try {
-      const res = await c.searchMulti(q, page)
+      const res = params.type === 'movie' ? await c.searchMovies(q, page)
+        : params.type === 'series' ? await c.searchTv(q, page) : await c.searchMulti(q, page)
       online = summaries(res.results)
+      if (Number.isInteger(res.page) && res.page! >= 1 && res.page! <= 500) effectivePage = res.page!
       onlineTotal = res.total_results
+      onlinePages = Math.max(1, Math.min(500, res.total_pages || 1))
       searchSource = tmdbCatalogSource(res) as CatalogSource
     } catch (error) {
       if (downloaded.length === 0) throw error
+      effectivePage = 1
     }
-    let data = [...new Map([...online, ...downloaded].map((item) => [item.id, item])).values()]
+    let data = [...new Map([...online, ...(effectivePage === 1 ? downloaded : [])].map((item) => [item.id, item])).values()]
     if (params.type === 'movie') data = data.filter((item) => item.type === 'movie')
     if (params.type === 'series') data = data.filter((item) => item.type === 'series')
     data = await applyCatalogMaturity(data, c)
-    return { success: true as const, data, meta: { ...meta(), query: q, total: Math.max(onlineTotal, data.length), source: searchSource } }
+    return { success: true as const, data, meta: { ...meta(), query: q, page: effectivePage, total: Math.max(onlineTotal, data.length), pages: onlinePages, source: searchSource } }
   },
 
   // No AI backend in the local build — behave like a normal search.

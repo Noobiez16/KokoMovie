@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = resolve(process.cwd(), '..')
 const read = (path: string) => readFileSync(resolve(repoRoot, path), 'utf8')
 
-describe('v1.5.5 runtime and package hardening', () => {
+describe('runtime and package hardening', () => {
   it('keeps release metadata and Electron patch versions consistent', () => {
     const rootPackage = JSON.parse(read('package.json')) as { version: string }
     const clientPackage = JSON.parse(read('client/package.json')) as {
@@ -13,8 +13,8 @@ describe('v1.5.5 runtime and package hardening', () => {
       scripts: Record<string, string>
       devDependencies: Record<string, string>
     }
-    expect(rootPackage.version).toBe('1.5.5')
-    expect(clientPackage.version).toBe('1.5.5')
+    expect(rootPackage.version).toBe('2.0.0')
+    expect(clientPackage.version).toBe('2.0.0')
     expect(clientPackage.devDependencies.electron).toBe('43.4.1')
     expect(clientPackage.scripts['rebuild:native']).toContain('--version 43.4.1')
     for (const target of ['linux', 'win', 'mac']) {

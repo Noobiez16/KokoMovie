@@ -17,7 +17,9 @@ import {
   isPermittedLocalMediaMethod,
   withLocalMediaCapability,
 } from '../providers/local-media-capability.js'
+import { TorrentCacheLifecycle, probeTorrentAudio } from '../providers/torrent-cache-lifecycle.js'
 import { trustedIpcHandler } from './security.js'
+import { bindTorrentDownloadSource, isLiveTorrentFile } from '../providers/torrent-download-source.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Free, built-in P2P (BitTorrent) dub pipeline — the way Stremio's own server works.
@@ -164,46 +166,15 @@ function audioMapArgs(audioLang: string, audioStreamIndex: number | null = null)
 //
 // Best-effort by design: any failure returns [] and the caller keeps the previous behaviour. This
 // path must never be able to break a playback that would otherwise have worked.
-const PROBE_BYTES = 8 * 1024 * 1024
-const AUDIO_STREAM_RE = /Stream #\d+:(\d+)(?:\[[^\]]*\])?(?:\(([A-Za-z]{2,3})\))?: Audio:/g
-interface ProbedAudioTrack { streamIndex: number; lang: string }
-function probeAudioTracks(file: any, timeoutMs = 15_000): Promise<ProbedAudioTrack[]> {
-  return new Promise((resolve) => {
-    if (!FFMPEG_BIN) { resolve([]); return }
-    let settled = false
-    let input: any = null
-    let ff: ChildProcess | null = null
-    const finish = (tracks: ProbedAudioTrack[]) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      try { input?.destroy?.() } catch { /* ignore */ }
-      try { ff?.kill('SIGKILL') } catch { /* ignore */ }
-      resolve(tracks)
-    }
-    const timer = setTimeout(() => finish([]), timeoutMs)
-    try {
-      const end = Math.min((file.length ?? PROBE_BYTES) - 1, PROBE_BYTES - 1)
-      input = file.createReadStream({ start: 0, end })
-      ff = spawn(FFMPEG_BIN, ['-hide_banner', '-i', 'pipe:0'], { stdio: ['pipe', 'ignore', 'pipe'] })
-      let out = ''
-      ff.stderr?.on('data', (d) => { out = (out + d.toString()).slice(-16_000) })
-      ff.on('error', () => finish([]))
-      ff.on('close', () => {
-        const tracks: ProbedAudioTrack[] = []
-        AUDIO_STREAM_RE.lastIndex = 0
-        for (let m = AUDIO_STREAM_RE.exec(out); m; m = AUDIO_STREAM_RE.exec(out)) {
-          tracks.push({ streamIndex: Number(m[1]), lang: normalizeStreamTag(m[2] ?? '') })
-        }
-        finish(tracks)
-      })
-      input.on('error', () => finish([]))
-      ff.stdin?.on('error', () => { /* EPIPE: ffmpeg exits as soon as it has the header */ })
-      input.pipe(ff.stdin!)
-    } catch {
-      finish([])
-    }
-  })
+function probeAudioTracks(file: any, timeoutMs = 15_000) {
+  if (!FFMPEG_BIN) return Promise.resolve([])
+  return probeTorrentAudio(
+    file,
+    () => spawn(FFMPEG_BIN!, ['-hide_banner', '-i', 'pipe:0'], { stdio: ['pipe', 'ignore', 'pipe'] }),
+    (cancel) => caches!.retain(file._torrent, cancel),
+    normalizeStreamTag,
+    timeoutMs,
+  )
 }
 
 interface Candidate { infoHash: string; fileIdx: number; title: string; quality: string; seeders: number; langs: string[]; trackers: string[] }
@@ -297,14 +268,27 @@ async function getTorrentStreams(req: StreamRequest): Promise<ProviderResult[]> 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>
 
 let clientPromise: Promise<any> | null = null
-let downloadPath: string | null = null
+let caches: TorrentCacheLifecycle | null = null
+let ChunkStore: any = null
+let shuttingDown = false
 async function getClient(): Promise<any> {
+  if (shuttingDown) throw new Error('Torrent service is shutting down')
   if (!clientPromise) {
     clientPromise = (async () => {
       const { default: WebTorrent } = await dynamicImport('webtorrent')
-      downloadPath = mkdtempSync(join(tmpdir(), 'kokomovie-p2p-'))
-      log(`WebTorrent ready, cache: ${downloadPath}`)
-      return new WebTorrent()
+      const { default: Store } = await dynamicImport('fs-chunk-store')
+      ChunkStore = Store
+      caches = new TorrentCacheLifecycle(mkdtempSync(join(tmpdir(), 'kokomovie-p2p-')))
+      try {
+        const client = new WebTorrent()
+        client.on('error', (err: Error) => log(`WebTorrent error: ${err.message}`))
+        log('WebTorrent ready with owned per-torrent cache')
+        return client
+      } catch (err) {
+        await caches.shutdown()
+        caches = null
+        throw err
+      }
     })()
   }
   return clientPromise
@@ -316,7 +300,7 @@ const VIDEO_EXT = /\.(mp4|mkv|avi|m4v|webm|mov)$/i
 // token -> the WebTorrent file being served (plus the audio language the user picked, so the
 // remux selects the right dub — and keeps selecting it across seek reloads, which re-hit this
 // server by token), for the range server below.
-const served = new Map<string, { file: any; audioLang: string; audioStreamIndex: number | null }>()
+const served = new Map<string, { torrent: any; file: any; audioLang: string; audioStreamIndex: number | null }>()
 let server: http.Server | null = null
 let serverPort = 0
 
@@ -408,6 +392,7 @@ function primeSeekRegion(file: any, byteOffset: number, leadBytes: number, timeo
         downloaded += chunk.length
         if (!settled && downloaded >= leadBytes) { settled = true; clearTimeout(t); resolve(handle) }
       })
+      driver.once('close', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('Torrent stream closed')) } })
       driver.once('end', () => { if (!settled) { settled = true; clearTimeout(t); resolve(handle) } })
       driver.once('error', (e: Error) => {
         if (!settled) { settled = true; clearTimeout(t); reject(e); return }
@@ -446,7 +431,7 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   // directory" (ffmpeg's cwd isn't the torrent cache). This was the real cause of the MKV "Video
   // failed to load", surfaced by the stderr logging. Resolve it against the torrent's download root.
   const torrentRoot: string | undefined =
-    (file._torrent && typeof file._torrent.path === 'string') ? file._torrent.path : (downloadPath ?? undefined)
+    (file._torrent && typeof file._torrent.path === 'string') ? file._torrent.path : undefined
   const rawPath: string | undefined = typeof file.path === 'string' ? file.path : undefined
   const inputPath: string | undefined = rawPath
     ? (isAbsolute(rawPath) ? rawPath : (torrentRoot ? join(torrentRoot, rawPath) : undefined))
@@ -547,7 +532,10 @@ async function serveTranscoded(file: any, req: http.IncomingMessage, res: http.S
   // it on a non-zero exit. Without this the renderer only ever sees a generic "Video failed to
   // load" with no way to tell WHY (HEVC video that can't be copied, a release with no usable audio,
   // truncated torrent input, …). The tail lands in ~/.config/KokoMovie logs for diagnosis.
+  if (res.destroyed || shuttingDown || !isLiveTorrentFile(file._torrent, file)) { seekDriver?.destroy(); (input as any)?.destroy?.(); return }
   const ff: ChildProcess = spawn(FFMPEG_BIN, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+  const releaseProcess = caches!.retain(file._torrent, () => { res.destroy(); ff.kill('SIGKILL') })
+  ff.once('close', releaseProcess)
   let errTail = ''
   ff.stderr?.on('data', (d) => { errTail = (errTail + d.toString()).slice(-2000) })
   ff.on('close', (code) => {
@@ -618,7 +606,9 @@ async function ensureServer(): Promise<number> {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const token = url.pathname.replace(/^\/t\//, '').replace(/\.(mp4|stream)$/i, '')
         const entry = served.get(token)
-        if (!entry) { res.writeHead(404, CORS_HEADERS); res.end('not found'); return }
+        if (!entry || !isLiveTorrentFile(entry.torrent, entry.file)) { res.writeHead(404, CORS_HEADERS); res.end('not found'); return }
+        const releaseResponse = caches!.retain(entry.torrent, () => res.destroy())
+        res.once('close', releaseResponse)
         const { file, audioLang, audioStreamIndex } = entry
         const startSec = Math.max(0, parseFloat(url.searchParams.get('start') || '0') || 0)
         const totalDur = Math.max(0, parseFloat(url.searchParams.get('dur') || '0') || 0)
@@ -652,6 +642,14 @@ async function ensureServer(): Promise<number> {
     server.maxConnections = MAX_CONNECTIONS
     server.listen(0, '127.0.0.1', () => {
       serverPort = (server!.address() as { port: number }).port
+      bindTorrentDownloadSource(serverPort, (token) => {
+        const entry = served.get(token)
+        return !!server?.listening && !!entry && isLiveTorrentFile(entry.torrent, entry.file)
+      }, (token) => {
+        const entry = served.get(token)
+        if (!entry || !isLiveTorrentFile(entry.torrent, entry.file)) throw new Error('Torrent is no longer available')
+        return caches!.reserve(entry.torrent)
+      })
       log(`stream server on 127.0.0.1:${serverPort}`)
       resolve()
     })
@@ -685,6 +683,7 @@ async function waitForTorrentStart(file: any, torrent: any): Promise<void> {
     stream.on('data', (chunk: Buffer) => { received += chunk.length; if (received >= target) finish() })
     stream.once('end', () => received > 0 ? finish() : finish(new Error('Torrent returned no playable data')))
     stream.once('error', (err: Error) => finish(err))
+    stream.once('close', () => finish(new Error('Torrent stream closed')))
     const peerCheck = setTimeout(() => { if ((torrent.numPeers ?? 0) === 0) finish(new Error('No active peers for this 1080p release')) }, 10_000)
     const timeout = setTimeout(() => finish(new Error('Torrent peers did not provide playable data in time')), 35_000)
   })
@@ -702,32 +701,46 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   const infoHash = hashMatch ? hashMatch[1]!.toLowerCase() : ''
   const requestedFileIdx = Math.max(0, Math.min(10_000, Number.parseInt(new URL(magnet).searchParams.get('x.km-file') ?? '0', 10) || 0))
 
-  // Keep only a couple of torrents alive at once so the temp cache doesn't grow unbounded.
-  const torrents: any[] = client.torrents ?? []
-  if (torrents.length >= 2) {
-    for (const t of torrents) {
-      if (t.infoHash?.toLowerCase() !== infoHash) { try { t.destroy() } catch { /* ignore */ } ; break }
-    }
-  }
+  // Four bounded slots accommodate three downloads and one player. Lookup and
+  // allocation are serialized; metadata/probing retain their own attempt lease.
+  const attempt = await caches!.acquire(
+    async () => (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet),
+    async () => {
+      let torrent: any
+      const cachePath = caches!.allocate()
+      try {
+        // storeCacheSlots: 0 — disable WebTorrent's in-memory CacheChunkStore (default 20 pieces) so
+        // completed pieces are written straight to the on-disk file. Without this, short playbacks keep
+        // every piece in memory and the real file is never written → ffmpeg `-ss` seek fails with "No
+        // such file or directory" (the on-disk file simply doesn't exist yet).
+        torrent = client.add(magnet, { path: cachePath, store: caches!.storeConstructor(cachePath, ChunkStore), destroyStoreOnDestroy: true, deselect: true, storeCacheSlots: 0, strategy: 'sequential' })
+        caches!.attach(cachePath, torrent)
+        torrent.once('close', () => { void caches!.dispose(torrent).catch((err: Error) => log(`cache cleanup failed: ${err.message}`)) })
+        const trackFiles = () => {
+          for (const file of torrent.files ?? []) {
+            const createReadStream = file.createReadStream.bind(file)
+            file.createReadStream = (...args: any[]) => {
+              let stream: any
+              const release = caches!.retain(torrent, () => stream?.destroy())
+              try {
+                stream = createReadStream(...args)
+                stream.once('close', release)
+                return stream
+              } catch (err) { release(); throw err }
+            }
+          }
+        }
+        if (torrent.ready) trackFiles(); else torrent.once('ready', trackFiles)
+      } catch (error) {
+        if (torrent) await caches!.dispose(torrent)
+        else await caches!.discard(cachePath)
+        throw error
+      }
+      return torrent
+  })
+  const torrent = attempt.torrent
 
-  // NOTE: client.get() is async in webtorrent v3 (returns a Promise | null). Pass the full tracker
-  // list on `add` (in addition to the trackers baked into the magnet) so peer discovery starts wide
-  // immediately instead of waiting on DHT alone.
-  let torrent: any = (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet)
-  if (!torrent) {
-    try {
-      // storeCacheSlots: 0 — disable WebTorrent's in-memory CacheChunkStore (default 20 pieces) so
-      // completed pieces are written straight to the on-disk file. Without this, short playbacks keep
-      // every piece in memory and the real file is never written → ffmpeg `-ss` seek fails with "No
-      // such file or directory" (the on-disk file simply doesn't exist yet).
-      torrent = client.add(magnet, { path: downloadPath!, deselect: true, storeCacheSlots: 0, strategy: 'sequential' })
-    } catch {
-      // A concurrent add for the same hash can throw "duplicate torrent" — fetch it instead.
-      torrent = (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet)
-    }
-  }
-  if (!torrent) throw new Error('Could not add torrent')
-
+  try {
   // Wait for metadata, but fail FAST when the swarm is genuinely dead: if not a single peer has
   // connected after 12s, this release has no seeders — reject now so the caller can immediately try
   // the next Spanish release instead of staring at "Switching…" for the full 25s. When peers HAVE
@@ -738,6 +751,7 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
     const finish = (fn: () => void) => { if (!settled) { settled = true; clearTimeout(hard); clearTimeout(peerCheck); fn() } }
     torrent.once('ready', () => finish(resolve))
     torrent.once('error', (err: Error) => finish(() => reject(err)))
+    torrent.once('close', () => finish(() => reject(new Error('Torrent is no longer available'))))
     const peerCheck = setTimeout(() => {
       if (!torrent.ready && (torrent.numPeers ?? 0) === 0) finish(() => reject(new Error('No peers found')))
     }, 10_000)
@@ -751,12 +765,7 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   // Stream just this file (others stay deselected).
   try { torrent.files.forEach((f: any) => { if (f !== file) f.deselect?.() }) } catch { /* ignore */ }
   try { file.select?.() } catch { /* ignore */ }
-  try {
-    await waitForTorrentStart(file, torrent)
-  } catch (err) {
-    try { torrent.destroy() } catch {}
-    throw err
-  }
+  await waitForTorrentStart(file, torrent)
 
   // Ask the file what audio it really carries, then report the language that will ACTUALLY play:
   // the request if the release genuinely ships it, otherwise whatever `0:a:0?` will fall back to.
@@ -772,15 +781,18 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
     if (!selectedTrack) {
       const described = probedTracks.map((track) => track.lang || 'und').join(', ') || 'unreadable'
       log(`"${name}" has no verified ${requestedLang} audio (streams: ${described})`)
-      try { torrent.destroy() } catch { /* ignore */ }
       throw new Error('Release does not contain verified ' + (TORRENT_LANG_NAMES[requestedLang] ?? requestedLang.toUpperCase()) + ' audio')
     }
     effectiveLang = selectedTrack.lang
     selectedAudioStreamIndex = selectedTrack.streamIndex
   }
 
+  if (shuttingDown || !isLiveTorrentFile(torrent, file)) throw new Error('Torrent is no longer available')
   const token = `${torrent.infoHash}-${torrent.files.indexOf(file)}-${audioLang || "default"}`
-  served.set(token, { file, audioLang, audioStreamIndex: selectedAudioStreamIndex })
+  served.set(token, { torrent, file, audioLang, audioStreamIndex: selectedAudioStreamIndex })
+  const unregister = () => served.delete(token)
+  torrent.once('close', unregister)
+  torrent.once('error', unregister)
   const port = await ensureServer()
   // MP4/WebM play directly (seekable); other containers are remuxed to MP4 by the server. The
   // .mp4 suffix keeps the player's isDirectVideo (native <video>) path happy either way.
@@ -793,7 +805,12 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   // can show the TMDB runtime as the total instead of the buffered-end time growing in real time.
   // `audioLang` is what will really be audible — the renderer labels the Audio menu with THIS, and
   // a language hunt uses it to reject a release that only advertised the dub it doesn't ship.
+  caches!.reserve(torrent, 60_000) // bounded URL handoff gap, including HEAD before GET
   return { url, transcoded, audioLang: effectiveLang, requestedLang, audioLangs: probedLangs }
+  } catch (err) {
+    await attempt.fail().catch((cleanupError: Error) => log(`cache cleanup failed: ${cleanupError.message}`))
+    throw err
+  } finally { attempt.release() }
 }
 
 export function registerTorrentIpc() {
@@ -807,4 +824,21 @@ export function registerTorrentIpc() {
     const audioLang = audioLangInput === undefined ? undefined : audioLanguageSchema.parse(audioLangInput)
     try { return await resolveTorrent(magnet, audioLang || '') } catch (e) { return { error: (e as Error).message } }
   }))
+}
+
+/** Called by the application's awaited before-quit hook. */
+export async function shutdownTorrentService(): Promise<void> {
+  shuttingDown = true
+  served.clear()
+  bindTorrentDownloadSource(0, () => false)
+  const activeServer = server
+  const closeServer = activeServer ? new Promise<void>((resolve) => { activeServer.close(() => resolve()); activeServer.closeAllConnections() }) : Promise.resolve()
+  const client = await clientPromise?.catch(() => null)
+  let cleanupError: unknown
+  try { await caches?.shutdown() } catch (err) { cleanupError = err }
+  if (client && !client.destroyed) await new Promise<void>((resolve, reject) => client.destroy((err?: Error) => err ? reject(err) : resolve()))
+  await closeServer
+  server = null
+  serverPort = 0
+  if (cleanupError) throw cleanupError
 }

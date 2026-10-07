@@ -39,14 +39,15 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'km-settings',
       storage: createJSONStorage(() => localStorage),
+      // The removed country selector was the only durable value in this store.
+      // Rewrite older payloads and ignore their properties during hydration.
+      version: 1,
+      migrate: () => ({}),
+      merge: (_persisted, current) => current,
       // Never persist the TMDB key to localStorage — it is loaded per-account
       // from the OS keychain via the useEffect in App.tsx. Persisting it here
       // would leak user A's key to user B when they log in on the same machine.
-      partialize: (state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { tmdbApiKey, tmdbKeyHydrated, ...rest } = state
-        return rest
-      },
+      partialize: () => ({}),
     },
   ),
 )

@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { userApi, type HistoryItem } from '../api/user'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 
 function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600)
@@ -15,7 +17,13 @@ function formatDuration(secs: number): string {
 export function HistoryPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<'history' | 'list'>('history')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') === 'list' ? 'list' : 'history'
+  const setActiveTab = (tab: 'history' | 'list') => {
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'list') next.set('tab', 'list'); else next.delete('tab')
+    setSearchParams(next)
+  }
 
 
   const profileId = 'local'
@@ -36,7 +44,7 @@ export function HistoryPage() {
     },
   })
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError } = useInfiniteQuery({
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } = useInfiniteQuery({
     queryKey: ['history', profileId],
     queryFn: ({ pageParam }) =>
       userApi.getHistory(profileId, 50, pageParam as string | undefined),
@@ -46,7 +54,7 @@ export function HistoryPage() {
     staleTime: 60 * 1000,
   })
 
-  const { data: watchlistData, isLoading: isWatchlistLoading, isError: isWatchlistError } = useQuery({
+  const { data: watchlistData, isLoading: isWatchlistLoading, isError: isWatchlistError, refetch: refetchWatchlist } = useQuery({
     queryKey: ['watchlist', profileId],
     queryFn: () => userApi.getWatchlist(profileId),
     enabled: activeTab === 'list' && !!profileId,
@@ -71,7 +79,7 @@ export function HistoryPage() {
       : 0
     const isCompleted = item.completedAt !== null || pct >= 95
 
-    const navState: any = {}
+    const navState: { resumePosition?: number; resumeEpisodeId?: string } = {}
     if (!isCompleted || forceResume) {
       if (item.positionSeconds > 0) {
         navState.resumePosition = item.positionSeconds
@@ -88,8 +96,8 @@ export function HistoryPage() {
 
   return (
     <AppLayout>
-      <div className="px-6 py-8">
-        <h1 className="text-white text-2xl font-bold mb-6">{t('history.title')}</h1>
+      <div className="km-page">
+        <PageHeader title={t('ui.myLibrary')} description={t('ui.myLibraryDescription')} />
 
         {/* Glassmorphic Tabs — Viewing History (unified) vs the saved Watchlist */}
         <div className="flex gap-2 mb-6">
@@ -113,24 +121,21 @@ export function HistoryPage() {
         {activeTab === 'history' ? (
           <>
             {isLoading && (
-              <div className="flex justify-center py-16">
+              <div role="status" aria-label={t('ui.loadingLibrary')} className="flex justify-center py-16">
                 <div className="w-8 h-8 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
               </div>
             )}
 
             {isError && (
-              <p className="text-white/40 text-center py-16">{t('history.loadError')}</p>
+              <EmptyState title={t('history.loadError')} action={<button className="km-button-secondary" onClick={() => refetch()}>{t('common.retry')}</button>} />
             )}
 
-            {!isLoading && historyItems.length === 0 && (
-              <div className="text-center text-white/20 py-16 bg-white/[0.02] backdrop-blur-md rounded-2xl max-w-2xl">
-                <p className="text-5xl mb-4">📺</p>
-                <p className="text-sm font-medium">{t('history.emptyDescription')}</p>
-              </div>
+            {!isLoading && !isError && historyItems.length === 0 && (
+              <EmptyState title={t('history.emptyDescription')} action={<button className="km-button-secondary" onClick={() => navigate('/browse')}>{t('ui.exploreLibrary')}</button>} />
             )}
 
             {historyItems.length > 0 && (
-              <div className="space-y-2 max-w-2xl">
+              <div className="space-y-2 max-w-4xl">
                 {historyItems.map((item) => {
                   const pct = item.durationSeconds > 0
                     ? Math.round((item.positionSeconds / item.durationSeconds) * 100)
@@ -241,24 +246,21 @@ export function HistoryPage() {
         ) : (
           <>
             {isWatchlistLoading && (
-              <div className="flex justify-center py-16">
+              <div role="status" aria-label={t('ui.loadingLibrary')} className="flex justify-center py-16">
                 <div className="w-8 h-8 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
               </div>
             )}
 
             {isWatchlistError && (
-              <p className="text-white/40 text-center py-16">{t('history.watchlistLoadError')}</p>
+              <EmptyState title={t('history.watchlistLoadError')} action={<button className="km-button-secondary" onClick={() => refetchWatchlist()}>{t('common.retry')}</button>} />
             )}
 
             {!isWatchlistLoading && !isWatchlistError && watchlistItems.length === 0 && (
-              <div className="text-center text-white/20 py-16 bg-white/[0.02] backdrop-blur-md rounded-2xl max-w-2xl">
-                <p className="text-5xl mb-4">⭐</p>
-                <p className="text-sm font-medium">{t('history.emptyList')}</p>
-              </div>
+              <EmptyState title={t('history.emptyList')} action={<button className="km-button-secondary" onClick={() => navigate('/browse')}>{t('ui.exploreLibrary')}</button>} />
             )}
 
             {!isWatchlistLoading && !isWatchlistError && watchlistItems.length > 0 && (
-              <div className="space-y-2 max-w-2xl">
+              <div className="space-y-2 max-w-4xl">
                 {watchlistItems.map((item) => (
                   <button
                     type="button"

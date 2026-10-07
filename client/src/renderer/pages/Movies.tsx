@@ -1,3 +1,4 @@
+import { genreLabel } from '../components/catalog/genreLabel'
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -7,16 +8,30 @@ import { catalogApi } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
 import { HeroBanner } from '../components/catalog/HeroBanner'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { GenreNavigation } from '../components/catalog/GenreNavigation'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { CatalogFallbackBanner } from '../components/catalog/CatalogFallbackBanner'
 import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/CategoryPagination'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
 
 export function MoviesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const genre = searchParams.get('genre') || undefined
+  const [searchParams, setSearchParams] = useSearchParams()
+  const legacyTrending = searchParams.get('genre') === 'trending'
+  const collection = searchParams.get('collection') === 'trending' || legacyTrending ? 'trending' : undefined
+  const genre = collection ? undefined : searchParams.get('genre') || undefined
+  const isCategory = !!genre || !!collection
+
+  useEffect(() => {
+    if (!legacyTrending) return
+    const normalized = new URLSearchParams(searchParams)
+    normalized.delete('genre')
+    normalized.set('collection', 'trending')
+    setSearchParams(normalized, { replace: true })
+  }, [legacyTrending, searchParams, setSearchParams])
   const [page, setPage] = useState(1)
 
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
@@ -24,7 +39,7 @@ export function MoviesPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [genre])
+  }, [genre, collection])
 
   const goToPage = (next: number) => {
     setPage(next)
@@ -34,26 +49,27 @@ export function MoviesPage() {
 
   const profileId = 'local'
 
-  const { data: homeData, isLoading: isHomeLoading, isError: isHomeError } = useQuery({
+  const { data: homeData, isLoading: isHomeLoading, isError: isHomeError, refetch: refetchHome } = useQuery({
     queryKey: ['movies-home', profileId, tmdbApiKey],
     queryFn: () => catalogApi.getHome({ type: 'movie' }, profileId),
     staleTime: 5 * 60 * 1000,
-    enabled: !genre,
+    enabled: !isCategory,
   })
 
-  const { data: genreData, isLoading: isGenreLoading, isError: isGenreError } = useQuery({
-    queryKey: ['movies-genre', profileId, genre, page, tmdbApiKey],
-    queryFn: () => catalogApi.browse({ type: 'movie', genre, limit: 80, page }, profileId),
+  const { data: genreData, isLoading: isGenreLoading, isError: isGenreError, refetch: refetchGenre } = useQuery({
+    queryKey: ['movies-genre', profileId, genre, collection, page, tmdbApiKey],
+    queryFn: () => catalogApi.browse({ type: 'movie', genre, ...(collection ? { collection } : {}), limit: 80, page }, profileId),
     staleTime: 5 * 60 * 1000,
-    enabled: !!genre,
+    enabled: isCategory,
   })
 
   if (tmdbKeyHydrated && !tmdbApiKey) return <ApiKeyRequired />
 
-  if (genre) {
+  if (isCategory) {
     if (isGenreLoading) {
       return (
         <AppLayout>
+          <GenreNavigation type="movie" />
           <div className="min-h-screen flex items-center justify-center">
             <div className="w-10 h-10 border-2 border-purple-500/10 border-t-km-accent rounded-full animate-spin" />
           </div>
@@ -64,35 +80,32 @@ export function MoviesPage() {
     if (isGenreError) {
       return (
         <AppLayout>
-          <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-            {t('catalog.serviceError')}
-          </div>
+          <GenreNavigation type="movie" />
+          <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchGenre()}>{t('common.retry')}</button>} />
         </AppLayout>
       )
     }
 
     const items = [...new Map((genreData?.data ?? []).map((m) => [m.id, m])).values()]
     const totalPages = genreData?.meta?.pagination?.pages ?? 1
-    const genreTitle = genre.charAt(0).toUpperCase() + genre.slice(1).replace('-', ' ')
+    const genreTitle = collection ? t('catalog.trending') : genreLabel(genre!, genre!.charAt(0).toUpperCase() + genre!.slice(1).replace('-', ' '), t)
 
     return (
       <AppLayout>
-        <div className="px-8 py-8 animate-fade-in">
+          <GenreNavigation type="movie" />
+        <div className="km-catalog-gutter py-7 animate-fade-in">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate('/movies')}
-                className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-all active:scale-95"
+                className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-purple-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-km-accent"
                 title={t('catalog.backMovies')}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <div>
-                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-widest leading-none">{t('catalog.moviesCategory')}</span>
-                <h1 className="text-2xl font-bold text-white mt-1 leading-none">{genreTitle}</h1>
-              </div>
+              <PageHeader title={genreTitle} eyebrow={t('catalog.moviesCategory')} />
             </div>
 
             {totalPages > 1 && (
@@ -101,10 +114,10 @@ export function MoviesPage() {
           </div>
 
           {items.length === 0 ? (
-            <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noMovies')}</div>
+            <EmptyState title={t('catalog.noMovies')} />
           ) : (
             <>
-              <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+              <div className="grid gap-x-4 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
                 {items.map((movie) => (
                   <ContentCard key={movie.id} content={movie} size="md" />
                 ))}
@@ -120,6 +133,7 @@ export function MoviesPage() {
   if (isHomeLoading) {
     return (
       <AppLayout>
+          <GenreNavigation type="movie" />
         <div className="min-h-screen flex items-center justify-center">
           <div className="w-10 h-10 border-2 border-purple-500/10 border-t-km-accent rounded-full animate-spin" />
         </div>
@@ -130,22 +144,22 @@ export function MoviesPage() {
   if (isHomeError) {
     return (
       <AppLayout>
-        <div className="min-h-screen flex items-center justify-center text-purple-300/40 text-sm">
-          {t('catalog.serviceError')}
-        </div>
+          <GenreNavigation type="movie" />
+        <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />
       </AppLayout>
     )
   }
 
   const moviesData = homeData?.data
-  const featured = moviesData?.featured as any | null
+  const featured = moviesData?.featured
   const trending = moviesData?.trending ?? []
   const rows = moviesData?.rows ?? []
 
   return (
-    <AppLayout transparentNav>
+    <AppLayout transparentNav={!!featured}>
       {featured && <HeroBanner content={featured} />}
 
+      <GenreNavigation type="movie" />
       <CatalogFallbackBanner source={homeData?.meta?.source} />
 
       <div className="pt-6 pb-12 animate-fade-in">
@@ -153,21 +167,21 @@ export function MoviesPage() {
           <ContentRow
             title={t('catalog.trendingMovies')}
             items={trending}
-            onViewAll={() => navigate('/movies?genre=trending')}
+            onViewAll={() => navigate('/movies?collection=trending')}
           />
         )}
 
         {rows.map((row) => (
           <ContentRow
             key={row.genre.id}
-            title={row.genre.name}
+            title={genreLabel(row.genre.slug, row.genre.name, t)}
             items={row.items}
             onViewAll={() => navigate(`/movies?genre=${row.genre.slug}`)}
           />
         ))}
 
         {!featured && trending.length === 0 && rows.length === 0 && (
-          <div className="text-purple-300/40 py-32 text-center text-sm">{t('catalog.noMoviesAvailable')}</div>
+          <EmptyState title={t('catalog.noMoviesAvailable')} />
         )}
       </div>
     </AppLayout>

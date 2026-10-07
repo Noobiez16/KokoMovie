@@ -1,4 +1,6 @@
 import { ipcMain, BrowserWindow, app, dialog, shell, net } from 'electron'
+import { constants as fsConstants } from 'node:fs'
+import { DownloadJob, finalizePortable } from '../download-job.js'
 import { FFMPEG_BIN } from '../ffmpeg.js'
 import { spawn } from 'child_process'
 import {
@@ -8,7 +10,7 @@ import {
   randomBytes,
   createHash,
 } from 'crypto'
-import { copyFileSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync, statSync, openSync, readSync, closeSync, writeSync } from 'fs'
+import { copyFileSync, rmdirSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync, existsSync, statSync, openSync, readSync, closeSync, writeSync } from 'fs'
 import { basename, join, dirname, isAbsolute } from 'path'
 import https from 'https'
 import http from 'http'
@@ -22,6 +24,7 @@ import { headersForDownloadTarget } from '../download-header-policy.js'
 import { unwrapLocalMediaProxyUrl } from '../providers/local-media-capability.js'
 import { decorateHlsManifestWithLocalCapability, withLocalMediaCapability } from '../providers/local-media-capability.js'
 import { resolveValidatedRedirect } from '../providers/network-policy.js'
+import { isTrustedTorrentDownloadSource, TorrentDownloadLeases } from '../providers/torrent-download-source.js'
 import {
   createHlsDownloadPlan,
   materializeHlsObject,
@@ -76,6 +79,15 @@ export function decryptSegment(encrypted: Buffer, key: Buffer): Buffer {
 import { getStreamHeaders, getStreamProxyPort, mergeHeadersCaseInsensitive, validateDownloadSourceUrl } from './providers.js'
 
 const { httpAgent, httpsAgent } = createAuthenticatedHttpAgents(32)
+// The torrent server is bound to IPv4 loopback. Only its main-registered URLs may
+// bypass the public-address DNS guard; no renderer-provided host is resolved here.
+const torrentDownloadAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: MAX_CONCURRENT,
+  lookup: ((_hostname: string, options: { all?: boolean }, callback: Function) => {
+    callback(null, options.all ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4)
+  }) as http.RequestOptions['lookup'],
+})
 
 const activeRequests = new Map<string, http.ClientRequest[]>()
 const hostNextRequestAt = new Map<string, number>()
@@ -153,7 +165,7 @@ function abortActiveRequests(id: string): void {
   }
 }
 
-function fetchBuffer(
+export function fetchBuffer(
   url: string,
   id?: string,
   customHeaders?: Record<string, string>,
@@ -171,6 +183,7 @@ function fetchBuffer(
   const normalizedUrl = normalizeUrl(url)
 
   return new Promise((resolve, reject) => {
+    if (id) checkpoint(id)
     validateDownloadSourceUrl(normalizedUrl)
     const originHeaders = headersForDownloadTarget(
       normalizedUrl,
@@ -204,7 +217,7 @@ function fetchBuffer(
 
     const options = {
       headers: reqHeaders,
-      agent: isHttps ? httpsAgent : httpAgent,
+      agent: isTrustedTorrentDownloadSource(normalizedUrl) ? torrentDownloadAgent : isHttps ? httpsAgent : httpAgent,
     }
 
     const req = get(normalizedUrl, options, (res) => {
@@ -213,8 +226,16 @@ function fetchBuffer(
         const location = res.headers.location
         if (location) {
           cleanUpReq()
-          const absoluteLocation = resolveValidatedRedirect(normalizedUrl, location).toString()
-          resolve(fetchBuffer(absoluteLocation, id, customHeaders, onProgress, redirectsCount + 1, onFinalUrl, sourceUrl, requestHeaders, maxBytes))
+          // This response is discarded after redirect handoff. Its body can still
+          // fail while draining, after the promise has rejected or adopted the target.
+          res.on('error', () => {})
+          res.resume()
+          try {
+            const absoluteLocation = resolveValidatedRedirect(normalizedUrl, location).toString()
+            resolve(fetchBuffer(absoluteLocation, id, customHeaders, onProgress, redirectsCount + 1, onFinalUrl, sourceUrl, requestHeaders, maxBytes))
+          } catch (error) {
+            reject(error)
+          }
           return
         }
       }
@@ -397,11 +418,57 @@ class ResponseTooLargeError extends Error {
 
 // ─── Active cancellation signals ─────────────────────────────────────────────
 
+let shuttingDown = false
+const activeJobs = new Map<string, DownloadJob>()
 const cancelSignals = new Map<string, boolean>()
 const pauseSignals = new Map<string, boolean>()
-let activeCount = 0
+function checkpoint(id: string): void {
+  activeJobs.get(id)?.checkpoint()
+  if (cancelSignals.get(id)) throw new Error('cancelled')
+  if (pauseSignals.get(id)) throw new Error('paused')
+}
 
-async function downloadDirectVideo(
+function removeStaging(row: Pick<DownloadRow, 'id' | 'local_dir'>): void {
+  // Only the UUID directory created by download:start is recursively removable.
+  if (isAbsolute(row.local_dir) && basename(row.local_dir) === row.id && /^[0-9a-f-]{36}$/i.test(row.id)) {
+    rmSync(row.local_dir, { recursive: true, force: true })
+  }
+}
+
+function removeDownloadFiles(row: Pick<DownloadRow, 'id' | 'local_dir' | 'manifest_path'>): void {
+  if (!isAbsolute(row.local_dir)) return
+  if (row.manifest_path === row.local_dir && row.local_dir.toLowerCase().endsWith('.mp4')) {
+    // File deletion is explicit; never recursively remove an arbitrary media path.
+    rmSync(row.local_dir, { force: true })
+    rmSync(row.local_dir + '.jpg', { force: true })
+    rmSync(row.local_dir + '.kokomovie.json', { force: true })
+    const subtitles = row.local_dir + '.subtitles'
+    if (existsSync(subtitles)) {
+      for (const name of readdirSync(subtitles)) {
+        if (/^(?:\d+-[a-z0-9-]+\.vtt|index\.json)$/.test(name)) rmSync(join(subtitles, name), { force: true })
+      }
+      // Leave unknown contents in place.
+      try { rmdirSync(subtitles) } catch {}
+    }
+  } else removeStaging(row)
+}
+
+const torrentLeases = new TorrentDownloadLeases()
+
+async function stopJob(id: string, reason: 'paused' | 'cancelled'): Promise<void> {
+  const job = activeJobs.get(id)
+  if (reason === 'paused') pauseSignals.set(id, true)
+  else cancelSignals.set(id, true)
+  job?.stop(reason)
+  abortActiveRequests(id)
+  try {
+    await job?.done.catch(() => {})
+    await artworkJobs.get(id)
+    artworkJobs.delete(id)
+  } finally { torrentLeases.release(id) }
+}
+
+export async function downloadDirectVideo(
   id: string,
   row: DownloadRow,
   key: Buffer,
@@ -422,6 +489,7 @@ async function downloadDirectVideo(
     if (pauseSignals.get(id)) throw new Error('paused')
     await waitForHostSlot(currentUrl, id)
 
+    checkpoint(id)
     validateDownloadSourceUrl(currentUrl)
     const streamHeaders = headersForDownloadTarget(
       currentUrl,
@@ -455,7 +523,7 @@ async function downloadDirectVideo(
 
     const options = {
       headers: reqHeaders,
-      agent: isHttps ? httpsAgent : httpAgent,
+      agent: isTrustedTorrentDownloadSource(currentUrl) ? torrentDownloadAgent : isHttps ? httpsAgent : httpAgent,
     }
 
     const res: http.IncomingMessage = await new Promise((resolve, reject) => {
@@ -490,9 +558,9 @@ async function downloadDirectVideo(
     if ([301, 302, 303, 307, 308].includes(statusCode)) {
       const location = res.headers.location
       if (location) {
+        res.resume() // drain even when redirect validation rejects
         currentUrl = resolveValidatedRedirect(currentUrl, location).toString()
         redirectsCount++
-        res.resume() // consume stream
         continue
       }
     }
@@ -638,25 +706,26 @@ async function downloadDirectVideo(
     throw new Error('Provider returned an undersized placeholder (' + received + ' bytes), not the requested video')
   }
 
+  checkpoint(id)
   db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
   notifyProgress(id, 99, 'downloading', completed, completed, received, received)
   const portable = await finalizeDirectMp4(row, key, completed)
-      await artworkJobs.get(row.id)
+  checkpoint(id)
   writePortableSidecars(row, portable.path)
-      artworkJobs.delete(row.id)
-  rmSync(localDir, { recursive: true, force: true })
+  artworkJobs.delete(row.id)
   db.prepare(`
     UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ?
     WHERE id = ?
   `).run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, id)
+  activeJobs.get(id)?.commit()
+  removeStaging(row)
   notifyProgress(id, 100, 'completed', completed, completed, portable.size, portable.size)
 }
 
 function portableVideoPath(row: DownloadRow): string {
   const safeTitle = row.title.replace(/[\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim() || "KokoMovie Download"
   const baseDir = dirname(row.local_dir)
-  const preferred = join(baseDir, safeTitle + '.mp4')
-  return existsSync(preferred) ? join(baseDir, safeTitle + ' - ' + row.id.slice(0, 8) + '.mp4') : preferred
+  return join(baseDir, safeTitle + '.mp4')
 }
 
 function validatePortableVideo(path: string, durationMins: number | null): void {
@@ -677,35 +746,35 @@ function validatePortableVideo(path: string, durationMins: number | null): void 
 async function finalizeDirectMp4(row: DownloadRow, key: Buffer, chunkCount: number): Promise<{ path: string; size: number }> {
   if (!FFMPEG_BIN) throw new Error('The bundled FFmpeg executable is unavailable')
   const outputPath = portableVideoPath(row)
-  const partialPath = outputPath + '.partial'
+  const partialPath = join(row.local_dir, 'output-' + randomBytes(8).toString('hex') + '.partial')
+  const job = activeJobs.get(row.id) ?? new DownloadJob()
+  job.checkpoint()
   const ff = spawn(FFMPEG_BIN, ['-y', '-loglevel', 'error', '-i', 'pipe:0', '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', partialPath], { stdio: ['pipe', 'ignore', 'pipe'] })
-  let stderr = ''
-  ff.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8000) })
-  const exited = new Promise<void>((resolve, reject) => {
-    ff.once('error', reject)
-    ff.once('close', (code) => code === 0 ? resolve() : reject(new Error('MP4 finalization failed: ' + (stderr.trim() || 'FFmpeg exited with code ' + code))))
-  })
+  const exited = job.trackChild(ff)
   try {
     for (let i = 0; i < chunkCount; i++) {
       const plain = decryptSegment(readFileSync(join(row.local_dir, 'seg_' + i + '.enc')), key)
-      if (!ff.stdin.write(plain)) await new Promise<void>((resolve) => ff.stdin.once('drain', resolve))
+      await job.write(ff, plain)
     }
     ff.stdin.end()
     await exited
     validatePortableVideo(partialPath, row.duration_mins)
-    renameSync(partialPath, outputPath)
-    return { path: outputPath, size: statSync(outputPath).size }
+    const published = await finalizePortable(job, partialPath, outputPath, async () => { await artworkJobs.get(row.id) })
+    return { path: published, size: statSync(published).size }
   } catch (err) {
     try { ff.kill('SIGKILL') } catch {}
+    await exited.catch(() => {})
     try { rmSync(partialPath, { force: true }) } catch {}
     throw err
   }
 }
 
-function writeDecryptedTrack(row: DownloadRow, key: Buffer, path: string, startIndex: number, count: number): void {
+async function writeDecryptedTrack(row: DownloadRow, key: Buffer, path: string, startIndex: number, count: number): Promise<void> {
   const fd = openSync(path, 'w')
   try {
     for (let offset = 0; offset < count; offset++) {
+      if (offset % 16 === 0) await new Promise<void>(resolve => setImmediate(resolve))
+      checkpoint(row.id)
       const encrypted = readFileSync(join(row.local_dir, `seg_${startIndex + offset}.enc`))
       writeSync(fd, decryptSegment(encrypted, key))
     }
@@ -717,31 +786,32 @@ function writeDecryptedTrack(row: DownloadRow, key: Buffer, path: string, startI
 async function finalizeHlsMp4(row: DownloadRow, key: Buffer, plan: HlsDownloadPlan): Promise<{ path: string; size: number }> {
   if (!FFMPEG_BIN) throw new Error('The bundled FFmpeg executable is unavailable')
   const outputPath = portableVideoPath(row)
-  const partialPath = outputPath + '.partial'
+  const partialPath = join(row.local_dir, 'output-' + randomBytes(8).toString('hex') + '.partial')
+  const job = activeJobs.get(row.id) ?? new DownloadJob()
+  job.checkpoint()
   const videoInputPath = join(row.local_dir, 'video-input.partial')
   const audioInputPath = join(row.local_dir, 'audio-input.partial')
-  writeDecryptedTrack(row, key, videoInputPath, 0, plan.video.objects.length)
-  if (plan.audio) writeDecryptedTrack(row, key, audioInputPath, plan.video.objects.length, plan.audio.objects.length)
-  const ff = spawn(FFMPEG_BIN, [
-    '-y', '-loglevel', 'error', '-i', videoInputPath,
-    ...(plan.audio ? ['-i', audioInputPath] : []),
-    '-map', '0:v:0', ...(plan.audio ? ['-map', '1:a:0?'] : ['-map', '0:a:0?']),
-    '-c', 'copy', '-movflags', '+faststart',
-    '-f', 'mp4', partialPath,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] })
-  let stderr = ''
-  ff.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8000) })
-  const exited = new Promise<void>((resolve, reject) => {
-    ff.once('error', reject)
-    ff.once('close', (code) => code === 0 ? resolve() : reject(new Error('MP4 finalization failed: ' + (stderr.trim() || 'FFmpeg exited with code ' + code))))
-  })
+  let ff: ReturnType<typeof spawn> | undefined
+  let exited: Promise<void> | undefined
   try {
+    await writeDecryptedTrack(row, key, videoInputPath, 0, plan.video.objects.length)
+    if (plan.audio) await writeDecryptedTrack(row, key, audioInputPath, plan.video.objects.length, plan.audio.objects.length)
+    job.checkpoint()
+    ff = spawn(FFMPEG_BIN, [
+      '-y', '-loglevel', 'error', '-i', videoInputPath,
+      ...(plan.audio ? ['-i', audioInputPath] : []),
+      '-map', '0:v:0', ...(plan.audio ? ['-map', '1:a:0?'] : ['-map', '0:a:0?']),
+      '-c', 'copy', '-movflags', '+faststart',
+      '-f', 'mp4', partialPath,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    exited = job.trackChild(ff)
     await exited
     validatePortableVideo(partialPath, row.duration_mins)
-    renameSync(partialPath, outputPath)
-    return { path: outputPath, size: statSync(outputPath).size }
+    const published = await finalizePortable(job, partialPath, outputPath, async () => { await artworkJobs.get(row.id) })
+    return { path: published, size: statSync(published).size }
   } catch (err) {
-    try { ff.kill('SIGKILL') } catch {}
+    try { ff?.kill('SIGKILL') } catch {}
+    await exited?.catch(() => {})
     try { rmSync(partialPath, { force: true }) } catch {}
     throw err
   } finally {
@@ -767,6 +837,7 @@ function legacyHlsPlan(segmentCount: number): HlsDownloadPlan {
 // ─── Core download logic ──────────────────────────────────────────────────────
 
 async function downloadContent(id: string): Promise<void> {
+  checkpoint(id)
   const db = getDb()
   const row = db.prepare('SELECT * FROM downloads WHERE id = ?').get(id) as DownloadRow | undefined
   if (!row || row.status === 'cancelled') {
@@ -786,7 +857,9 @@ async function downloadContent(id: string): Promise<void> {
       return
     }
 
-    const plan = pendingHlsPlans.get(id) ?? await buildDownloadPlan(row.s3_hls_key, customHeaders, id)
+    const plan = pendingHlsPlans.get(id) ?? (row.manifest_path?.endsWith('.m3u8') && row.downloaded_at
+      ? legacyHlsPlan(row.completed_segments)
+      : await buildDownloadPlan(row.s3_hls_key, customHeaders, id))
     pendingHlsPlans.delete(id)
     const downloadObjects = [...plan.video.objects, ...(plan.audio?.objects ?? [])]
     db.prepare(`UPDATE downloads SET total_segments = ? WHERE id = ?`).run(downloadObjects.length, id)
@@ -844,6 +917,7 @@ async function downloadContent(id: string): Promise<void> {
         return fetchBufferWithRetry(resourceUrl, id, customHeaders, reportProgress, 3, 1000, undefined, row.s3_hls_key, requestHeaders)
       }, hlsKeyCache)
 
+      checkpoint(id)
       const encrypted = encryptSegment(plain, key)
       writeFileSync(segPath, encrypted)
       downloadedBytes += plain.length
@@ -855,23 +929,25 @@ async function downloadContent(id: string): Promise<void> {
     }
 
     // Remux the locally cached TS or fMP4 tracks into one portable MP4 without re-encoding.
+    checkpoint(id)
     db.prepare('UPDATE downloads SET progress_percent = 99 WHERE id = ?').run(id)
     notifyProgress(id, 99, 'downloading', completed, downloadObjects.length, downloadedBytes, downloadedBytes)
     const portable = await finalizeHlsMp4(row, key, plan)
-    await artworkJobs.get(row.id)
+    checkpoint(id)
     writePortableSidecars(row, portable.path)
     artworkJobs.delete(row.id)
-    rmSync(localDir, { recursive: true, force: true })
 
     db.prepare(`
       UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ?
       WHERE id = ?
     `).run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, id)
 
+    activeJobs.get(id)?.commit()
+    removeStaging(row)
     notifyProgress(id, 100, 'completed', completed, downloadObjects.length, portable.size, portable.size)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    if (message === 'paused' || pauseSignals.get(id)) {
+    if (!cancelSignals.get(id) && (message === 'paused' || pauseSignals.get(id))) {
       const current = db.prepare(
         'SELECT progress_percent, completed_segments, total_segments, downloaded_bytes, total_bytes FROM downloads WHERE id = ?',
       ).get(id) as Pick<DownloadRow, 'progress_percent' | 'completed_segments' | 'total_segments' | 'downloaded_bytes' | 'total_bytes'> | undefined
@@ -897,22 +973,40 @@ async function downloadContent(id: string): Promise<void> {
       notifyProgress(id, 0, 'error')
     }
   } finally {
-    cancelSignals.delete(id)
-    pauseSignals.delete(id)
-    activeRequests.delete(id)
-    activeCount--
-
-    processQueue()
+    await artworkJobs.get(id)
   }
 }
 
+function launchJob(id: string, run: () => Promise<void>): Promise<void> {
+  const existing = activeJobs.get(id)
+  if (existing) return existing.done
+  const job = new DownloadJob()
+  activeJobs.set(id, job)
+  job.done = Promise.resolve().then(run).finally(async () => {
+    try {
+      await job.settleChildren()
+      job.rollback()
+      await artworkJobs.get(id)
+      if (activeJobs.get(id) === job) {
+        activeJobs.delete(id)
+        cancelSignals.delete(id)
+        pauseSignals.delete(id)
+        activeRequests.delete(id)
+        artworkJobs.delete(id)
+      }
+    } finally { torrentLeases.release(id) }
+    processQueue()
+  })
+  return job.done
+}
+
 function processQueue(): void {
+  if (shuttingDown) return
   const db = getDb()
-  while (activeCount < MAX_CONCURRENT) {
-    const next = db.prepare(`SELECT id FROM downloads WHERE status = 'pending' ORDER BY rowid LIMIT 1`).get() as { id: string } | undefined
-    if (!next) return
-    activeCount++
-    void downloadContent(next.id)
+  const pending = db.prepare(`SELECT id FROM downloads WHERE status = 'pending' ORDER BY rowid`).all() as Array<{ id: string }>
+  for (const next of pending) {
+    if (activeJobs.size >= MAX_CONCURRENT) return
+    if (!activeJobs.has(next.id)) void launchJob(next.id, () => downloadContent(next.id)).catch(console.error)
   }
 }
 
@@ -953,6 +1047,7 @@ async function cacheDownloadArtwork(id: string, sourceUrl: string, localDir: str
       validateDownloadSourceUrl(sourceUrl)
       bytes = new Uint8Array(await fetchBufferWithRetry(sourceUrl, id, undefined, undefined, 3, 1000, undefined, sourceUrl, {}, MAX_DOWNLOAD_ARTWORK_BYTES))
     }
+    checkpoint(id)
     if (bytes.byteLength > MAX_DOWNLOAD_ARTWORK_BYTES) return
     writeFileSync(join(localDir, 'artwork.jpg'), bytes)
     getDb().prepare('UPDATE downloads SET thumbnail_url = ? WHERE id = ?')
@@ -974,7 +1069,7 @@ interface OfflineSubtitle {
   url: string
 }
 
-async function cacheDownloadSubtitles(localDir: string, tracks: DownloadSubtitleInput[]): Promise<void> {
+async function cacheDownloadSubtitles(id: string, localDir: string, tracks: DownloadSubtitleInput[]): Promise<void> {
   const selected = tracks.slice(0, 8)
   if (selected.length === 0) return
   const subtitleDir = join(localDir, 'subtitles')
@@ -986,7 +1081,8 @@ async function cacheDownloadSubtitles(localDir: string, tracks: DownloadSubtitle
       const url = new URL(track.url)
       if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
       validateDownloadSourceUrl(url.toString())
-      const bytes = new Uint8Array(await fetchBufferWithRetry(url.toString(), undefined, undefined, undefined, 3, 1000, undefined, url.toString(), {}, 2 * 1024 * 1024))
+      const bytes = new Uint8Array(await fetchBufferWithRetry(url.toString(), id, undefined, undefined, 3, 1000, undefined, url.toString(), {}, 2 * 1024 * 1024))
+      checkpoint(id)
       if (bytes.byteLength > 2 * 1024 * 1024) continue
       const text = normalizeSubtitleText(new TextDecoder().decode(bytes))
       const lang = track.lang.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16) || 'und'
@@ -997,6 +1093,7 @@ async function cacheDownloadSubtitles(localDir: string, tracks: DownloadSubtitle
       // Individual subtitle failures do not fail the media download.
     }
   }
+  if (cancelSignals.get(id) || pauseSignals.get(id)) return
   writeFileSync(join(subtitleDir, 'index.json'), JSON.stringify(saved, null, 2), 'utf8')
 }
 
@@ -1004,9 +1101,14 @@ function copySubtitleSidecars(row: DownloadRow, mediaPath: string): void {
   const source = join(row.local_dir, 'subtitles')
   if (!existsSync(source)) return
   const target = mediaPath + '.subtitles'
-  mkdirSync(target, { recursive: true })
+  mkdirSync(target)
+  activeJobs.get(row.id)?.ownDirectory(target)
   for (const name of readdirSync(source)) {
-    if (/^(?:\d+-[a-z0-9-]+\.vtt|index\.json)$/.test(name)) copyFileSync(join(source, name), join(target, name))
+    if (/^(?:\d+-[a-z0-9-]+\.vtt|index\.json)$/.test(name)) {
+      const path = join(target, name)
+      copyFileSync(join(source, name), path, fsConstants.COPYFILE_EXCL)
+      activeJobs.get(row.id)?.own(path)
+    }
   }
 }
 
@@ -1045,7 +1147,10 @@ function writePortableSidecars(row: DownloadRow, mediaPath: string): void {
   const temporaryArtwork = join(row.local_dir, 'artwork.jpg')
   const artworkPath = mediaPath + '.jpg'
   copySubtitleSidecars(row, mediaPath)
-  if (existsSync(temporaryArtwork)) copyFileSync(temporaryArtwork, artworkPath)
+  if (existsSync(temporaryArtwork)) {
+    copyFileSync(temporaryArtwork, artworkPath, fsConstants.COPYFILE_EXCL)
+    activeJobs.get(row.id)?.own(artworkPath)
+  }
 
   const metadata = {
     schemaVersion: 1,
@@ -1060,7 +1165,9 @@ function writePortableSidecars(row: DownloadRow, mediaPath: string): void {
     subtitleDirectory: existsSync(mediaPath + '.subtitles') ? basename(mediaPath + '.subtitles') : null,
     downloadedAt: new Date().toISOString(),
   }
-  writeFileSync(mediaPath + '.kokomovie.json', JSON.stringify(metadata, null, 2), 'utf8')
+  const metadataPath = mediaPath + '.kokomovie.json'
+  writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), { encoding: 'utf8', flag: 'wx' })
+  activeJobs.get(row.id)?.own(metadataPath)
 }
 
 export function readOfflineArtwork(downloadId: string): Buffer | null {
@@ -1130,22 +1237,26 @@ export function registerDownloadIpc(): void {
       "SELECT * FROM downloads WHERE status = 'completed' AND manifest_path LIKE '%.m3u8'",
     ).all() as DownloadRow[]
     for (const row of legacyRows) {
-      try {
-        db.prepare("UPDATE downloads SET status = 'downloading', progress_percent = 99, error_message = NULL WHERE id = ?").run(row.id)
-        notifyProgress(row.id, 99, 'downloading', row.completed_segments, row.total_segments, row.downloaded_bytes, row.total_bytes)
-        const portable = await finalizeHlsMp4(row, deriveSegmentKey(row.drm_key_id), legacyHlsPlan(row.completed_segments))
-        await artworkJobs.get(row.id)
-        writePortableSidecars(row, portable.path)
-        artworkJobs.delete(row.id)
-        rmSync(row.local_dir, { recursive: true, force: true })
-        db.prepare("UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?")
-          .run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, row.id)
-        notifyProgress(row.id, 100, 'completed', row.completed_segments, row.total_segments, portable.size, portable.size)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        db.prepare("UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?").run(message, row.id)
-        notifyProgress(row.id, 0, 'error')
-      }
+      if (shuttingDown) break
+      await launchJob(row.id, async () => {
+        try {
+          checkpoint(row.id)
+          db.prepare("UPDATE downloads SET status = 'downloading', progress_percent = 99, error_message = NULL WHERE id = ?").run(row.id)
+          const portable = await finalizeHlsMp4(row, deriveSegmentKey(row.drm_key_id), legacyHlsPlan(row.completed_segments))
+          checkpoint(row.id)
+          writePortableSidecars(row, portable.path)
+          db.prepare("UPDATE downloads SET status = 'completed', progress_percent = 100, downloaded_at = ?, manifest_path = ?, local_dir = ?, downloaded_bytes = ?, total_bytes = ? WHERE id = ?")
+            .run(new Date().toISOString(), portable.path, portable.path, portable.size, portable.size, row.id)
+          activeJobs.get(row.id)?.commit()
+          removeStaging(row)
+          notifyProgress(row.id, 100, 'completed', row.completed_segments, row.total_segments, portable.size, portable.size)
+        } catch (err) {
+          if (cancelSignals.get(row.id) || pauseSignals.get(row.id)) return
+          const message = err instanceof Error ? err.message : String(err)
+          db.prepare("UPDATE downloads SET status = 'error', error_message = ? WHERE id = ?").run(message, row.id)
+          notifyProgress(row.id, 0, 'error')
+        }
+      })
     }
     processQueue()
   })()
@@ -1154,6 +1265,7 @@ export function registerDownloadIpc(): void {
     _event,
     input: unknown,
   ) => {
+    if (shuttingDown) throw new Error('Downloads are stopping')
     const opts: DownloadStartInput = downloadStartSchema.parse(input)
     validateDownloadSourceUrl(opts.manifestUrl)
     if (opts.customDownloadPath && !isAbsolute(opts.customDownloadPath)) {
@@ -1168,40 +1280,44 @@ export function registerDownloadIpc(): void {
         throw error
       }
     }
+    if (shuttingDown) throw new Error('Downloads are stopping')
     const id = crypto.randomUUID()
-    const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
-    const localDir = join(baseDir, id)
-    mkdirSync(localDir, { recursive: true })
+    torrentLeases.accept(id, opts.manifestUrl)
+    try {
+      const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
+      const localDir = join(baseDir, id)
+      mkdirSync(localDir, { recursive: true })
 
-    const expiresAt = new Date(Date.now() + DOWNLOAD_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
+      const expiresAt = new Date(Date.now() + DOWNLOAD_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
-    db.prepare(`
-      INSERT INTO downloads (id, content_id, episode_id, title, content_type, thumbnail_url, duration_mins,
-        s3_hls_key, drm_key_id, status, local_dir, expires_at, headers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-    `).run(
-      id, opts.contentId, opts.episodeId ?? null, opts.title, opts.contentType,
-      opts.thumbnailUrl ?? null, opts.durationMins ?? null,
-       unwrapLocalMediaProxyUrl(opts.manifestUrl, getStreamProxyPort()), opts.drmKeyId ?? null, localDir, expiresAt,
-      opts.headers ? JSON.stringify(opts.headers) : null
-    )
+      db.prepare(`
+        INSERT INTO downloads (id, content_id, episode_id, title, content_type, thumbnail_url, duration_mins,
+          s3_hls_key, drm_key_id, status, local_dir, expires_at, headers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+      `).run(
+        id, opts.contentId, opts.episodeId ?? null, opts.title, opts.contentType,
+        opts.thumbnailUrl ?? null, opts.durationMins ?? null,
+         unwrapLocalMediaProxyUrl(opts.manifestUrl, getStreamProxyPort()), opts.drmKeyId ?? null, localDir, expiresAt,
+        opts.headers ? JSON.stringify(opts.headers) : null
+      )
 
-    writeFileSync(join(localDir, 'content.kokomovie.json'), JSON.stringify({
-      schemaVersion: 1, downloadId: id, contentId: opts.contentId, episodeId: opts.episodeId ?? null,
-      title: opts.title, contentType: opts.contentType, durationMins: opts.durationMins ?? null,
-      createdAt: new Date().toISOString(),
-    }, null, 2), 'utf8')
-    const assetJobs: Promise<void>[] = []
-    if (opts.thumbnailUrl) assetJobs.push(cacheDownloadArtwork(id, opts.thumbnailUrl, localDir))
-    if (opts.subtitles?.length) assetJobs.push(cacheDownloadSubtitles(localDir, opts.subtitles))
-    if (assetJobs.length) artworkJobs.set(id, Promise.all(assetJobs).then(() => undefined))
-    if (preflightPlan) pendingHlsPlans.set(id, preflightPlan)
+      writeFileSync(join(localDir, 'content.kokomovie.json'), JSON.stringify({
+        schemaVersion: 1, downloadId: id, contentId: opts.contentId, episodeId: opts.episodeId ?? null,
+        title: opts.title, contentType: opts.contentType, durationMins: opts.durationMins ?? null,
+        createdAt: new Date().toISOString(),
+      }, null, 2), 'utf8')
+      const assetJobs: Promise<void>[] = []
+      if (opts.thumbnailUrl) assetJobs.push(cacheDownloadArtwork(id, opts.thumbnailUrl, localDir))
+      if (opts.subtitles?.length) assetJobs.push(cacheDownloadSubtitles(id, localDir, opts.subtitles))
+      if (assetJobs.length) artworkJobs.set(id, Promise.allSettled(assetJobs).then(() => undefined))
+      if (preflightPlan) pendingHlsPlans.set(id, preflightPlan)
 
-    processQueue()
-    return { id, expiresAt }
+      processQueue()
+      return { id, expiresAt }
+    } catch (error) { torrentLeases.release(id); throw error }
   }))
 
-  ipcMain.handle('download:pause', trustedIpcHandler((_event, rawId: unknown) => {
+  ipcMain.handle('download:pause', trustedIpcHandler(async (_event, rawId: unknown) => {
     const id = downloadIdSchema.parse(rawId)
     const row = db.prepare('SELECT status, s3_hls_key, progress_percent, completed_segments, total_segments, downloaded_bytes, total_bytes FROM downloads WHERE id = ?')
       .get(id) as Pick<DownloadRow, 'status' | 's3_hls_key' | 'progress_percent' | 'completed_segments' | 'total_segments' | 'downloaded_bytes' | 'total_bytes'> | undefined
@@ -1211,15 +1327,16 @@ export function registerDownloadIpc(): void {
     if (isDirectVideoUrl(row.s3_hls_key)) {
       return { ok: false, reason: 'Pause is unavailable because this source cannot resume safely' }
     }
-    pauseSignals.set(id, true)
-    abortActiveRequests(id)
+    const stopped = stopJob(id, 'paused')
     db.prepare("UPDATE downloads SET status = 'paused', download_speed_kbps = 0 WHERE id = ?").run(id)
     notifyProgress(id, row.progress_percent, 'paused', row.completed_segments, row.total_segments, row.downloaded_bytes, row.total_bytes)
+    await stopped
     return { ok: true }
   }))
 
-  ipcMain.handle('download:resume', trustedIpcHandler((_event, rawId: unknown) => {
+  ipcMain.handle('download:resume', trustedIpcHandler(async (_event, rawId: unknown) => {
     const id = downloadIdSchema.parse(rawId)
+    await activeJobs.get(id)?.done.catch(() => {})
     const changed = db.prepare(
       "UPDATE downloads SET status = 'pending', error_message = NULL WHERE id = ? AND status = 'paused'",
     ).run(id)
@@ -1230,45 +1347,31 @@ export function registerDownloadIpc(): void {
     return { ok: true }
   }))
 
-  ipcMain.handle('download:cancel', trustedIpcHandler((_event, rawId: unknown) => {
-    const id = downloadIdSchema.parse(rawId)
+  async function removeDownload(id: string, deleting: boolean): Promise<boolean> {
     pendingHlsPlans.delete(id)
-    cancelSignals.set(id, true)
-    abortActiveRequests(id)
-    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?')
-      .get(id) as { local_dir: string } | undefined
-    db.prepare("UPDATE downloads SET status = 'cancelled', error_message = NULL WHERE id = ?").run(id)
+    const row = db.prepare('SELECT id, local_dir, manifest_path, status FROM downloads WHERE id = ?').get(id) as DownloadRow | undefined
+    if (!row) return true
+    if (!deleting && row.status === 'completed') return false
+    const stopped = stopJob(id, 'cancelled')
+    if (deleting) db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
+    else db.prepare("UPDATE downloads SET status = 'cancelled', error_message = NULL WHERE id = ?").run(id)
     notifyProgress(id, 0, 'cancelled')
-    if (row) {
-      setTimeout(() => {
-        try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
-      }, 500)
-    }
+    await stopped
+    removeDownloadFiles(row)
     return true
-  }))
+  }
 
-  ipcMain.handle('download:delete', trustedIpcHandler((_event, rawId: unknown) => {
+  ipcMain.handle('download:cancel', trustedIpcHandler(async (_event, rawId: unknown) => {
     const id = downloadIdSchema.parse(rawId)
     pendingHlsPlans.delete(id)
-    cancelSignals.set(id, true)
-    abortActiveRequests(id)
-    const row = db.prepare('SELECT local_dir FROM downloads WHERE id = ?')
-      .get(id) as { local_dir: string } | undefined
-    db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
-    if (row) {
-      setTimeout(() => {
-        try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
-        try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
-      }, 500)
-    }
-    return true
+    return removeDownload(id, false)
   }))
 
+  ipcMain.handle('download:delete', trustedIpcHandler(async (_event, rawId: unknown) => {
+    const id = downloadIdSchema.parse(rawId)
+    pendingHlsPlans.delete(id)
+    return removeDownload(id, true)
+  }))
 
   ipcMain.handle('download:list', trustedIpcHandler(() => {
     const rows = db.prepare('SELECT * FROM downloads ORDER BY rowid DESC').all() as DownloadRow[]
@@ -1478,19 +1581,33 @@ export function decryptLocalDirectVideoRange(
 
 // ─── TTL enforcement ──────────────────────────────────────────────────────────
 
-export function purgeExpiredDownloads(): void {
+export async function purgeExpiredDownloads(): Promise<void> {
   const db = getDb()
-  const expired = db.prepare(`SELECT id, local_dir FROM downloads WHERE expires_at < ?`).all(new Date().toISOString()) as Array<{ id: string; local_dir: string }>
-
-  for (const row of expired) {
-    try { rmSync(row.local_dir, { recursive: true, force: true }) } catch { /* ignore */ }
-    try { rmSync(row.local_dir + '.jpg', { force: true }) } catch { /* ignore */ }
-    try { rmSync(row.local_dir + '.kokomovie.json', { force: true }) } catch { /* ignore */ }
-    try { rmSync(row.local_dir + '.subtitles', { recursive: true, force: true }) } catch { /* ignore */ }
-    db.prepare('DELETE FROM downloads WHERE id = ?').run(row.id)
+  const cutoff = new Date().toISOString()
+  const eligibility = `expires_at < ? AND status != 'completed' AND downloaded_at IS NULL AND (manifest_path IS NULL OR manifest_path NOT LIKE '%.mp4')`
+  const expired = db.prepare(`SELECT id FROM downloads WHERE ${eligibility}`).all(cutoff) as Pick<DownloadRow, 'id'>[]
+  for (const candidate of expired) {
+    // Previous teardown may have let another candidate finish or change paths.
+    // Claim the current unfinished row synchronously before invalidating its job.
+    const row = db.prepare(`SELECT id, local_dir, manifest_path FROM downloads WHERE id = ? AND ${eligibility}`).get(candidate.id, cutoff) as DownloadRow | undefined
+    if (!row) continue
+    const deleted = db.prepare(`DELETE FROM downloads WHERE id = ? AND ${eligibility}`).run(row.id, cutoff)
+    if (!deleted.changes) continue
+    pendingHlsPlans.delete(row.id)
+    const stopped = stopJob(row.id, 'cancelled')
+    await stopped
+    removeStaging(row)
   }
+}
 
-  if (expired.length > 0) {
-    console.log(`[downloads] Purged ${expired.length} expired download(s)`)
+/** Quiesce before Electron exits; startup safely reconciles preserved work. */
+export async function shutdownDownloadJobs(): Promise<void> {
+  shuttingDown = true
+  const ids = [...new Set([...activeJobs.keys(), ...artworkJobs.keys(), ...torrentLeases.ids()])]
+  await Promise.allSettled(ids.map(id => stopJob(id, 'cancelled')))
+  await Promise.allSettled(artworkJobs.values())
+  const db = getDb()
+  for (const id of ids) {
+    db.prepare("UPDATE downloads SET status = 'pending', download_speed_kbps = 0 WHERE id = ? AND status = 'downloading'").run(id)
   }
 }

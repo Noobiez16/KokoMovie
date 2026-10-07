@@ -71,6 +71,9 @@ export function shouldResolveAutomaticSource(
 ): boolean {
   if (mode === 'complete') return false
   const searching = statuses.some((status) => status.state === 'searching')
-  if ((quality.releaseType === 'cam' || quality.releaseType === 'telesync') && searching) return false
-  return true
+  if (!searching) return true
+  return quality.mediaValidated
+    && quality.resolution >= 2160
+    && quality.releaseType !== 'cam'
+    && quality.releaseType !== 'telesync'
 }

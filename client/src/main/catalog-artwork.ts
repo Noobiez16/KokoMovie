@@ -5,8 +5,8 @@ import { join } from 'path'
 
 const CACHE_VERSION = 'v1'
 const MAX_ARTWORK_BYTES = 15 * 1024 * 1024
-const ALLOWED_SIZES = new Set(['w185', 'w300', 'w500', 'w1280'])
-const IMAGE_PATH = /^\/[A-Za-z0-9/_-]+\.(?:jpg|jpeg|png|webp)$/
+const ALLOWED_SIZES = new Set(['w185', 'w300', 'w500', 'w1280', 'original'])
+const IMAGE_PATH = /^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:jpg|jpeg|png|webp)$/
 
 function artworkRoot(): string {
   return join(app.getPath('userData'), 'catalog-artwork', CACHE_VERSION)
@@ -20,8 +20,10 @@ export function catalogArtworkUrl(path: string | null, size: string): string | n
 function parseArtworkRequest(raw: string): { remoteUrl: string; cachePath: string; contentType: string } | null {
   try {
     const url = new URL(raw)
-    if (url.protocol !== 'catalog-cache:' || url.hostname !== 'image') return null
-    const match = /^\/(w185|w300|w500|w1280)(\/[A-Za-z0-9/_-]+\.(jpg|jpeg|png|webp))$/.exec(decodeURIComponent(url.pathname))
+    if (url.protocol !== 'catalog-cache:' || url.hostname !== 'image' || url.username || url.password || url.port || url.search || url.hash) return null
+    // Reject traversal before URL normalization can remove those path segments.
+    if (decodeURIComponent(raw).includes('..')) return null
+    const match = /^\/(w185|w300|w500|w1280|original)(\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(jpg|jpeg|png|webp))$/.exec(decodeURIComponent(url.pathname))
     if (!match || match[2]!.includes('..')) return null
     const extension = match[3]!.toLowerCase()
     const digest = createHash('sha256').update(`${match[1]}${match[2]}`).digest('hex')

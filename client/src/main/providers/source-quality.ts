@@ -79,10 +79,14 @@ export function classifySourceQuality(input: SourceQualityInput): StreamQuality 
 function qualityFor(result: ProviderResult): StreamQuality {
   const stream = result.streams[0]
   if (stream?.qualityInfo) return stream.qualityInfo
-  const parsed = Number.parseInt(stream?.quality ?? '', 10)
+  const label = stream?.quality ?? ''
+  const parsed = /\b4k\b/i.test(label) ? 2160
+    : /\b2k\b/i.test(label) ? 1440
+      : Number.parseInt(label.match(/\b(\d{3,4})p?\b/i)?.[1] ?? '', 10)
   return classifySourceQuality({
     url: stream?.url ?? '',
     resolution: Number.isFinite(parsed) ? parsed : 0,
+    declaredQuality: label,
     mediaValidated: false,
   })
 }
@@ -93,13 +97,18 @@ function releaseRank(type: StreamReleaseType): number {
   return 2
 }
 
+function isCam(type: StreamReleaseType): boolean {
+  return type === 'cam' || type === 'telesync'
+}
+
 export function rankProviderResults(results: ProviderResult[]): ProviderResult[] {
   return results
     .map((result, index) => ({ result, index, quality: qualityFor(result) }))
     .sort((a, b) =>
-      releaseRank(a.quality.releaseType) - releaseRank(b.quality.releaseType)
+      Number(isCam(a.quality.releaseType)) - Number(isCam(b.quality.releaseType))
       || Number(b.quality.mediaValidated) - Number(a.quality.mediaValidated)
       || b.quality.resolution - a.quality.resolution
+      || releaseRank(a.quality.releaseType) - releaseRank(b.quality.releaseType)
       || a.index - b.index)
     .map(({ result }) => result)
 }

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 const primarySurfaces = [
   '../App.tsx',
   '../components/layout/AppLayout.tsx',
+  '../components/layout/HeaderSearch.tsx',
   '../components/catalog/ApiKeyRequired.tsx',
   '../components/catalog/CatalogFallbackBanner.tsx',
   '../components/catalog/CategoryPagination.tsx',

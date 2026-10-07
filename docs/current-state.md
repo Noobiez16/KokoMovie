@@ -1,8 +1,182 @@
 # KokoMovie Current State
 
-**Audit date:** 2026-08-12
-**Baseline:** v1.5.4 source-discovery branch based on tagged v1.5.3
-**Rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
+**Current review:** 2026-10-07
+**Source target:** v2.0.0; release integration into `main` with annotated tag `v2.0.0`. The development branch is `codex/kokomovie-v2-source-priority`, based on `7e1c219`.
+**Recovery points:** `codex/kokomovie-v2-fullscreen-polish` remains at `7e1c219`; `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
+**Release status:** release prepared on 2026-10-07. The tag-triggered [release workflow](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml) builds and publishes installers after all gates succeed; consult [Releases](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.0.0) for publication status. No installer was installed by this work.
+
+## Release integration and screenshots
+
+README previews capture the actual Electron renderer with a live TMDB catalog: Home,
+genre galleries, title details/recommendations and inline search. Images retain the
+original logo and palette. Catalog content is time-dependent.
+
+Fresh-checkout verification reproduced missing FFmpeg in the separate Electron CI job
+and missing media-fixture parent directories. The job now vendors its pinned Linux x64
+LGPL build before tests; both media tests initialize their own parent. Fresh setup checks
+pass, together with 662 deterministic tests, 17 native Electron tests, all TypeScript
+targets, lint and the production audit policy. Installer publication remains a CI result.
+
+## Verified source priority and native typing
+
+Automatic discovery ranks validated non-CAM sources by 2160p/4K, 1440p, 1080p, then
+720p; known standard-release evidence breaks equal-resolution ties. Known CAM/TS remains
+last resort with confirmation. Progressive discovery starts immediately for validated non-CAM
+4K; otherwise it waits for enabled pending providers to finish or the existing 40-second deadline.
+Complete Scan still waits for all attempts/deadline. This may increase initial waiting time for
+lower tiers, giving late HD/UHD alternatives a chance to win. Manual choice and HLS AUTO
+bandwidth adaptation remain intact; no quality variants or pixels are invented.
+
+The HLS probe previously passed a localhost proxy URL to a helper that intentionally rejects
+private targets, falling back to guessed 720p. It now reads validated public manifests with
+source headers, redirects and DNS protections, a 2 MiB compressed/decompressed bound,
+15-second elapsed timeout and cancellation. Dimensionless legitimate media remains Unknown
+and usable as fallback; failed validation is rejected. Main nominal tiers now agree with the
+renderer for 960x540, 1282x534 and 1920x800. Late responses cannot change finished searches.
+
+Fresh lookups already re-extract in unique temporary sessions; no persistent CAM-selection
+cache was found or added. Current playback/PiP deliberately retains its session. URL/manifest
+release clues cannot visually identify an unlabelled CAM, and a streaming release date does
+not guarantee a high-quality source in every enabled provider.
+
+Strict checking now covers renderer, main and every native E2E source. The standard
+`client/e2e/tsconfig.json` gives the editor the existing preload globals; installed TSserver
+confirms the configured project and zero fullscreen diagnostics. Final functional gates passed:
+662 units, 17 real Electron tests (40.3s), all TypeScript targets, lint 0 errors/0 warnings,
+build and 227 production package/three FFmpeg licence checks. Version, logo and base palette
+remain unchanged. See [testing](testing.md) for evidence and limits.
+
+An isolated live repeat on 2026-10-07 at 21:35 UTC selected VidSrc.su for Spider-Man:
+Brand New Day, with MoviesAPI also reporting 1080p and VixSrc reporting 720p. Actual
+decoded frames were 1920x800 (cinematic nominal 1080p), unchanged in DOM fullscreen
+with the same video and source. The release type was unknown, so this observation does
+not certify WEB-DL or visual absence of CAM. This is one title/source/time, not universal
+1080p/4K availability. The earlier VixSrc observation below remains historical evidence.
+
+The current local Windows x64 verification package is
+`client/.codex/package-windows-source-priority/win-unpacked`. Resource/native module,
+FFmpeg, production CSP and executable-fuse checks pass; version stays 2.0.0. It is unsigned,
+unpublished and not installed. No desktop shortcut was changed.
+
+## Verified v2.0.0 interface
+
+The desktop shell follows the approved five-screen HBO Max-inspired composition: a 76px
+topbar without a separator, Home/Movies/Series, the original centered logo, Search and a Library/tools menu.
+Compact windows move the primary links into that disclosure. Search expands left in the header,
+showing up to eight real poster/title suggestions beneath the field after a 300ms debounce and
+at least two characters. Typing keeps the current route; selecting opens details. Keyboard selection,
+Escape focus, outside/Tab closure, Ctrl+K/Cmd+K and stale-response suppression are covered.
+Dismissal contracts right over 160ms while the field/panel immediately become inactive.
+Reopening cancels closure; reduced motion closes immediately. Empty or one-character input
+has no panel or minimum-length instruction.
+Legacy `/search` links retain their single page field, URL filters, pagination and history; the
+redundant header control is omitted there. The shared
+scroll area and single PlayerHost outside Routes are preserved. No login or profiles were added.
+
+Home prioritizes one real Continue Watching row in 16:9 cards, followed by catalog rows.
+Its former My List row and query are removed. A single My Library menu entry and shared
+page heading join the existing history/list tabs; `/history?tab=list` remains valid and saved
+records remain in the library. Movies/Series expose actual genre and trending destinations.
+Integrated detail artwork, keyboard season tabs and independent episode play/download
+buttons retain the existing source, resume and demand-loading workflows. Episodes form
+four/three/two columns at 1440/1152/1024px. Without a featured hero, content keeps the header
+space so local library rows and genre controls remain accessible.
+
+Hero/detail artwork contains the complete image with a feathered transition to the existing
+background. Fluid height replaces the 620px hero ceiling and allows copy/actions to grow.
+Only hero/detail trusted w1280 artwork upgrades to original when contained size and density
+require it, with cached w1280 fallback. Original image requests retain fixed-host/path validation,
+15 MiB limits and timeout. Native layout checks cover 3840x2160, 3440x1440 and 1024x768.
+Measured monitors are 3440x1440 and 1440x2560, both at scale 1.
+
+Quality exposes actual HLS variants and AUTO; 720p/1080p missing from a source are disabled.
+Direct video reports its measured nominal tier and cannot change encoded resolution. Intrinsic
+metadata/resize events update that measurement; real source changes clear old variant data.
+Fullscreen retains the video, URL, decoded pixels and quality intent. Real generated 720p/1080p
+files passed DOM and native-window fullscreen checks. One isolated live Spider-Man: Brand New Day
+probe selected VixSrc: 1282x534 cinematic frames (nominal 720p) remained identical during fullscreen.
+That observation applies to the tested source and time, not every provider or the user's selected source.
+
+Compiled Electron checks verify card zoom, menu entry, 200ms valid Search/season entry and
+reduced motion without displacement or loss of focus. These are KokoMovie motion values;
+exact HBO Max macOS timings were not verified. The Behance reference is an unofficial static
+concept, limited to Wireframe, Home, Series Selected, Search and Movies Featured.
+Library import/export retains its Settings tab and all existing operational APIs.
+
+Movie hero Play enters source discovery through approved content details rather than
+opening an empty player. Series opens episode selection. Search uses complete typed
+TMDB endpoints, preserves filters/pagination through navigation, and normalizes synthesized
+offline matches to page 1. Catalog failures expose actual query retries.
+
+The logo SHA-256 remains `EE5C1EF3359A6E459C92090623487664B2444F1B37AD4A75EA04D48A68608650`;
+base palette values are unchanged. Locale persistence accepts both canonical and legacy
+codes. Seventeen real Electron tests exercised isolated SQLite watchlist/resume, EN/ES/FR,
+search/navigation, compiled layout/motion and privileged boundaries. See [testing](testing.md)
+for limits. Dependencies and playback-provider contracts are unchanged; this block retires
+specific availability endpoints and extends validated artwork sizing and player quality presentation.
+
+The renderer entry checks for Electron's preload bridge before mounting App/PlayerHost.
+A regular browser at the development URL now receives localized desktop guidance instead
+of crashing on missing provider subscriptions. This is a desktop client, not a browser
+backend: no credentials, database, source or playback APIs are exposed over HTTP.
+
+The preceding core block repaired source/downloader contracts and callback redirects. Torrent
+downloads require the actual IPv4 endpoint, live selected file and capability. Both accepted
+hostnames were exercised through a real local HTTP server. Production audit now fails closed;
+js-yaml 4.3.2 and ip-address 10.7.3 yielded a fresh report with zero findings. Weekly trending
+collections preserve scope and pagination instead of treating trending as an unknown genre.
+
+## Verified storage, security and first discovery addition
+
+Per-download jobs serialize pause/resume, settle requests and FFmpeg children, and check
+cancellation after asynchronous finalization/artwork. Portable publication and sidecars use
+exclusive creation; rollback tracks owned files. Expiration claims only live unfinished
+rows, preventing a stale cleanup snapshot from removing a newly completed download.
+Completed files remain until explicit removal; unfinished work has the visible 30-day policy.
+
+Torrent caches are allocated per torrent, registered by the main process and removed only
+after consumers and filesystem stores close. Audio probes preserve successful EOF and are
+retained until FFmpeg closes. Application quit awaits both download and P2P teardown.
+Resolver lookup/allocation is serialized within four torrent slots. Routine eviction selects
+only idle entries; active streams/processes, accepted queued downloads and a 60-second URL
+handoff reservation protect their allocation. Failed language resolution cannot dispose a
+shared torrent. When all slots are reserved, translated copy asks the user to wait or retry.
+A buffered player after HTTP EOF and handoff expiry is idle; a later request may need fresh
+resolution if its cache was evicted. No persistent player-session lease was added.
+
+Production renderer scripts prohibit inline code and evaluation, with build-time file CSP
+and blob media-worker support. Trusted-frame headers do not replace third-party policies.
+Existing frame/media/network permissions remain broad for compatibility; this is targeted
+script hardening, not a complete removal of third-party media risk.
+
+Where to watch has been removed completely: UI/API, translations, country persistence and
+specific country/watch-provider endpoints. Older km-settings payloads migrate to an empty
+durable state while runtime keychain handling remains. Actual playback providers and regional
+maturity certifications are preserved.
+
+Final source checks passed: 616 deterministic tests, seventeen Electron tests (37.3s), both TypeScript
+targets, zero-error/zero-warning lint, build and licenses (227 packages/three FFmpeg targets).
+The preceding core block returned a zero-finding production audit; dependencies did not
+change during this UI refinement. The native download test used a generated
+H.264/AAC fixture and real FFmpeg; movie/episode outputs had different names and offline
+video decoding, seek and play worked with HTTP blocked.
+
+A Windows x64 unpacked package was prepared and inspected, including native resources,
+version, fuses, file CSP and bundled FFmpeg. All 28 renderer assets match the tested build.
+The package is at client/.codex/package-windows-fullscreen/win-unpacked; it is unsigned,
+unpublished and not installed. Existing Vite/plugin deprecations, Node SQLite experimental
+notice, player chunk size and packaging ASAR/duplicate-reference notices remain tooling debt.
+Authenticode needs a signing identity; installed upgrades, Linux/macOS packaging and live
+peer/provider endurance were not repeated here. Title alerts, personal collections,
+history-based recommendations and a marathon planner remain future roadmap items.
+
+## Historical architecture and phase notes
+
+The remaining sections describe prior milestones and audit findings. They are historical;
+the current verification above takes precedence over old baseline counts and risk status.
+
+**Historical audit:** 2026-08-12, v1.5.4 source-discovery branch based on tagged v1.5.3.
+**Historical rollback SHA:** b35f87615fa0bc49f197902c3f501b6be7433797
 
 ## Runtime
 

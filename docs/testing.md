@@ -1,7 +1,216 @@
 # Testing and Regression Baseline
 
-**Date:** 2026-08-08
-**Automated baseline:** lint, strict renderer/main typecheck, 113 Vitest tests, the production dependency audit policy, the distribution licence gate, and the production build are active gates on the v1.5.2 optimization line.
+**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
+Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s),
+TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
+ENOENT in both media tests and a missing FFmpeg prerequisite in the Electron CI job;
+all three setup checks pass after correction. README screenshots use live catalog data.
+Final source checks: 662 deterministic tests and seventeen real Electron tests passed (40.3s);
+renderer/main/E2E TypeScript, lint (zero errors/warnings), build and licenses passed.
+The interface/core counts below record earlier completed blocks.
+
+### Highest available source and native editor typing
+
+- Compiler RED reproduced 33 native test diagnostics, including the sixteen fullscreen errors.
+  Shared preload declarations, guarded bridge access, validated unknown download rows and explicit
+  HTMLVideoElement callbacks removed the errors. Initial nonstandard config passed CLI but fresh
+  TSserver still assigned fullscreen to an inferred project with four missing-bridge diagnostics.
+  The corrected standard e2e/tsconfig.json is discovered by the editor and root typecheck; fresh
+  TSserver confirms all native tests/globals and zero diagnostics. No duplicate API or suppression.
+- Real registered IPC regression tests retain production registry, validation, ranking and trusted
+  handler logic, mocking only external boundaries. They reproduce 720p winning before later
+  1440p/2160p, immediate validated non-CAM 4K with correlated background snapshots, complete-mode
+  waiting, CAM fallback at completion/deadline, fresh CAM-to-WEB-DL lookup, unknown-media fallback,
+  failed HTTP/HTML, and nominal geometry. Initial focused RED: 23 failed, 22 passed.
+- Additional probe regressions cover raw/decompressed 2 MiB caps, elapsed timeout, aborts,
+  response errors, late completion, redirected manifest-relative variants, exact-origin headers and
+  credential removal across origins. Main HLS probes now reach the validated upstream rather than
+  failing private-target validation on localhost; unknown dimensions never become guessed HD.
+- First full run was 661/662: fixture hygiene rejected new fake credential-shaped literals.
+  Using the existing shared fixture value fixed that test without weakening it. Final fresh full
+  run: 662/662, including real HTTP callback tests; full native suite: 17/17, preserving source/video
+  identity, decoded 720p/1080p, fullscreen, locale, navigation, privileged boundaries and downloads.
+- Root npm run typecheck, full lint (0 errors/0 warnings), build and licence gate passed.
+  Native run removed the conflicting NO_COLOR environment variable. Existing Vite/plugin
+  deprecations, SQLite experimental and bundle-size warnings remain inherited tooling debt.
+- These tests prove selection behavior when an eligible source exists, not visual detection of
+  unlabelled CAM or a promise that any provider has 4K/1080p for a particular movie.
+- Live isolated Spider-Man repeat at 21:35 UTC selected VidSrc.su 1080p over VixSrc 720p;
+  MoviesAPI also advertised 1080p. Actual 1920x800 cinematic frames stayed identical in DOM
+  fullscreen with the same video/source. Release evidence remained unknown; no claim of
+  visually verified WEB-DL or higher-tier availability follows from this single observation.
+- Current local Windows x64 package is `.codex/package-windows-source-priority/win-unpacked`;
+  resource/native module, FFmpeg, CSP and actual executable-fuse verification passed.
+  No transient CSP test probe is shipped. Unsigned, unpublished and not installed.
+
+### Search exit, feature removal and fullscreen polish (previous block)
+
+- Search lifecycle RED/GREEN verifies rightward 160ms closure, immediate inactive/inert state,
+  canceled exit on reopen/unmount, all dismissal paths, quiet short input and reduced motion.
+  Real Electron confirms the compiled collapse animation and absence of the empty panel.
+- Availability removal regressions deny retired endpoints, mount both detail types without
+  country/provider requests, discard old country/unknown persisted properties and retain
+  keychain updates, generic catalog cache semantics and maturity routes. Obsolete feature tests
+  were removed rather than retained as a positive product baseline.
+- Artwork RED reproduced cover framing; source inspection found the 620px ceiling. Focused tests cover trusted
+  original upgrades, contained width/DPR, intrinsic aspect, latched cached fallback, cleanup,
+  malicious protocol paths, offline cache and both byte limits. Native geometry/screenshot
+  checks pass at 3840x2160, 3440x1440, 1024x768 and actual native fullscreen. A hard contain edge
+  found in visual QA was feathered at the measured picture boundary; final captures were inspected.
+- Quality tests execute actual VideoPlayer lifecycle and controls: real tiers/original indices,
+  disabled unavailable 720p/1080p, direct decoded tiers, AUTO/manual intent, source transitions,
+  intrinsic resize/emptied, replacement video nodes and corrected540/cinematic classifications.
+- Real Electron decodes generated 1280x720 and 1920x1080 portable files through production
+  PlayerHost/VideoPlayer. Both DOM and window fullscreen preserve identity, source, decoded
+  pixels and menu quality; playback advances with no loadstart/emptied restart. Initial native
+  failures were caused by the test clicking a covered gear; the corrected click-away interaction
+  passed both focused tests and the fresh complete 17-test suite without product changes.
+- An isolated live Spider-Man probe selected VixSrc and measured 1282x534 before/during DOM
+  fullscreen, with identical video/source. This was one source at one time; no user credentials
+  or preferences were accessed, and all-provider 1080p availability was not established.
+- Final gates: 616/616 units, 17/17 Electron, renderer/main TypeScript, lint 0 errors/0 warnings,
+  build, 227 production licenses/three FFmpeg targets, unchanged logo/palette and version 2.0.0.
+- Local Windows x64 package client/.codex/package-windows-fullscreen/win-unpacked passes
+  resources/native modules/FFmpeg/CSP/actual executable fuses; all 28 renderer assets match
+  tested source. Unsigned, unpublished and not installed. Existing Vite/plugin deprecations,
+  SQLite experimental notice, player chunk size and ASAR/duplicate-reference packaging notices
+  remain separate tooling debt; validation output is not claimed to be warning-free.
+
+### Integrated search and library refinement (historical)
+
+- Native RED reproduced the old 1px topbar separator; the compiled header now has no border.
+  Home has one Continue Watching row with real SQLite positions and no saved-list row/query.
+  One My Library entry and shared heading retain list/history tabs, deep links and saved records.
+- Ten focused inline regressions cover 300ms debounce/minimum length, delayed responses,
+  eight-result limit, keyboard detail identity, errors/retry/empty state, focus, shortcuts,
+  same-page navigation/Back cleanup and locale/maturity refresh suppression. Menu/search
+  overlap was reproduced RED and corrected with focus-preserving disclosure closure.
+- Real Electron verifies no typing navigation, actual IPC-backed suggestions, an old delayed
+  response arriving after the latest result, keyboard selection, Escape and outside focus.
+  Captures and actual geometry at 1440/1024/960px show no overlap with brand/menu or viewport overflow.
+  Chromium confirms the 260ms left-reveal input animation and its removal under reduced motion.
+- Legacy `/search` links retain URL/type/page/Back and result-entry coverage. EN/ES/FR,
+  SQLite library/resume persistence, no-hero spacing, privileged boundaries and real offline
+  FFmpeg playback remain covered. Closed inline search performs no preference/catalog queries.
+- Fresh final gate: 531 units, fourteen native tests (28.2s), both TypeScript targets,
+  build and full lint with zero errors/warnings. No dependencies, main/IPC or player changes.
+  Logo hash/base palette match the recovery source; all versions remain 2.0.0.
+- The local Windows x64 unpacked package was regenerated with publication disabled.
+  Version 2.0.0, resources, native modules, FFmpeg, production CSP and executable fuses
+  passed inspection; its renderer bundle matches the tested source build and includes
+  inline search. The unsigned package was not installed; the desktop shortcut remains unchanged.
+
+The dedicated Search field and Home saved-list composition in the historical HBO block
+below were superseded by the user's integrated-search/library refinement.
+
+### Desktop runtime guidance
+
+- Reproduced the development browser crash on missing `onStreamsCollected`. The entry
+  now mounts App only when the preload bridge exists; otherwise it renders EN/ES/FR
+  desktop guidance. The live development browser was reloaded and inspected successfully.
+- Entry regressions verify both missing-bridge guidance and normal desktop mounting.
+  A sandboxed native Chromium window with no preload verifies the compiled guidance;
+  the existing real-app navigation, persistence, playback and security tests still pass.
+- Final gate: 520 units, thirteen native tests, both TypeScript targets, zero-error/zero-warning
+  lint and build passed. Main-process contracts and dependencies remain unchanged.
+
+### HBO-inspired UI refinement
+
+- Native tests retain SQLite, country persistence, URL search/type/page/Back, operational
+  routes and EN/ES/FR. The header has a single Search link/input destination, accessible
+  library disclosure, compact primary links and both Ctrl+K/Cmd+K focus.
+- Home, Movies Featured, Search, movie detail, selected series and menu captures were
+  inspected at 1440×900 and 1024×768 using synthetic artwork and isolated catalog records.
+  Episode geometry also passes at 1152×820: four/three/two columns with 16:9 visuals.
+  Keyboard season changes show the correct requested episodes.
+- A native RED/GREEN case confirmed a no-hero Home heading at y=24 under the 76px header;
+  the corrected Home library and Movies/Series genre controls reserve header space.
+  Local records are explicitly seeded for this independent test.
+- Chromium metrics verify hover scale approximately 1.035, menu entry 220ms, and valid
+  Search/season entry 200ms. Same-route Search identity remounts without stale results.
+  Reduced motion removes animations/zoom and retains arrow position, focus and actions.
+  Representative resting/hover/menu/reduced screenshots form a local motion sequence.
+- Focused regressions cover delayed season data and menu close/reopen, navigation and
+  unmount timer cancellation. PlayerHost remains outside Routes; main/player/API and
+  dependency files are unchanged from the prior verified checkpoint.
+- Logo SHA-256 and palette match `c465dbb`; root/client/lock versions remain 2.0.0.
+  License gate: 227 production packages and three LGPL FFmpeg targets. The prior core
+  production audit was clean; no dependency change required an additional external audit.
+- The final Windows x64 unpacked package was regenerated with `--publish never` and
+  verified for version 2.0.0, production CSP, actual executable fuses, SQLite/keychain
+  bindings, filesystem store and bundled FFmpeg. Authenticode is NotSigned; no installer
+  or installed upgrade was executed.
+- The reference is an unofficial static Behance concept. This verifies KokoMovie on
+  Windows, not exact HBO Max macOS timings, live providers, peers or current availability.
+  Existing Vite migration/deprecation, SQLite experimental and large-player-chunk warnings
+  remain; lint itself reports zero warnings. One native resize request was lost in an
+  intermediate run; the final full suite passed its actual-width assertions without a
+  product change or weakening the checks.
+
+### Initial v2.0.0 interface milestone (historical)
+
+- 366 deterministic tests passed. Renderer/main TypeScript, lint (zero errors/warnings), and production build passed.
+- Six real Electron tests passed on Windows: five privileged boundary tests and a desktop UI flow with isolated SQLite and credentials intercepted before application startup.
+- UI flow covered detail navigation, typed paginated search, Back, query changes, watchlist/resume records, operational pages, EN/ES/FR persistence, compact navigation and Ctrl+K focus.
+- Screenshots at 1440×900 and 1024×768 used synthetic catalog artwork. This verifies layout and interaction, not external provider availability or a packaged upgrade.
+- License gate: 227 compatible production packages and three verified LGPL FFmpeg targets. Audit security findings remain a separate correction block.
+- Logo hash and base CSS palette were compared with the pre-change source and are unchanged.
+
+On this Windows sandbox, set TEMP/TMP to a project-local writable temporary folder before
+Vitest/Playwright; the system temporary folder can reject Vitest artifact renames. The tests
+do not need changes to product behavior for that environment limitation.
+
+Historical baseline (2026-08-08): 113 Vitest tests on v1.5.2. Historical phase notes below
+are retained and do not imply every live/manual scenario has been repeated for v2.0.0.
+
+### v2.0.0 core correction block
+
+- Full suite: 417 passed; six Electron tests passed again after dependency/source changes.
+- Final IPv4 endpoint refinement: 25 targeted source/redirect tests passed, including rejection of IPv6 literals and real HTTP transfers via localhost and 127.0.0.1.
+- Callback tests exercise invalid/private/prohibited redirects, late response errors, valid public redirects and same-origin sensitive-header isolation. They use synthetic fixtures rather than external providers or peers.
+- Audit CLI tests cover malformed/operational/error reports, signal/spawn failures, exit/count consistency, and severity policy. The actual external production audit returned exit 0 with all vulnerability counts zero.
+- Both TypeScript targets, zero-error/zero-warning lint, production build, license gate, and npm ci --dry-run passed. No installer signature, upgrade, live swarm or long-duration playback is implied.
+
+### v2.0.0 storage, security and regional discovery
+
+- Storage/security/discovery block: 471 passed; final ownership correction: 487 passed.
+  Eight Electron tests passed again against the final built renderer/main.
+- Download regressions execute real IPC handlers with SQLite and staging directories;
+  controlled FFmpeg children cover blocked stdin, pause/resume ordering, artwork waits,
+  cancellation/deletion, shutdown recovery, equal-title collisions, sidecar exclusivity,
+  unrelated directory preservation and expiry racing a completed transfer.
+- P2P tests include the installed fs-chunk-store and callback ordering. Audio probe tests
+  distinguish normal EOF from interruption and retain the child until actual close.
+- Resolver tests exercise the production acquisition boundary with deterministic torrent
+  doubles: idle-only eviction, bounded all-busy rejection, same-torrent reuse, concurrent
+  acquisition, shared failure preservation, handoff expiry and forced shutdown. Real
+  download IPC/SQLite tests observe queued lease release on cancel/delete/expiry/shutdown,
+  destination setup failure and successful media completion. They do not certify a live swarm.
+- The native portable test generates H.264/AAC with bundled FFmpeg, downloads a movie and
+  episode through a registered process-owned local fixture, checks distinct MP4/metadata
+  outputs and removed staging, stops the origin, blocks HTTP and verifies offline Range,
+  video decoding, seek and play in Electron. It does not join a torrent swarm.
+- Native CSP checks inject an inline script, load an ordinary external local eval probe,
+  and run a blob worker. DevTools evaluation alone bypasses CSP and is not the eval proof.
+- At this earlier milestone, Where to watch tests covered both media types, country selection, grouping,
+  saved/outdated notices, malformed response/link rejection, retry and title isolation.
+  Native fixtures switched countries and verified persistence. The later polish block removes
+  this feature and its positive tests; current coverage verifies absence and migration instead.
+- Fresh production audit returned zero info/low/moderate/high/critical findings.
+  License check passed for 227 production packages and three FFmpeg targets.
+- Windows x64 unpacked packaging completed with `--publish never`; version/resources,
+  native modules, FFmpeg and production CSP were inspected. Actual executable fuses were
+  read using `node scripts/verify-electron-fuses.cjs <path-to-KokoMovie.exe>`; the argument
+  mode is read-only. Signing status was NotSigned. No installer/upgrade was executed.
+
+Repeat native checks from `client` after `npm run build`, with TEMP/TMP under
+`client/.codex/tmp`, using `node ../node_modules/@playwright/test/cli.js test`.
+Live provider/swarm startup, long-duration seek/audio stability, installed upgrades and
+other platform packages still need their own verification. Availability fixtures do not
+establish today's regional service availability.
+After HTTP EOF and the 60-second URL handoff reservation, a fully buffered player is idle;
+eviction can require fresh resolution for a later media request. Active HTTP/process consumers
+and accepted queued downloads are protected, without a renderer player-session lease.
 
 ## Existing commands
 

@@ -4,9 +4,9 @@
 
 # KokoMovie
 
-**All your movies and TV shows in one beautiful app — free, no subscriptions, no clutter.**
+**A local movie and TV library with catalog discovery, playback and offline files.**
 
-[![Version](https://img.shields.io/badge/version-1.5.4-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#automatic-updates)
 
@@ -39,18 +39,65 @@ artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` �
 
 ## What is KokoMovie?
 
-KokoMovie is a desktop app that brings movies and TV shows together in one place,
-with a clean, modern interface. Search for anything, hit **Watch**, and it finds a
-working stream for you automatically — no juggling websites, pop-ups, or sign-ups.
+**KokoMovie 2.0.0** introduces an HBO Max-inspired desktop composition:
+top navigation with the original centered logo, cinematic title artwork, a landscape
+Continue Watching row, genre navigation and keyboard-operated season tabs. The clean header
+has no separator line; My Library joins saved titles and viewing history under one menu entry.
+Search expands left in the header and suggests titles below the field as you type, keeping
+the current page until you select a detail. It contracts right when dismissed; an empty or
+one-character field shows no instructional panel. Existing `/search` links retain filters and pagination.
+Hero/detail artwork shows its complete frame on large and ultrawide screens, with fluid height
+and higher-resolution trusted artwork when needed. Playback exposes real 720p/1080p choices;
+unavailable variants are disabled, and direct videos report their decoded quality.
+The existing purple palette and logo bytes are preserved;
+motion respects the system's reduced-motion preference. Login and profiles are not added.
+It also adds permanent completed downloads, controlled
+transfer teardown and a stricter renderer script policy.
+The `v2.0.0` tag runs installer builds and publication through
+[GitHub Actions](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml).
+Downloads become available when the release workflow succeeds. See
+[current state](docs/current-state.md) for verified scope.
+
+KokoMovie brings catalog discovery, local library records and playback into one desktop
+interface. Search titles, review their details, choose a source or play saved media.
+External catalog access uses your TMDB credential; source availability depends on providers.
 
 - **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
-- **One-click play** — KokoMovie finds a working stream and starts playing
+- **Source discovery** — prefers available non-CAM sources at 4K, 1440p, 1080p, then 720p; manual selection, visible errors and retries remain available
 - **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - **On-device storage** — watchlists, history, and preferences are stored locally on your machine
-- **Watch offline** — save portable 1080p MP4 files, including language-selected torrent dubs, for when you are without internet
-- **Always up to date** — the app updates itself in the background
-- **English, Español, Français** — switch the complete interface instantly in Settings, with no restart
+- **Watch offline** — completed portable MP4 files stay until you remove them; equal-title downloads receive distinct filenames
+- **Release updates** — optional update checks for published builds
+- **English, Español, Français** — switch the localised interface in Settings, with no restart
 - **Built-in diagnostics** — advanced users can open Developer Tools from the View menu to inspect console errors
+
+---
+
+## Desktop preview
+
+Actual screenshots of KokoMovie 2.0.0 with the live catalog. Titles and artwork change
+with catalog availability and the selected interface language.
+
+**Home — featured artwork and trending titles**
+
+![KokoMovie home with cinematic artwork and a gallery of trending posters](docs/screenshots/home.png)
+
+<details>
+<summary>Explore the catalog galleries, title details and instant search</summary>
+
+**Catalog galleries**
+
+![KokoMovie catalog with poster galleries organized by genre](docs/screenshots/catalog-gallery.png)
+
+**Title details and recommendations**
+
+![KokoMovie title details with synopsis, cast and recommended titles](docs/screenshots/title-details.png)
+
+**Instant search**
+
+![KokoMovie expanded header search with live poster and title suggestions](docs/screenshots/inline-search.png)
+
+</details>
 
 ---
 
@@ -140,6 +187,10 @@ npm run dev:client
 ```
 
 This starts the main compiler in watch mode and launches the Electron application on your desktop.
+Keep the terminal running and use that KokoMovie window. Opening `http://localhost:5173/`
+in a regular browser only serves the development renderer; playback, local records and
+settings require Electron's preload connection. Without that connection, the page shows
+desktop guidance instead of mounting privileged flows and leaving a blank screen.
 
 ### Project structure
 
@@ -196,8 +247,8 @@ Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) 
 `latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
 
 ```bash
-git tag v1.5.4
-git push origin v1.5.4
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of

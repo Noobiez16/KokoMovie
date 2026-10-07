@@ -5,6 +5,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.0.0] — 2026-10-07
+
+### Added
+- README screenshots show the real desktop Home, genre galleries, title details and inline search with live catalog artwork.
+- Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
+- Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, saved-library posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
+- Inline header search expands left and progressively suggests real posters/titles below the field, without leaving the current page while typing. Selection opens details; keyboard navigation, Escape, shortcuts, retries and stale-response protection are included.
+- Existing URL-based `/search` links retain their page field, movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
+- Shared page headings and empty/error states with real retry actions; a separate Library tab for existing import/export controls.
+- Deterministic UI behavior tests and real Electron desktop smoke coverage with temporary SQLite data and credentials intercepted before startup.
+- Actual IPC/SQLite lifecycle regression coverage and a real FFmpeg/Electron test that publishes equal-title movie/episode fixtures and decodes, seeks and plays saved media with HTTP blocked.
+
+### Changed
+- Electron release tests now provision the pinned LGPL FFmpeg build in their own CI job. Media fixtures create their temporary parent independently, so fresh checkouts and individual test runs do not depend on earlier tests.
+- Automatic discovery prioritizes validated non-CAM sources by available resolution: 2160p/4K, 1440p, 1080p, then 720p. It waits for pending sources below the top tier, resolves a validated non-CAM 4K candidate immediately in progressive mode, and retains the 40-second deadline and explicit CAM/TS fallback warning.
+- HLS resolution probes now read the validated public upstream manifest rather than a rejected localhost proxy URL. Dimensionless media remains Unknown until measurable; failed probes no longer receive guessed 720p/1080p labels. Corrected main-process cinematic/540p tier thresholds.
+- Media probes have bounded response size and elapsed time, propagate discovery cancellation, preserve redirected manifest paths and scope credentials to the correct origin. Terminal discovery snapshots ignore late results. Fresh searches re-extract sources; current playback/manual quality and HLS AUTO remain intact.
+- Native E2E sources now participate in `npm run typecheck` through the editor-discoverable `client/e2e/tsconfig.json`, using shared preload declarations and explicit video element types. Corrected the sixteen fullscreen diagnostics and the remaining native test typing errors without suppressions.
+- Header search contracts right on dismissal, immediately disables interaction/queries, cancels closure on reopening and honors reduced motion. Empty/one-character input shows no instructional panel.
+- Hero/detail artwork uses complete contain framing, fluid large-screen height, a measured edge transition and density-aware trusted original images with cached fallback. Trailer geometry also contains its complete frame.
+- Player Quality presents real 720p/1080p availability, disables missing variants, retains other genuine HLS tiers and reports decoded direct-video quality. Corrected540/cinematic tier classification; source changes clear obsolete variants while fullscreen preserves quality intent and the media session.
+- Removed Where to watch completely, including its UI/API, translations, persisted country and specific TMDB endpoint permissions. Existing playback providers and maturity certifications are preserved.
+- Removed the topbar separator. Home now has one Continue Watching row instead of a My List row/query. A single localized My Library menu entry and shared page heading join existing saved-list/history tabs while preserving their records and deep links.
+- Refined hero, cards, rows and details around the five approved reference compositions while preserving the logo bytes and original base palette. Shared header space remains reserved when the optional hero is absent.
+- Added scoped card/menu/route and valid Search/season entry motion with reduced-motion support. Same-route results remount only behind existing valid-data guards; loading episode placeholders do not receive the data-entry animation.
+- Movie hero Play runs existing source discovery after approved metadata; series opens episodes. Playback intent is consumed once, retaining cancellation, maturity and CAM checks.
+- Locale preference validation now accepts the interface's en-US/es-ES/fr-FR codes and legacy values, fixing language changes reverting to English.
+- Torrent downloads now accept only the main process's live selected file on its actual IPv4 server, with the session capability; ordinary outbound DNS/TLS guards remain in place.
+- Invalid download/proxy redirects and late redirect-body errors now settle as controlled failures instead of throwing outside their request callbacks.
+- Production audit validation rejects execution failures, malformed/incomplete reports, inconsistent severity totals and clean reports with failure exits. Compatible patches update js-yaml to 4.3.2 and ip-address to 10.7.3.
+- Trending See All preserves its weekly all/movie/TV collection, uses real trending pagination, normalizes legacy links and retains distinct movie/TV IDs.
+- Download jobs own cancellation and FFmpeg lifetimes. Pause/resume waits for the previous generation; cancellation/deletion waits for teardown and artwork before cleanup. Application quit awaits download and torrent teardown.
+- Portable media and sidecars use exclusive creation, preserving existing files. Rollback removes only files allocated by the failed job. Expiration revalidates live unfinished rows before deletion, retaining downloads that completed during another job's teardown.
+- Completed portable downloads remain until explicit removal. Unfinished work retains the 30-day cleanup policy shown in Downloads and Storage settings; interrupted jobs retain recoverable encrypted staging.
+- Each torrent has its own registered cache directory. Cleanup waits for filesystem-store closure, streams, responses, audio probes and remux children. Unowned cache contents are preserved. fs-chunk-store 5.0.1 is now an explicit production dependency.
+- Torrent resolution serializes allocation within four slots and evicts only idle entries. Active consumers, issued URL handoff and accepted queued downloads retain ownership; failed audio lookup preserves shared torrents. All-busy responses explain the retry in EN/ES/FR, and job leases release on completion, failure, removal, expiry and shutdown.
+- Production renderer scripts permit only local modules; inline scripts and dynamic evaluation are blocked. Build-time file CSP permits media workers and retains existing media/frame compatibility. Development HMR permissions remain separate.
+- Fuse verification can inspect a supplied packaged executable without modifying it.
+- All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
+
+### Fixed
+- Opening the development renderer in a regular browser now shows localized desktop guidance instead of crashing on absent Electron subscriptions. App and PlayerHost mount only when the preload bridge exists; no desktop API is exposed through HTTP.
+
+### Verification and remaining work
+- Fullscreen polish: 616 deterministic tests and 17 real Electron tests (37.3s), both TypeScript targets, full lint 0 errors/0 warnings, build and licenses passed. Real 720p/1080p files preserve pixels/session/menu through fullscreen; artwork geometry passes 4K/ultrawide/native 3440x1440. A VixSrc Spider-Man probe retained 1282x534 frames in fullscreen; this does not establish every source's 1080p availability. Local Windows package resources/security and all 28 tested assets match; version 2.0.0, logo/palette intact. Existing tooling warnings remain recorded in testing.md.
+- Integrated search/library refinement: 531 deterministic tests and fourteen real Electron tests passed, both TypeScript targets, full lint with zero errors/warnings and build. Actual header/panel geometry passes at 1440/1024/960px, normal/reduced motion and delayed-response suppression are verified; original logo/palette and version 2.0.0 are preserved.
+- Renderer runtime correction: 520 deterministic tests and thirteen real Electron tests passed, with both TypeScript targets, zero-error/zero-warning lint and build. The development browser and compiled no-preload Chromium guidance were verified.
+- Final HBO-inspired UI block: 518 deterministic tests and twelve real Electron tests passed, alongside both TypeScript targets, zero-error/zero-warning lint, production build and licenses. Native checks cover 1440/1152/1024 episode geometry, EN/ES/FR, no-hero header space, same-route results, keyboard seasons and reduced motion.
+- Inspected motion belongs to KokoMovie; exact HBO Max macOS timings remain unverified. The selected Behance concept is static and unofficial. Existing Vite/SQLite/build warnings remain documented separately from clean lint.
+- UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).
+- Desktop layouts were inspected at 1440×900 and 1024×768 with synthetic catalog artwork; EN/ES/FR and local watchlist/resume persistence were exercised.
+- Core block: 417 tests and six real Electron tests passed; final IPv4 contract refinement passed 25 targeted tests. Renderer/main checks, lint, build, license gate and a dry-run locked install passed. Fresh production audit reports zero findings at every severity.
+- Storage/security/discovery block passed 471 deterministic tests. Final ownership correction passed 487 deterministic tests and eight real Electron tests; both TypeScript targets, zero-error/zero-warning lint and build passed again. License checks passed, and the production audit reports zero findings at all severities.
+- The local Windows x64 unpacked package was regenerated with the final UI and publication disabled; version 2.0.0, resources, native modules, bundled FFmpeg, file CSP and executable fuses were inspected. It remains unsigned and was not installed. Signed release/installed upgrade and live peer/provider endurance remain unverified.
+- Earlier country availability fixtures were removed with the feature; current tests verify absence, retired endpoint denial and persistence migration. Source HTTP and redirect tests retain their fixture boundaries; real FFmpeg/offline playback adds coverage beyond those mocks.
+- A fully buffered player after HTTP EOF and the 60-second handoff reservation is eligible for idle eviction; a later media request can require fresh resolution. Persistent player-session ownership remains outside this block.
+
 ## [1.5.5] — 2026-08-24 — Reliability, Security & Offline Playback
 
 ### Added

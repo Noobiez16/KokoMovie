@@ -353,7 +353,7 @@ export async function extractStream(
         finish(null)
       })
 
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       logExtraction(`[Extractor] did-fail-load for ${validatedURL} | code: ${errorCode} | desc: ${errorDescription} | isMainFrame: ${isMainFrame}`)
       const isMain = isMainFrame === true || validatedURL === embedUrl || validatedURL === (embedUrl + '/')
       if (isMain) {

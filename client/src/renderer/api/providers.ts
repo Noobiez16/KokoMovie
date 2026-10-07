@@ -1,3 +1,5 @@
+import i18n from '../i18n'
+
 export const providersApi = {
   list: () => window.electronAPI!.listProviders(),
   toggle: (id: string, enabled: boolean) => window.electronAPI!.toggleProvider(id, enabled),
@@ -14,5 +16,10 @@ export const providersApi = {
 // a chosen magnet to a localhost MP4 URL on demand.
 export const torrentApi = {
   getStreams: (req: StreamRequest) => window.electronAPI!.torrentGetStreams(req),
-  resolve: (magnet: string, audioLang?: string) => window.electronAPI!.torrentResolve(magnet, audioLang),
+  resolve: async (magnet: string, audioLang?: string) => {
+    const result = await window.electronAPI!.torrentResolve(magnet, audioLang)
+    return result.error === 'TORRENT_CAPACITY_BUSY'
+      ? { ...result, error: i18n.t('player.torrentCapacityBusy') }
+      : result
+  },
 }

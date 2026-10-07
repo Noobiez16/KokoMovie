@@ -5,6 +5,7 @@ import { userApi, type Preferences } from '../api/user'
 import { libraryPortabilityApi, type LibraryImportSelection } from '../api/library-portability'
 import { LOCAL_PROFILE } from '../lib/local-identity'
 import { AppLayout } from '../components/layout/AppLayout'
+import { PageHeader } from '../components/ui/PageHeader'
 import tmdbLogo from '../assets/tmdb/tmdb-logo.svg'
 import { ToggleSwitch } from '../components/ui/ToggleSwitch'
 import { LanguageSelect } from '../components/ui/LanguageSelect'
@@ -24,12 +25,12 @@ function SectionCard({ icon, title, description, children }: {
   children: React.ReactNode
 }) {
   return (
-    <section className="bg-white/[0.04] backdrop-blur-md rounded-2xl border border-white/[0.08] p-6 transition-all duration-300 hover:border-white/[0.12]">
+    <section className="bg-km-surface rounded-2xl border border-white/[0.08] p-6 transition-all duration-300 hover:border-white/[0.12]">
       <div className="flex items-center gap-3 mb-5">
         <span className="text-white/60 shrink-0">{icon}</span>
         <div>
           <h2 className="text-white font-semibold text-[15px]">{title}</h2>
-          {description && <p className="text-white/40 text-xs mt-0.5">{description}</p>}
+          {description && <p className="text-white/60 text-xs mt-0.5">{description}</p>}
         </div>
       </div>
       <div className="space-y-4">{children}</div>
@@ -46,7 +47,7 @@ function SettingRow({ label, description, children }: {
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
         <p className="text-white text-sm">{label}</p>
-        {description && <p className="text-white/35 text-xs mt-0.5 leading-relaxed">{description}</p>}
+        {description && <p className="text-white/60 text-xs mt-0.5 leading-relaxed">{description}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -138,7 +139,7 @@ function TmdbInstructions({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
                 </span>
                 <div>
                   <p className="text-white/80 text-sm font-medium">{title}</p>
-                  <p className="text-white/40 text-xs mt-0.5 leading-relaxed">{desc}</p>
+                  <p className="text-white/60 text-xs mt-0.5 leading-relaxed">{desc}</p>
                 </div>
               </li>
             ))}
@@ -174,7 +175,7 @@ export function SettingsPage() {
   const [updateCheck, setUpdateCheck] = useState<{ status: 'idle' | 'checking' | 'available' | 'up-to-date' | 'error' | 'dev'; version?: string; message?: string }>({ status: 'idle' })
 
   // Layout Tab selection
-  const [activeTab, setActiveTab] = useState<'preferences' | 'api' | 'downloads' | 'privacy'>('preferences')
+  const [activeTab, setActiveTab] = useState<'preferences' | 'library' | 'api' | 'downloads' | 'privacy'>('preferences')
 
   // TMDB key state
   const [tmdbKeyInput, setTmdbKeyInput] = useState(tmdbApiKey)
@@ -421,16 +422,18 @@ export function SettingsPage() {
 
   return (
     <AppLayout>
-      <div className="px-6 py-8 max-w-2xl animate-fade-in flex flex-col h-full overflow-hidden">
+      <div className="km-page max-w-5xl flex flex-col">
         {/* Page Header */}
-        <div className="mb-6 shrink-0">
-          <h1 className="text-white text-2xl font-bold tracking-tight">{t('settings.title')}</h1>
-          <p className="text-white/40 text-sm mt-1">{t('settings.description')}</p>
-        </div>
+        <PageHeader title={t('settings.title')} description={t('settings.description')} />
 
         {/* Tab Navigation */}
         <div className="flex border-b border-white/[0.06] mb-6 overflow-x-auto shrink-0 scrollbar-none">
           {[
+            {
+              id: 'library',
+              label: t('nav.library'),
+              icon: <span aria-hidden="true">▤</span>
+            },
             {
               id: 'preferences',
               label: t('settings.preferences'),
@@ -451,7 +454,7 @@ export function SettingsPage() {
             },
             {
               id: 'downloads',
-              label: t('settings.downloads'),
+              label: t('ui.storage'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -460,7 +463,7 @@ export function SettingsPage() {
             },
             {
               id: 'privacy',
-              label: t('settings.privacy'),
+              label: t('ui.advanced'),
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -473,7 +476,7 @@ export function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-5 py-3 border-b-2 text-xs font-semibold uppercase tracking-wider transition-all duration-200 outline-none select-none ${
+                className={`flex items-center gap-2 px-5 py-3 border-b-2 text-xs font-semibold uppercase tracking-wider transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-km-accent select-none ${
                   active
                     ? 'border-violet-500 text-violet-400 bg-violet-500/[0.02]'
                     : 'border-transparent text-white/40 hover:text-white/80 hover:bg-white/[0.01]'
@@ -487,7 +490,7 @@ export function SettingsPage() {
         </div>
 
         {/* Scrollable Settings Panel */}
-        <div className="flex-1 overflow-y-auto pr-1 -mr-3 space-y-5 pb-8 scrollbar-thin">
+        <div className="space-y-5 pb-8">
           {isLoading ? (
             <div className="flex justify-center py-12">
               <div className="w-6 h-6 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" />
@@ -497,6 +500,15 @@ export function SettingsPage() {
               {/* ── Tab: Preferences ────────────────────────────────────────── */}
               {activeTab === 'preferences' && (
                 <>
+
+                  <SectionCard icon={<span aria-hidden="true">◎</span>} title={t('ui.languages')} description={t('settings.languageDescription')}>
+                    <SettingRow label={t('settings.interfaceLanguage')} description={t('settings.languageDescription')}>
+                      <LanguageSelect
+                        value={normalizeLocale(i18n.language || prefs.language)}
+                        disabled={saveStatus === 'saving'}
+                        onChange={(locale) => { void handleLanguageChange(locale) }}
+                      />
+                    </SettingRow></SectionCard>
 
                   <SectionCard
                     icon={(
@@ -508,13 +520,6 @@ export function SettingsPage() {
                     title={t('settings.playback')}
                     description={t('settings.playbackDescription')}
                   >
-                    <SettingRow label={t('settings.interfaceLanguage')} description={t('settings.languageDescription')}>
-                      <LanguageSelect
-                        value={normalizeLocale(i18n.language || prefs.language)}
-                        disabled={saveStatus === 'saving'}
-                        onChange={(locale) => { void handleLanguageChange(locale) }}
-                      />
-                    </SettingRow>
 
                     <SettingRow label={t('settings.autoplay')} description={t('settings.autoplayDescription')}>
                       <Toggle label={t('settings.autoplay')} enabled={prefs.autoplay} onChange={() => updateMutation.mutate({ autoplay: !prefs.autoplay })} />
@@ -768,29 +773,24 @@ export function SettingsPage() {
                       </button>
                     </div>
                     <p className="text-white/30 text-[11px] leading-relaxed">
-                      {t('settings.downloadFolderDescription')}
+                      {t('settings.downloadFolderDescription')} {' '}{t('downloads.retentionPolicy')}
                     </p>
                   </div>
                 </SectionCard>
               )}
 
-              {/* ── Tab: Privacy ────────────────────────────────────────────── */}
-              {activeTab === 'privacy' && (
+              {/* Library portability */}
+              {activeTab === 'library' && (
                 <SectionCard
-                  icon={(
-                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                  )}
-                  title={t('settings.privacy')}
-                  description={t('settings.privacyDescription')}
+                  icon={<span aria-hidden="true">▤</span>}
+                  title={t('settings.portableLibrary')}
+                  description={t('settings.portableLibraryDescription')}
                 >
-                  <div className="space-y-4">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="text-white text-sm">{t('settings.portableLibrary')}</p>
-                          <p className="text-white/35 text-xs mt-0.5">
+                          <p className="text-white/60 text-xs mt-0.5">
                             {t('settings.portableLibraryDescription')}
                           </p>
                         </div>
@@ -826,7 +826,7 @@ export function SettingsPage() {
                           <p className="text-white/45 text-xs mt-1">
                             {t('settings.importCounts', { watchlist: importSelection.preview.watchlist, history: importSelection.preview.positions, artwork: importSelection.preview.artwork })}
                           </p>
-                          <p className="text-white/35 text-[11px] mt-1">
+                          <p className="text-white/60 text-[11px] mt-1">
                             {t('settings.importConflicts', { count: importSelection.preview.watchlistConflicts + importSelection.preview.positionConflicts })}
                           </p>
                           <div className="flex gap-2 mt-3">
@@ -855,11 +855,25 @@ export function SettingsPage() {
                         </div>
                       )}
                     </div>
+                </SectionCard>
+              )}
+              {/* ── Tab: Privacy ────────────────────────────────────────────── */}
+              {activeTab === 'privacy' && (
+                <SectionCard
+                  icon={(
+                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                  )}
+                  title={t('settings.privacy')}
+                  description={t('settings.privacyDescription')}
+                >
+                  <div className="space-y-4">
                     <div className="border-t border-white/[0.08] pt-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="text-white text-sm">{t('settings.diagnosticReport')}</p>
-                          <p className="text-white/35 text-xs mt-0.5">
+                          <p className="text-white/60 text-xs mt-0.5">
                             {t('settings.diagnosticDescription')}
                           </p>
                         </div>
@@ -874,7 +888,7 @@ export function SettingsPage() {
                       {diagnosticPreview && (
                         <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-3">
                           <p className="text-white/80 text-xs font-semibold">{t('settings.reviewBeforeSaving')}</p>
-                          <p className="text-white/35 text-[11px] mt-1">
+                          <p className="text-white/60 text-[11px] mt-1">
                             {t('settings.diagnosticExcludes')}
                           </p>
                           <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 text-[10px] text-white/55">
@@ -902,7 +916,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between border-t border-white/[0.08] pt-4">
                       <div>
                         <p className="text-white text-sm">{t('settings.catalogCache')}</p>
-                        <p className="text-white/35 text-xs mt-0.5">
+                        <p className="text-white/60 text-xs mt-0.5">
                           {cacheStats ? t('settings.cacheUsage', { count: cacheStats.entries, size: (cacheStats.bytes / 1024 / 1024).toFixed(1) }) : t('settings.loadingCache')}
                         </p>
                         <p className="text-white/25 text-[11px] mt-1">{t('settings.clearCacheSafety')}</p>
