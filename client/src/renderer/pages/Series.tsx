@@ -1,3 +1,4 @@
+import { genreLabel } from '../components/catalog/genreLabel'
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -87,7 +88,7 @@ export function SeriesPage() {
 
     const items = [...new Map((genreData?.data ?? []).map((s) => [s.id, s])).values()]
     const totalPages = genreData?.meta?.pagination?.pages ?? 1
-    const genreTitle = collection ? t('catalog.trending') : genre!.charAt(0).toUpperCase() + genre!.slice(1).replace('-', ' ')
+    const genreTitle = collection ? t('catalog.trending') : genreLabel(genre!, genre!.charAt(0).toUpperCase() + genre!.slice(1).replace('-', ' '), t)
 
     return (
       <AppLayout>
@@ -173,7 +174,7 @@ export function SeriesPage() {
         {rows.map((row) => (
           <ContentRow
             key={row.genre.id}
-            title={row.genre.name}
+            title={genreLabel(row.genre.slug, row.genre.name, t)}
             items={row.items}
             onViewAll={() => navigate(`/series?genre=${row.genre.slug}`)}
           />

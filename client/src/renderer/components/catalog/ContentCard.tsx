@@ -17,6 +17,9 @@ export function ContentCard({ content, size = 'md', variant = 'poster', onRemove
   const [imgError, setImgError] = useState(false)
 
   const widths = { sm: 'w-32 max-w-full', md: 'w-40 max-w-full', lg: 'w-48 max-w-full' }
+  // Literal classes keep every public variant in Tailwind's production output.
+  const variants = { poster: 'km-content-card--poster', landscape: 'km-content-card--landscape' }
+  const sizes = { sm: 'km-content-card--sm', md: 'km-content-card--md', lg: 'km-content-card--lg' }
   const artwork = variant === 'landscape' ? content.backdropUrl || content.s3Thumbnail : content.s3Thumbnail
   const cw = content as ContentSummary & { positionSeconds?: number; durationSeconds?: number; episodeId?: string | null }
   const hasProgress = cw.positionSeconds !== undefined && cw.durationSeconds !== undefined && cw.durationSeconds > 0
@@ -42,7 +45,7 @@ export function ContentCard({ content, size = 'md', variant = 'poster', onRemove
 
   return (
     <div
-      className={`km-content-card km-content-card--${variant} km-content-card--${size} ${variant === 'poster' ? widths[size] : ''} flex-shrink-0 group relative`}
+      className={`km-content-card ${variants[variant]} ${sizes[size]} ${variant === 'poster' ? widths[size] : ''} flex-shrink-0 group relative`}
     >
       <button
         type="button"
@@ -52,12 +55,12 @@ export function ContentCard({ content, size = 'md', variant = 'poster', onRemove
         className="block w-full text-left cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
       >
       {/* Poster */}
-      <div className="km-card-artwork relative w-full aspect-[2/3] rounded-xl overflow-hidden bg-km-surface-2 border border-km-border/30 mb-2 shadow-md transition-all duration-300 group-hover:border-violet-500/50 group-hover:shadow-violet-500/10">
+      <div className="km-card-artwork relative w-full aspect-[2/3] overflow-hidden bg-km-surface-2 border mb-2 transition-all group-hover:border-violet-500/50">
         {artwork && !imgError ? (
           <img
             src={artwork}
             alt=""
-            className="km-card-image w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03] motion-reduce:transform-none"
+            className="km-card-image w-full h-full object-cover"
             loading="lazy"
             onError={() => setImgError(true)}
           />
@@ -71,8 +74,8 @@ export function ContentCard({ content, size = 'md', variant = 'poster', onRemove
         )}
 
         {/* Hover overlay */}
-        <div className="km-card-overlay absolute inset-0 bg-black/0 group-hover:bg-km-bg/60 group-focus-within:bg-km-bg/60 transition-all duration-300 flex items-center justify-center">
-          <div className="w-10 h-10 rounded-xl bg-km-accent flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 scale-95 group-hover:scale-100 group-focus-within:scale-100 motion-reduce:transform-none transition-all duration-300 shadow-lg text-white">
+        <div className="km-card-overlay absolute inset-0 bg-black/0 group-hover:bg-km-bg/60 group-focus-within:bg-km-bg/60 transition-all flex items-center justify-center">
+          <div className="w-10 h-10 bg-km-accent flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 scale-95 group-hover:scale-100 group-focus-within:scale-100 motion-reduce:transform-none transition-all shadow-lg text-white">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M11 10h2v7h-2zm0-3h2v2h-2z" /><path fillRule="evenodd" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 100 16 8 8 0 000-16z" />
             </svg>

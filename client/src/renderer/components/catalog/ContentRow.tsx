@@ -57,7 +57,7 @@ export function ContentRow({ title, items, size = 'md', variant = 'poster', onVi
 
         <div
           ref={ref}
-          className="km-row-track flex gap-4 overflow-x-auto km-catalog-gutter"
+          className="km-row-track flex overflow-x-auto km-catalog-gutter"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {items.map((item) => (

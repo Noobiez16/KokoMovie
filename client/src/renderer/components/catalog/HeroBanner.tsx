@@ -88,7 +88,7 @@ export function HeroBanner({ content }: Props) {
         <img
           src={bg}
           alt=""
-          className={`absolute inset-0 w-full h-full km-hero-artwork object-cover object-center transition-opacity duration-1000 motion-reduce:transition-none z-0 ${
+          className={`absolute inset-0 w-full h-full km-hero-artwork object-cover transition-opacity motion-reduce:transition-none z-0 ${
             showTrailer ? 'opacity-0' : 'opacity-100'
           }`}
         />
@@ -120,7 +120,7 @@ export function HeroBanner({ content }: Props) {
       <div className="absolute inset-0 bg-gradient-to-t from-km-bg via-transparent to-black/20 z-20 pointer-events-none" />
 
       {/* Content */}
-      <div className="km-hero-copy absolute bottom-0 left-0 right-0 km-catalog-gutter pb-8 z-30">
+      <div className="km-hero-copy absolute bottom-0 left-0 right-0 km-catalog-gutter z-30">
         {/* Type label */}
         <div className="flex items-center gap-2 mb-3">
           <span className={`text-xs font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${
@@ -151,7 +151,7 @@ export function HeroBanner({ content }: Props) {
         </div>
 
         {/* Title */}
-        <h1 className="km-hero-title text-3xl lg:text-5xl font-bold tracking-tight text-white mb-3 leading-tight max-w-xl drop-shadow-lg bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-purple-200">
+        <h1 className="km-hero-title font-bold tracking-tight text-white mb-3 leading-tight drop-shadow-lg bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-purple-200">
           {content.title}
         </h1>
 

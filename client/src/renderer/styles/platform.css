@@ -56,7 +56,11 @@
 @media (prefers-reduced-motion: reduce) {
   .km-route-content, .km-menu-panel { animation: none !important; }
   .km-shell *, .km-shell *::before, .km-shell *::after { scroll-behavior: auto !important; }
-  .km-shell *:hover, .km-shell *:focus, .km-shell *:active { transform: none !important; }
+  .km-icon-button:active, .km-menu-link:active, .km-button-secondary:active, .km-btn-primary:active,
+  .km-hero-copy button:active { transform: none !important; }
+  /* Keep row arrows' structural translateY while suppressing Tailwind hover scale. */
+  .km-content-row button { --tw-scale-x: 1 !important; --tw-scale-y: 1 !important; }
+  .km-content-row button > svg { --tw-translate-x: 0px !important; }
 }
 
 /* Cinematic catalog. Components share the shell gutter and motion tokens. */
