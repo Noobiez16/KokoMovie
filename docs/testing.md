@@ -14,6 +14,13 @@ the unchanged native fullscreen assertions in a 3840x2160 Xvfb display. The star
 wait is bounded to ten seconds and the job cleans up its own window-manager process.
 Version remains 2.0.0; the failed tag will be recreated after verification.
 
+Recovery run `37696411498` passed the complete Linux quality/security job and the
+native fullscreen geometry and 720p/1080p playback checks. It exposed a separate
+inline-search test synchronization failure: a one-shot computed-style read returned
+an empty value during Home navigation. The test now awaits the Home URL and uses
+Playwright's retrying CSS assertion against the rendered header, still requiring
+exactly `0px`. No application style or fullscreen assertion is relaxed.
+
 **Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
 Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s),
 TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
