@@ -1,9 +1,50 @@
 # KokoMovie Current State
 
 **Current review:** 2026-10-07
-**Source target:** v2.0.0, branch `codex/kokomovie-v2-fullscreen-polish`, based on `1cc797a`.
-**Recovery points:** `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
+**Source target:** v2.0.0, branch `codex/kokomovie-v2-source-priority`, based on `7e1c219`.
+**Recovery points:** `codex/kokomovie-v2-fullscreen-polish` remains at `7e1c219`; `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
 **Release status:** development source; no v2.0.0 installer published or installed by this work.
+
+## Verified source priority and native typing
+
+Automatic discovery ranks validated non-CAM sources by 2160p/4K, 1440p, 1080p, then
+720p; known standard-release evidence breaks equal-resolution ties. Known CAM/TS remains
+last resort with confirmation. Progressive discovery starts immediately for validated non-CAM
+4K; otherwise it waits for enabled pending providers to finish or the existing 40-second deadline.
+Complete Scan still waits for all attempts/deadline. This may increase initial waiting time for
+lower tiers, giving late HD/UHD alternatives a chance to win. Manual choice and HLS AUTO
+bandwidth adaptation remain intact; no quality variants or pixels are invented.
+
+The HLS probe previously passed a localhost proxy URL to a helper that intentionally rejects
+private targets, falling back to guessed 720p. It now reads validated public manifests with
+source headers, redirects and DNS protections, a 2 MiB compressed/decompressed bound,
+15-second elapsed timeout and cancellation. Dimensionless legitimate media remains Unknown
+and usable as fallback; failed validation is rejected. Main nominal tiers now agree with the
+renderer for 960x540, 1282x534 and 1920x800. Late responses cannot change finished searches.
+
+Fresh lookups already re-extract in unique temporary sessions; no persistent CAM-selection
+cache was found or added. Current playback/PiP deliberately retains its session. URL/manifest
+release clues cannot visually identify an unlabelled CAM, and a streaming release date does
+not guarantee a high-quality source in every enabled provider.
+
+Strict checking now covers renderer, main and every native E2E source. The standard
+`client/e2e/tsconfig.json` gives the editor the existing preload globals; installed TSserver
+confirms the configured project and zero fullscreen diagnostics. Final functional gates passed:
+662 units, 17 real Electron tests (40.3s), all TypeScript targets, lint 0 errors/0 warnings,
+build and 227 production package/three FFmpeg licence checks. Version, logo and base palette
+remain unchanged. See [testing](testing.md) for evidence and limits.
+
+An isolated live repeat on 2026-10-07 at 21:35 UTC selected VidSrc.su for Spider-Man:
+Brand New Day, with MoviesAPI also reporting 1080p and VixSrc reporting 720p. Actual
+decoded frames were 1920x800 (cinematic nominal 1080p), unchanged in DOM fullscreen
+with the same video and source. The release type was unknown, so this observation does
+not certify WEB-DL or visual absence of CAM. This is one title/source/time, not universal
+1080p/4K availability. The earlier VixSrc observation below remains historical evidence.
+
+The current local Windows x64 verification package is
+`client/.codex/package-windows-source-priority/win-unpacked`. Resource/native module,
+FFmpeg, production CSP and executable-fuse checks pass; version stays 2.0.0. It is unsigned,
+unpublished and not installed. No desktop shortcut was changed.
 
 ## Verified v2.0.0 interface
 

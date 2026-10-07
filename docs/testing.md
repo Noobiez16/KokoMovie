@@ -1,11 +1,45 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-fullscreen-polish`.
-Final source checks: 616 deterministic tests and seventeen real Electron tests passed (37.3s);
-both TypeScript targets, lint (zero errors/warnings), build and licenses passed.
+**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
+Final source checks: 662 deterministic tests and seventeen real Electron tests passed (40.3s);
+renderer/main/E2E TypeScript, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.
 
-### Search exit, feature removal and fullscreen polish
+### Highest available source and native editor typing
+
+- Compiler RED reproduced 33 native test diagnostics, including the sixteen fullscreen errors.
+  Shared preload declarations, guarded bridge access, validated unknown download rows and explicit
+  HTMLVideoElement callbacks removed the errors. Initial nonstandard config passed CLI but fresh
+  TSserver still assigned fullscreen to an inferred project with four missing-bridge diagnostics.
+  The corrected standard e2e/tsconfig.json is discovered by the editor and root typecheck; fresh
+  TSserver confirms all native tests/globals and zero diagnostics. No duplicate API or suppression.
+- Real registered IPC regression tests retain production registry, validation, ranking and trusted
+  handler logic, mocking only external boundaries. They reproduce 720p winning before later
+  1440p/2160p, immediate validated non-CAM 4K with correlated background snapshots, complete-mode
+  waiting, CAM fallback at completion/deadline, fresh CAM-to-WEB-DL lookup, unknown-media fallback,
+  failed HTTP/HTML, and nominal geometry. Initial focused RED: 23 failed, 22 passed.
+- Additional probe regressions cover raw/decompressed 2 MiB caps, elapsed timeout, aborts,
+  response errors, late completion, redirected manifest-relative variants, exact-origin headers and
+  credential removal across origins. Main HLS probes now reach the validated upstream rather than
+  failing private-target validation on localhost; unknown dimensions never become guessed HD.
+- First full run was 661/662: fixture hygiene rejected new fake credential-shaped literals.
+  Using the existing shared fixture value fixed that test without weakening it. Final fresh full
+  run: 662/662, including real HTTP callback tests; full native suite: 17/17, preserving source/video
+  identity, decoded 720p/1080p, fullscreen, locale, navigation, privileged boundaries and downloads.
+- Root npm run typecheck, full lint (0 errors/0 warnings), build and licence gate passed.
+  Native run removed the conflicting NO_COLOR environment variable. Existing Vite/plugin
+  deprecations, SQLite experimental and bundle-size warnings remain inherited tooling debt.
+- These tests prove selection behavior when an eligible source exists, not visual detection of
+  unlabelled CAM or a promise that any provider has 4K/1080p for a particular movie.
+- Live isolated Spider-Man repeat at 21:35 UTC selected VidSrc.su 1080p over VixSrc 720p;
+  MoviesAPI also advertised 1080p. Actual 1920x800 cinematic frames stayed identical in DOM
+  fullscreen with the same video/source. Release evidence remained unknown; no claim of
+  visually verified WEB-DL or higher-tier availability follows from this single observation.
+- Current local Windows x64 package is `.codex/package-windows-source-priority/win-unpacked`;
+  resource/native module, FFmpeg, CSP and actual executable-fuse verification passed.
+  No transient CSP test probe is shipped. Unsigned, unpublished and not installed.
+
+### Search exit, feature removal and fullscreen polish (previous block)
 
 - Search lifecycle RED/GREEN verifies rightward 160ms closure, immediate inactive/inert state,
   canceled exit on reopen/unmount, all dismissal paths, quiet short input and reduced motion.

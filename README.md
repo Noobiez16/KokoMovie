@@ -61,7 +61,7 @@ interface. Search titles, review their details, choose a source or play saved me
 External catalog access uses your TMDB credential; source availability depends on providers.
 
 - **A real catalog** — posters, ratings, cast, and descriptions for thousands of titles
-- **Source discovery** — automatic and manual source selection with visible errors and retries
+- **Source discovery** — prefers available non-CAM sources at 4K, 1440p, 1080p, then 720p; manual selection, visible errors and retries remain available
 - **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - **On-device storage** — watchlists, history, and preferences are stored locally on your machine
 - **Watch offline** — completed portable MP4 files stay until you remove them; equal-title downloads receive distinct filenames
