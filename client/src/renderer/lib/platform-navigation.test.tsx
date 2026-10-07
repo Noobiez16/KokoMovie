@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -44,6 +44,23 @@ describe('platform navigation', () => {
   it.each([['/movies', undefined, 'nav.movies'], ['/series', undefined, 'nav.series'], ['/content/00000002-0000-4000-8000-00000000002a', undefined, 'nav.series'], ['/content/42', { tmdbType: 'movie' }, 'nav.movies']])('marks the primary destination for %s', (path, state, label) => {
     setup(path as string, state)
     expect(screen.getByRole('link', { name: label as string }).getAttribute('aria-current')).toBe('page')
+  })
+  it.each([
+    ['/content/00000001-0000-4000-8000-00000000002a', undefined, 'nav.movies'],
+    ['/content/00000002-0000-4000-8000-00000000002a', undefined, 'nav.series'],
+    ['/content/local-movie', { tmdbType: 'movie' }, 'nav.movies'],
+    ['/content/local-series', { tmdbType: 'tv' }, 'nav.series'],
+    ['/content/local-unknown', undefined, undefined],
+  ])('shares detail active state in desktop and disclosure for %s', async (path, state, activeLabel) => {
+    const user = userEvent.setup(); setup(path, state)
+    await user.click(screen.getByRole('button', { name: 'ui.libraryMenu' }))
+    const navigations = screen.getAllByRole('navigation', { name: 'ui.mainNavigation' })
+    expect(navigations).toHaveLength(2)
+    for (const navigation of navigations) {
+      for (const label of ['nav.home', 'nav.movies', 'nav.series']) {
+        expect(within(navigation).getByRole('link', { name: label }).getAttribute('aria-current')).toBe(label === activeLabel ? 'page' : null)
+      }
+    }
   })
   it('keeps search out of the shell and exposes a search link', async () => {
     const user = userEvent.setup(); setup()

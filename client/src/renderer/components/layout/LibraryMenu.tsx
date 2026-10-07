@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../ui/Icon'
+import { isPrimaryDestinationActive } from './Navigation'
 
 const links = [
   ['history.myList', '/history?tab=list', 'list'],
@@ -50,7 +51,7 @@ export function LibraryMenu() {
     </button>
     {(open || closing) && <div id={id} className="km-menu-panel" data-closing={closing} aria-hidden={closing || undefined} inert={closing || undefined}>
       <nav className="km-compact-nav" aria-label={t('ui.mainNavigation')}>
-        {([['nav.home', '/browse'], ['nav.movies', '/movies'], ['nav.series', '/series']] as const).map(([label, path]) => <Link key={path} to={path} onClick={close} aria-current={location.pathname === path ? 'page' : undefined} className="km-menu-link">{t(label)}</Link>)}
+        {([['nav.home', '/browse'], ['nav.movies', '/movies'], ['nav.series', '/series']] as const).map(([label, path]) => <Link key={path} to={path} onClick={close} aria-current={isPrimaryDestinationActive(location, path) ? 'page' : undefined} className="km-menu-link">{t(label)}</Link>)}
       </nav>
       <p className="km-menu-heading">{t('ui.localLibrary')}</p>
       {links.map(([label, path, icon]) => {
