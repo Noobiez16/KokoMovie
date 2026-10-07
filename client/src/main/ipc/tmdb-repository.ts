@@ -17,7 +17,7 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const MAX_TMDB_ATTEMPTS = 4
 const requestScheduler = new CoalescingRequestScheduler(6)
 
-const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/release_dates|\/watch\/providers)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/content_ratings|\/season\/\d+|\/watch\/providers)?)|discover\/(?:movie|tv)|search\/(?:multi|movie|tv)|configuration(?:\/countries)?)$/
+const allowedPath = /^\/(?:trending\/(?:all|movie|tv)\/week|movie\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/release_dates)?)|tv\/(?:popular|top_rated|\d+(?:\/videos|\/recommendations|\/content_ratings|\/season\/\d+)?)|discover\/(?:movie|tv)|search\/(?:multi|movie|tv)|configuration)$/
 const paramsSchema = z.record(z.string().max(500)).default({}).refine((params) =>
   Object.keys(params).length <= 12 &&
   Object.keys(params).every((key) => ['page', 'sort_by', 'with_genres', 'primary_release_year', 'first_air_date_year', 'query', 'append_to_response', 'language'].includes(key)),

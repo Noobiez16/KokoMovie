@@ -14,7 +14,6 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
 import { SeasonTabs } from '../components/catalog/SeasonTabs'
 import { EpisodeCard } from '../components/catalog/EpisodeCard'
-import { WhereToWatch } from '../components/catalog/WhereToWatch'
 import type { ContentSummary } from '../api/catalog'
 import { sanitizeMediaUrl } from '../lib/media-url'
 import { downloadErrorTranslationKey } from '../lib/download-error-policy'
@@ -926,7 +925,6 @@ export function ContentDetailPage() {
             </div>
           </section>
         )}
-          <WhereToWatch contentId={content.id} />
 
           {content.cast.length > 0 && (
             <div className="mb-8">

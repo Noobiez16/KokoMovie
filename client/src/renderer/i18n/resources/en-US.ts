@@ -1,15 +1,4 @@
 const enUS = {
-  watchAvailability: {
-    title: 'Where to watch', country: 'Country', chooseCountry: 'Choose a country',
-    prompt: 'Choose a country to see viewing options.',
-    loadingCountries: 'Loading countries…', loading: 'Loading viewing options…',
-    countriesError: 'Could not load countries.', error: 'Could not load viewing options.',
-    noInformation: 'No viewing information for this country.',
-    saved: 'Saved information. Confirm current availability on TMDB.',
-    outdated: 'Saved information may be outdated. Confirm availability on TMDB.',
-    viewOptions: 'View options on TMDB', attribution: 'Availability data: JustWatch via TMDB.',
-    groups: { flatrate: 'Subscription', free: 'Free', ads: 'With ads', rent: 'Rent', buy: 'Buy' },
-  },
   ui: {
     myLibrary: 'My Library',
     myLibraryDescription: 'Your saved titles and viewing history, on this device.',

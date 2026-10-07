@@ -1,15 +1,4 @@
 const frFR = {
-  watchAvailability: {
-    title: 'Où regarder', country: 'Pays', chooseCountry: 'Choisir un pays',
-    prompt: 'Choisissez un pays pour voir les options de visionnage.',
-    loadingCountries: 'Chargement des pays…', loading: 'Chargement des options…',
-    countriesError: 'Impossible de charger les pays.', error: 'Impossible de charger les options.',
-    noInformation: 'Aucune information de disponibilité pour ce pays.',
-    saved: 'Informations enregistrées. Confirmez la disponibilité actuelle sur TMDB.',
-    outdated: 'Les informations enregistrées peuvent être obsolètes. Confirmez la disponibilité sur TMDB.',
-    viewOptions: 'Voir les options sur TMDB', attribution: 'Données de disponibilité : JustWatch via TMDB.',
-    groups: { flatrate: 'Abonnement', free: 'Gratuit', ads: 'Avec publicités', rent: 'Location', buy: 'Achat' },
-  },
   ui: {
     myLibrary: 'Ma bibliothèque',
     myLibraryDescription: 'Vos titres enregistrés et votre historique, sur cet appareil.',

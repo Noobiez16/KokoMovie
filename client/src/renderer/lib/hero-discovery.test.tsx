@@ -11,7 +11,6 @@ import { providersApi } from '../api/providers'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock('../components/layout/AppLayout', () => ({ AppLayout: ({ children }: any) => children }))
 vi.mock('../components/catalog/ContentRow', () => ({ ContentRow: () => null }))
-vi.mock('../components/catalog/WhereToWatch', () => ({ WhereToWatch: () => null }))
 vi.mock('../store/settings', () => ({ useSettingsStore: (selector: any) => selector({ tmdbApiKey: '' }) }))
 vi.mock('../api/catalog', () => ({ catalogApi: { getContent: vi.fn(), syncContent: vi.fn() } }))
 vi.mock('../api/providers', () => ({ providersApi: { getFirstStream: vi.fn() }, torrentApi: {} }))

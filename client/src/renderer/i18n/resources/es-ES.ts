@@ -1,15 +1,4 @@
 const esES = {
-  watchAvailability: {
-    title: 'Dónde ver', country: 'País', chooseCountry: 'Elige un país',
-    prompt: 'Elige un país para ver las opciones disponibles.',
-    loadingCountries: 'Cargando países…', loading: 'Cargando opciones…',
-    countriesError: 'No se pudieron cargar los países.', error: 'No se pudieron cargar las opciones.',
-    noInformation: 'No hay información de disponibilidad para este país.',
-    saved: 'Información guardada. Confirma la disponibilidad actual en TMDB.',
-    outdated: 'La información guardada puede estar desactualizada. Confirma la disponibilidad en TMDB.',
-    viewOptions: 'Ver opciones en TMDB', attribution: 'Datos de disponibilidad: JustWatch a través de TMDB.',
-    groups: { flatrate: 'Suscripción', free: 'Gratis', ads: 'Con anuncios', rent: 'Alquiler', buy: 'Compra' },
-  },
   ui: {
     myLibrary: 'Mi biblioteca',
     myLibraryDescription: 'Tus títulos guardados y tu historial, en este dispositivo.',

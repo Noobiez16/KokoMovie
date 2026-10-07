@@ -3,8 +3,6 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { useAuthStore } from './auth'
 
 interface SettingsState {
-  watchCountry: string
-  setWatchCountry: (country: string) => void
   tmdbApiKey: string
   // True once the per-account key has been loaded from the OS keychain on
   // login (see App.tsx). Lets the UI distinguish "still loading the key" from
@@ -19,8 +17,6 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      watchCountry: '',
-      setWatchCountry: (country) => set({ watchCountry: /^[A-Z]{2}$/.test(country) ? country : '' }),
       tmdbApiKey: '',
       tmdbKeyHydrated: false,
 
@@ -43,14 +39,15 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'km-settings',
       storage: createJSONStorage(() => localStorage),
+      // The removed country selector was the only durable value in this store.
+      // Rewrite older payloads and ignore their properties during hydration.
+      version: 1,
+      migrate: () => ({}),
+      merge: (_persisted, current) => current,
       // Never persist the TMDB key to localStorage — it is loaded per-account
       // from the OS keychain via the useEffect in App.tsx. Persisting it here
       // would leak user A's key to user B when they log in on the same machine.
-      partialize: (state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { tmdbApiKey, tmdbKeyHydrated, ...rest } = state
-        return rest
-      },
+      partialize: () => ({}),
     },
   ),
 )

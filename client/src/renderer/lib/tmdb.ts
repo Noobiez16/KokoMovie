@@ -133,14 +133,6 @@ export function tmdbCatalogSource(...values: unknown[]): 'tmdb' | 'cache' {
     : 'tmdb'
 }
 
-// Watch availability must disclose even fresh cache entries as saved information.
-// Catalog's existing stale-only fallback semantics above stay unchanged.
-export function tmdbResponseMetadata(value: unknown): { source: TmdbResponseSource; stale: boolean } {
-  return value && typeof value === 'object'
-    ? tmdbResponseSources.get(value as object) ?? { source: 'network', stale: false }
-    : { source: 'network', stale: false }
-}
-
 function tmdbImageUrl(path: string | null, size: 'w185' | 'w300' | 'w500' | 'w1280'): string | null {
   if (!path) return null
   if (/^(?:https?:|offline:|catalog-cache:)/.test(path)) return path
@@ -284,9 +276,6 @@ export function createTmdbClient(apiKey: string, locale: AppLocale | string = 'e
       get<TmdbMovieReleaseDates>(`/movie/${id}/release_dates`),
     getTvContentRatings: (id: number) =>
       get<TmdbTvContentRatings>(`/tv/${id}/content_ratings`),
-    getCountries: () => get<unknown>('/configuration/countries'),
-    getMovieWatchProviders: (id: number) => get<unknown>(`/movie/${id}/watch/providers`),
-    getTvWatchProviders: (id: number) => get<unknown>(`/tv/${id}/watch/providers`),
     getSimilarMovies: (id: number) => get<TmdbPage>(`/movie/${id}/recommendations`),
     getSimilarTv: (id: number) => get<TmdbPage>(`/tv/${id}/recommendations`),
   }
