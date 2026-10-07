@@ -47,6 +47,5 @@
 
 ### Completion
 
-- [ ] Final whole-change review, fix actionable findings and recheck affected gates.
+- [x] Final whole-change review, fix actionable findings and recheck affected gates.
 - [x] Keep changes on `codex/kokomovie-v2-source-priority`, preserving previous branch as recovery.
-
