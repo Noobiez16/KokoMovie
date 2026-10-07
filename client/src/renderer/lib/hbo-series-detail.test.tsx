@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -31,6 +31,25 @@ beforeEach(() => {
   vi.mocked(providersApi.getFirstStream).mockResolvedValue({ providerId: 'source', streams: [{ url: 'https://example.com/episode.m3u8' }] } as any)
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
+it('enters ready episodes while keeping a delayed season loader unanimated and correctly identified', async () => {
+  let resolve!: (value: any) => void
+  vi.mocked(catalogApi.getSeason).mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+  mount()
+  const first = await screen.findByRole('button', { name: 'First season episode' })
+  expect(first.closest('[role="tabpanel"]')?.classList.contains('km-data-enter')).toBe(true)
+  await userEvent.click(screen.getByRole('tab', { name: 'detail.season 2 — Winter' }))
+  await waitFor(() => expect(catalogApi.getSeason).toHaveBeenCalledWith('series', 2))
+  const loading = screen.getByRole('tabpanel')
+  expect(loading.getAttribute('data-season-number')).toBe('2')
+  expect(loading.getAttribute('aria-busy')).toBe('true')
+  expect(loading.classList.contains('km-data-enter')).toBe(false)
+  expect(screen.queryByRole('button', { name: 'First season episode' })).toBeNull()
+  await act(async () => resolve({ data: { ...seasons[1], episodes: [episode(3, 'Winter episode')] } }))
+  const ready = (await screen.findByRole('button', { name: 'Winter episode' })).closest('[role="tabpanel"]')
+  expect(ready).not.toBe(loading)
+  expect(ready?.classList.contains('km-data-enter')).toBe(true)
+  expect(ready?.getAttribute('aria-busy')).toBe('false')
+})
 it('selects and demands the actual season with keyboard, then plays its actual episode', async () => {
   mount()
   const first = await screen.findByRole('tab', { name: 'detail.season 1' })

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { Link, MemoryRouter, useLocation } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
 import { GlobalSearch } from '../components/layout/GlobalSearch'
+import { LibraryMenu } from '../components/layout/LibraryMenu'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals() })
 function Contents() {
   const location = useLocation()
   return <><output data-testid="location">{location.pathname + location.search}</output>{location.pathname === '/search' && <GlobalSearch />}<button>Outside</button></>
@@ -15,6 +16,66 @@ function setup(path = '/browse', state?: unknown) {
   return render(<MemoryRouter initialEntries={[{ pathname: path.split('?')[0], search: path.includes('?') ? '?' + path.split('?')[1] : '', state }]}><AppLayout><Contents /></AppLayout></MemoryRouter>)
 }
 describe('platform navigation', () => {
+  it('cancels the closing timer when reopened before 160ms', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const scheduled = vi.spyOn(globalThis, 'setTimeout')
+    const cancelled = vi.spyOn(globalThis, 'clearTimeout')
+    const { container } = render(<MemoryRouter><LibraryMenu /></MemoryRouter>)
+    const toggle = screen.getByRole('button', { name: 'ui.libraryMenu' })
+    fireEvent.click(toggle)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(container.querySelector('.km-menu-panel')?.getAttribute('data-closing')).toBe('true')
+    const closeCall = scheduled.mock.calls.findIndex(([, delay]) => delay === 160)
+    expect(closeCall).toBeGreaterThanOrEqual(0)
+    const closeTimer = scheduled.mock.results[closeCall].value
+    cancelled.mockClear()
+    act(() => vi.advanceTimersByTime(80))
+    fireEvent.click(toggle)
+    expect(cancelled).toHaveBeenCalledWith(closeTimer)
+    act(() => vi.advanceTimersByTime(160))
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('link', { name: 'history.myList' })).toBeTruthy()
+    expect(container.querySelector('.km-menu-panel')?.getAttribute('data-closing')).toBe('false')
+  })
+  it('clears the closing panel and timer immediately on navigation', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const scheduled = vi.spyOn(globalThis, 'setTimeout')
+    const cancelled = vi.spyOn(globalThis, 'clearTimeout')
+    const { container } = render(<MemoryRouter><LibraryMenu /><Contents /><Link to="/downloads">Navigate</Link></MemoryRouter>)
+    const toggle = screen.getByRole('button', { name: 'ui.libraryMenu' })
+    fireEvent.click(toggle)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const closeCall = scheduled.mock.calls.findIndex(([, delay]) => delay === 160)
+    expect(closeCall).toBeGreaterThanOrEqual(0)
+    const closeTimer = scheduled.mock.results[closeCall].value
+    cancelled.mockClear()
+    fireEvent.click(screen.getByRole('link', { name: 'Navigate' }))
+    expect(screen.getByTestId('location').textContent).toBe('/downloads')
+    expect(container.querySelector('.km-menu-panel')).toBeNull()
+    expect(cancelled).toHaveBeenCalledWith(closeTimer)
+    act(() => vi.advanceTimersByTime(160))
+    expect(container.querySelector('.km-menu-panel')).toBeNull()
+  })
+  it('cancels a closing timer on unmount before mounting a new disclosure', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const scheduled = vi.spyOn(globalThis, 'setTimeout')
+    const cancelled = vi.spyOn(globalThis, 'clearTimeout')
+    const { unmount } = render(<MemoryRouter><LibraryMenu /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'ui.libraryMenu' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const closeCall = scheduled.mock.calls.findIndex(([, delay]) => delay === 160)
+    expect(closeCall).toBeGreaterThanOrEqual(0)
+    const closeTimer = scheduled.mock.results[closeCall].value
+    cancelled.mockClear()
+    unmount()
+    expect(cancelled).toHaveBeenCalledWith(closeTimer)
+    render(<MemoryRouter><LibraryMenu /></MemoryRouter>)
+    const toggle = screen.getByRole('button', { name: 'ui.libraryMenu' })
+    fireEvent.click(toggle)
+    act(() => vi.advanceTimersByTime(160))
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('link', { name: 'history.myList' })).toBeTruthy()
+  })
   it('reveals all existing local destinations and distinguishes list from history', async () => {
     const user = userEvent.setup(); setup('/history?tab=list')
     await user.click(screen.getByRole('button', { name: 'ui.libraryMenu' }))

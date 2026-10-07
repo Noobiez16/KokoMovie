@@ -915,7 +915,7 @@ export function ContentDetailPage() {
               prefetchSeason(selectedIndex - 1)
               prefetchSeason(selectedIndex + 1)
             }} />
-            <div key={`${content.id}-${season?.seasonNumber}-${sortedEpisodes.length ? 'ready' : 'loading'}`} id={`season-panel-${content.id}-${season?.id}`} role="tabpanel" aria-label={t('detail.season', { number: season?.seasonNumber })} className="km-episode-grid" data-season-number={season?.seasonNumber} aria-busy={isSeasonLoading && sortedEpisodes.length === 0}>
+            <div key={`${content.id}-${season?.seasonNumber}-${sortedEpisodes.length ? 'ready' : 'loading'}`} id={`season-panel-${content.id}-${season?.id}`} role="tabpanel" aria-label={t('detail.season', { number: season?.seasonNumber })} className={'km-episode-grid' + (sortedEpisodes.length ? ' km-data-enter' : '')} data-ready={sortedEpisodes.length > 0} data-season-number={season?.seasonNumber} aria-busy={isSeasonLoading && sortedEpisodes.length === 0}>
               {isSeasonLoading && sortedEpisodes.length === 0 && <div className="km-episode-loading" role="status" aria-label={t('common.loading')}><div className="w-6 h-6 border-2 border-white/20 border-t-km-accent rounded-full animate-spin" /></div>}
               {sortedEpisodes.map(ep => <EpisodeCard key={ep.id} episode={ep}
                 onPlay={() => handleAutoStream(ep, season?.seasonNumber)}

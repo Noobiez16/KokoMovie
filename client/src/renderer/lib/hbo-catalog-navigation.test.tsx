@@ -8,12 +8,21 @@ import { catalogApi } from '../api/catalog'
 import { GenreNavigation } from '../components/catalog/GenreNavigation'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { MoviesPage } from '../pages/Movies'
+import { SeriesPage } from '../pages/Series'
 const locale = vi.hoisted(() => ({ language: 'en' }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => ({ es: { 'catalog.genres.action': 'Acción', 'catalog.genres.comedy': 'Comedia', 'catalog.genres.sciFi': 'Ciencia ficción' }, fr: { 'catalog.genres.action': 'Action', 'catalog.genres.comedy': 'Comédie', 'catalog.genres.sciFi': 'Science-fiction' } } as Record<string, Record<string, string>>)[locale.language]?.[key] ?? key, i18n: { language: locale.language } }) }))
-vi.mock('../api/catalog', () => ({ catalogApi: { getGenres: vi.fn().mockResolvedValue({ data: [{ id: 'science-fiction', name: 'Science Fiction', slug: 'science-fiction' }] }) } }))
+vi.mock('../api/catalog', () => ({ catalogApi: { getHome: vi.fn().mockResolvedValue({ data: { featured: null, trending: [], rows: [] } }), getGenres: vi.fn().mockResolvedValue({ data: [{ id: 'science-fiction', name: 'Science Fiction', slug: 'science-fiction' }] }) } }))
+vi.mock('../store/settings', () => ({ useSettingsStore: (select: any) => select({ tmdbApiKey: 'key', tmdbKeyHydrated: true }) }))
 const item = { id: 'tv-11', title: 'Resume Show', type: 'series' as const, releaseYear: 2026, rating: null, imdbScore: null, durationMins: null, s3Thumbnail: '/poster.jpg', backdropUrl: '/backdrop.jpg', imdbId: null, tmdbId: 11, planMinimum: 'basic', positionSeconds: 120, durationSeconds: 300, episodeId: 'ep-11-1-2' }
 function Probe() { return <output data-testid="nav-state">{JSON.stringify(useLocation().state)}</output> }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); locale.language = 'en' })
+it.each([['/movies', MoviesPage, 'catalog.noMoviesAvailable'], ['/series', SeriesPage, 'catalog.noSeriesAvailable']] as const)('reserves header space for a successful catalog without featured content at %s', async (path, Page, emptyTitle) => {
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={[path]}><Page /></MemoryRouter></QueryClientProvider>)
+  await screen.findByText(emptyTitle)
+  expect(screen.getByRole('main').getAttribute('data-overlay')).toBe('false')
+  expect(screen.getByRole('link', { name: 'catalog.featured' })).toBeTruthy()
+})
 for (const [path, active] of [['/movies', 'catalog.featured'], ['/movies?collection=trending', 'catalog.trending'], ['/movies?genre=science-fiction', 'Science Fiction']] as const) {
   it(`uses returned genre routes and active selection at ${path}`, async () => {
     render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={[path]}><GenreNavigation type="movie" /></MemoryRouter></QueryClientProvider>)

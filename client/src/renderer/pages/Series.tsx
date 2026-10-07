@@ -156,7 +156,7 @@ export function SeriesPage() {
   const rows = seriesData?.rows ?? []
 
   return (
-    <AppLayout transparentNav>
+    <AppLayout transparentNav={!!featured}>
       {featured && <HeroBanner content={featured} />}
 
       <GenreNavigation type="series" />

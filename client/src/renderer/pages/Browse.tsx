@@ -223,7 +223,7 @@ export function BrowsePage() {
   }
 
   return (
-    <AppLayout transparentNav>
+    <AppLayout transparentNav={!!featured}>
       {featured && <HeroBanner content={featured} />}
 
       <CatalogFallbackBanner source={data?.meta?.source} />

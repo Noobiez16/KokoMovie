@@ -156,7 +156,7 @@ export function MoviesPage() {
   const rows = moviesData?.rows ?? []
 
   return (
-    <AppLayout transparentNav>
+    <AppLayout transparentNav={!!featured}>
       {featured && <HeroBanner content={featured} />}
 
       <GenreNavigation type="movie" />

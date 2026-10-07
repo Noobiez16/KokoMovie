@@ -65,7 +65,7 @@ export function SearchPage() {
         <CatalogFallbackBanner source={search.data.meta.source} />
         <p className="mb-5 text-sm text-purple-100/70" aria-live="polite">{t('catalog.resultCount', { count: results.length, query })}</p>
         {!results.length && <EmptyState title={t('catalog.noResultsFor', { query })} />}
-        <div className="grid gap-x-5 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(156px, 1fr))' }}>
+        <div key={JSON.stringify([query, type, page])} className="km-search-results km-data-enter grid gap-x-5 gap-y-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(156px, 1fr))' }}>
           {results.map((item) => <ContentCard key={item.id} content={item} size="md" />)}
         </div>
         <CategoryPagination page={page} totalPages={pages} onPageChange={(next) => update({ page: next })} />

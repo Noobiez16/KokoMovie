@@ -52,6 +52,7 @@ test.beforeAll(async () => {
         } }
       }
       if (input.path.endsWith('/release_dates') || input.path.endsWith('/content_ratings')) result = { results: [] }
+      if (process.env.KOKOMOVIE_UI_FIXTURE_EMPTY === '1' && /\/(?:trending|discover|search)\//.test(input.path)) result = { results: [], total_pages: 1, total_results: 0 }
       return { body: JSON.stringify(result), source: 'network', stale: false }
     })
   })
@@ -249,6 +250,11 @@ test('featured movies and selected series retain genre and keyboard season navig
   await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: 'Fixture Episode 2-1', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Fixture Episode 1-1', exact: true })).toHaveCount(0)
+  const episodeGrid = page.locator('.km-episode-grid')
+  expect(await episodeGrid.evaluate(element => getComputedStyle(element).animationDuration)).toBe('0.2s')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => episodeGrid.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await screenshot('series-season-2')
   await screenshot('series-season-2', 1024, 768)
   await page.keyboard.press('Home')
@@ -303,5 +309,57 @@ test('desktop motion preserves focus and honors reduced movement', async () => {
   await page.keyboard.press('Escape')
   await expect(toggle).toBeFocused()
   await writeFile(join(visual, 'hbo-motion-metrics.json'), JSON.stringify({ ...metrics, restingWidth, hoveredWidth, hoverScale: hoveredWidth / restingWidth, reducedRouteAnimation: 'none', reducedHoverScale: await artwork.evaluate(element => element.getBoundingClientRect().width) / restingWidth }, null, 2))
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+})
+
+test('catalog without a featured hero keeps local records and genres below the topbar', async () => {
+  await page.evaluate(async () => {
+    await window.electronAPI.watchlistAdd('00000001-0000-4000-8000-000000000064', 'movie')
+    await window.electronAPI.positionSave({ contentId: '00000001-0000-4000-8000-000000000064', contentType: 'movie', positionSeconds: 120, durationSeconds: 600, completed: false })
+  })
+  await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '1' })
+  await primary('Home')
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Continue Watching', exact: true })).toBeVisible()
+  await expect(page.locator('.km-hero')).toHaveCount(0)
+  await screenshot('home-no-featured')
+  const headerBottom = await page.locator('.km-topbar').evaluate(element => element.getBoundingClientRect().bottom)
+  const resumeHeading = page.getByRole('heading', { name: 'Continue Watching', exact: true })
+  expect(await resumeHeading.evaluate(element => element.getBoundingClientRect().top)).toBeGreaterThanOrEqual(headerBottom)
+  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toBeVisible()
+  for (const destination of ['Movies', 'Series']) {
+    await primary(destination)
+    await expect(page.locator('.km-hero')).toHaveCount(0)
+    const featured = page.getByRole('link', { name: 'Featured', exact: true })
+    await expect(featured).toBeVisible()
+    await screenshot(`${destination.toLowerCase()}-no-featured`)
+    expect(await featured.evaluate(element => element.getBoundingClientRect().top)).toBeGreaterThanOrEqual(headerBottom)
+  }
+})
+
+test('same-route search results enter after valid data and honor reduced motion', async () => {
+  await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '0' })
+  await page.locator('.km-header-actions').getByRole('link', { name: 'Search', exact: true }).click()
+  await page.reload()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const search = page.getByRole('searchbox')
+  const results = page.locator('.km-search-results')
+  await search.fill('fixture entrance')
+  await expect(page).toHaveURL(/search\?q=fixture\+entrance/)
+  await expect(results).toBeVisible()
+  const first = await results.elementHandle()
+  await search.fill('fixture replacement')
+  await expect(page).toHaveURL(/search\?q=fixture\+replacement/)
+  await expect(results).toBeVisible()
+  expect(await first!.evaluate(element => element.isConnected)).toBe(false)
+  const motion = await results.evaluate(element => ({ duration: getComputedStyle(element).animationDuration, animation: getComputedStyle(element).animationName }))
+  expect(motion.duration).toBe('0.2s')
+  expect(motion.animation).not.toBe('none')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await search.fill('fixture reduced')
+  await expect(page).toHaveURL(/search\?q=fixture\+reduced/)
+  await expect(results).toBeVisible()
+  expect(await results.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  await writeFile(join(visual, 'hbo-data-motion-metrics.json'), JSON.stringify({ ...motion, reducedAnimation: 'none', validIdentityRemounted: true }, null, 2))
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 })
