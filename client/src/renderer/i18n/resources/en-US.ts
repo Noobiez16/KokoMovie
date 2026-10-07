@@ -182,6 +182,7 @@ const enUS = {
     source: 'Source',
     sourceSearching: 'Searching', sourceAvailable: 'Available', sourceUnavailable: 'Unavailable', sourceTimedOut: 'Timed out', camWarning: 'This source appears to be a CAM or telesync recording. Continue anyway?',
     quality: 'Quality',
+    qualityUnavailable: 'Unavailable',
     audio: 'Audio',
     subtitles: 'Subtitles',
     subtitleOff: 'Off',

@@ -14,6 +14,7 @@ import { usePlayerStore } from '../../store/player'
 import { rankSourceStatuses } from '../../../main/providers/source-discovery'
 import { selectAutomaticFallback } from '../../../main/providers/source-quality'
 import { createMediaListenerScope } from '../../lib/media-listener-scope'
+import { getStandardHeight } from '../../lib/video-quality'
 
 interface CachedStream {
   providerId: string
@@ -58,18 +59,6 @@ const LANG_NORMALIZE: Record<string, string> = {
 function normalizeLang(lang: string): string {
   const l = (lang || '').toLowerCase().trim().split(/[-_]/)[0] ?? ''
   return LANG_NORMALIZE[l] ?? l.slice(0, 2)
-}
-
-function getStandardHeight(width: number, height: number): number {
-  const w = width || 0
-  const h = height || 0
-  if (w >= 3840 || h >= 2160) return 2160
-  if (w >= 2560 || h >= 1400) return 1440
-  if (w >= 1920 || h >= 800) return 1080
-  if (w >= 1280 || h >= 530) return 720
-  if (w >= 960 || h >= 540) return 540
-  if (w >= 854 || h >= 480) return 480
-  return h
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -329,6 +318,7 @@ export function VideoPlayer({
   const [buffered, setBuffered] = useState(0)
   const [currentLevel, setCurrentLevel] = useState(-1)
   const [levels, setLevels] = useState<Array<{ height: number; bitrate: number }>>([])
+  const [decodedDimensions, setDecodedDimensions] = useState<{ width: number; height: number } | null>(null)
   // HLS alternate audio renditions. id maps directly to hls.js's audioTrack index.
   // -1 = the stream's default/original audio (also used when a manifest has a single track).
   const [audioTracks, setAudioTracks] = useState<Array<{ id: number; name: string; lang: string }>>([])
@@ -994,6 +984,9 @@ export function VideoPlayer({
     }
   }, [subtitleSize])
 
+  // A different source must obtain fresh frame geometry from its own metadata.
+  useEffect(() => { setDecodedDimensions(null) }, [activeStreamUrl])
+
   // Init HLS or direct video
   useEffect(() => {
     const video = videoRef.current
@@ -1001,6 +994,8 @@ export function VideoPlayer({
 
     setHlsError(null)
     setInitialLoading(true)
+    setLevels([])
+    setCurrentLevel(-1)
     const manifestUrl = activeStreamUrl
     const sourceListeners = createMediaListenerScope(video)
     const playWhenReady: EventListener = () => { video.play().catch(() => {}) }
@@ -1097,7 +1092,7 @@ export function VideoPlayer({
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         const mapped = data.levels.map((l) => ({
-          height: getStandardHeight(l.width || 0, l.height || 0),
+          height: getStandardHeight(l.width || 0, l.height || 0) ?? 0,
           bitrate: l.bitrate
         }))
         setLevels(mapped)
@@ -1262,6 +1257,13 @@ export function VideoPlayer({
       hlsRef.current = null
     }
   }, [activeStreamUrl, resumeAtSeconds, content.id, episode?.id, profileId, session.sessionId])
+
+  // Bind to the rendered video so recovery from an error panel also observes the new element.
+  const updateDecodedDimensions = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return
+    setDecodedDimensions({ width: video.videoWidth, height: video.videoHeight })
+  }
 
   // Video event listeners
   useEffect(() => {
@@ -1895,6 +1897,9 @@ export function VideoPlayer({
         playsInline
         autoPlay
         crossOrigin="anonymous"
+        onLoadedMetadata={updateDecodedDimensions}
+        onResize={updateDecodedDimensions}
+        onEmptied={() => setDecodedDimensions(null)}
         onClick={handlePlayPause}
         disablePictureInPicture
       >
@@ -1929,6 +1934,7 @@ export function VideoPlayer({
           buffered={buffered}
           currentLevel={currentLevel}
           levels={levels}
+          decodedHeight={decodedDimensions ? getStandardHeight(decodedDimensions.width, decodedDimensions.height) : null}
           subtitleTracks={subtitleTracks}
           currentSubtitle={currentSubtitle}
           subtitleSize={subtitleSize}

@@ -4,11 +4,6 @@ import type { Episode } from '../../api/catalog'
 import { NextEpisodeButton } from './NextEpisodeButton'
 import { useTranslation } from 'react-i18next'
 
-// Premium player exposes only the meaningful tiers: AUTO, 720p, 1080p.
-// Lower tiers (240/360/480/540p) are still picked by AUTO when bandwidth requires,
-// but never as a manual choice — there's no reason to deliberately downgrade.
-const VISIBLE_QUALITY_HEIGHTS = [720, 1080] as const
-
 type MenuView = 'home' | 'source' | 'subtitles' | 'quality' | 'audio'
 
 // A selectable audio track. The parent (VideoPlayer) maps hls.js `audioTracks` into this
@@ -34,6 +29,8 @@ interface Props {
   buffered: number
   currentLevel: number
   levels: Array<{ height: number; bitrate: number }>
+  /** Measured nominal tier from the video's intrinsic frame dimensions. */
+  decodedHeight?: number | null
   subtitleTracks: Array<{ id: number; name: string; lang: string }>
   currentSubtitle: number
   subtitleSize: 'small' | 'medium' | 'large'
@@ -101,7 +98,7 @@ const ChevronRight = () => (
 
 export function PlayerControls({
   hls, isPlaying, isMuted, volume, currentTime, duration, buffered,
-  currentLevel, levels, subtitleTracks, currentSubtitle, subtitleSize, subtitleOffset,
+  currentLevel, levels, decodedHeight = null, subtitleTracks, currentSubtitle, subtitleSize, subtitleOffset,
   onPlayPause, onMute, onVolumeChange, onSeek, onLevelChange, onSubtitleChange, onSubtitleSizeChange, onSubtitleOffsetChange,
   onAutoSync, autoSyncState = 'idle',
   onFullscreen, introEndSecs, creditsStartSecs,
@@ -165,12 +162,19 @@ export function PlayerControls({
       .sort((a, b) => (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER))
   }, [sources, availableSourceIds, sourceStatuses])
 
-  // Map the allowed tiers to actual HLS level indices for this stream.
+  const hasHlsQuality = !!hls && levels.length > 0
+  const measuredHeight = decodedHeight && decodedHeight > 0 ? decodedHeight : null
+  // Keep original HLS indices even when sorted or when unknown levels are omitted.
   const visibleLevels = useMemo(() => {
-    return VISIBLE_QUALITY_HEIGHTS
-      .map((height) => ({ height, idx: levels.findIndex((l) => l.height === height) }))
-      .filter((l) => l.idx >= 0)
-  }, [levels])
+    const heights = new Set([720, 1080])
+    if (hasHlsQuality) levels.forEach((level) => { if (level.height > 0) heights.add(level.height) })
+    else if (measuredHeight) heights.add(measuredHeight)
+    return [...heights].sort((a, b) => b - a).map((height) => ({
+      height,
+      idx: hasHlsQuality ? levels.findIndex((level) => level.height === height) : -1,
+      available: hasHlsQuality ? levels.some((level) => level.height === height) : measuredHeight === height,
+    }))
+  }, [hasHlsQuality, levels, measuredHeight])
 
   const showSkipIntro = introEndSecs !== null && currentTime < introEndSecs && currentTime > (introEndSecs - 90)
   const showSkipCredits = creditsStartSecs !== null && currentTime >= creditsStartSecs
@@ -178,13 +182,16 @@ export function PlayerControls({
   const progress = duration ? (currentTime / duration) * 100 : 0
   const bufferedPct = duration ? (buffered / duration) * 100 : 0
 
-  const hasQuality = !!hls && levels.length > 0
+  const hasQuality = hasHlsQuality || (!hls && measuredHeight !== null)
   const hasSources = sources.length > 0
   const activeSubtitleName = currentSubtitle >= 0
     ? subtitleTracks.find((track) => track.id === currentSubtitle)?.name || t('common.on')
     : t('common.off')
   const activeSourceName = sources.find((source) => source.id === activeSourceId)?.name || t('player.server')
-  const activeQualityName = currentLevel === -1 ? t('player.auto') : `${levels[currentLevel]?.height ?? ''}p`
+  const autoQualityName = `${t('player.auto')}${measuredHeight ? ` (${measuredHeight}p)` : ''}`
+  const activeQualityName = hasHlsQuality
+    ? currentLevel === -1 ? autoQualityName : levels[currentLevel]?.height > 0 ? `${levels[currentLevel].height}p` : t('player.auto')
+    : `${measuredHeight}p`
   const activeAudioName = audioTracks.find((track) => track.id === currentAudioTrack)?.name || t('player.original')
 
   // Reusable bits ----------------------------------------------------------------
@@ -559,16 +566,21 @@ export function PlayerControls({
                     {menuView === 'quality' && (
                       <div>
                         <BackHeader title={t('player.quality')} />
-                        <button onClick={() => { onLevelChange(-1); setMenuView('home') }} className={optionClass(currentLevel === -1)}>
-                          <span>{t('player.auto')}</span>
+                        {hasHlsQuality && <button aria-pressed={currentLevel === -1} aria-label={`${autoQualityName}${currentLevel === -1 ? ' ✓' : ''}`} onClick={() => { onLevelChange(-1); setMenuView('home') }} className={optionClass(currentLevel === -1)}>
+                          <span>{autoQualityName}</span>
                           {currentLevel === -1 && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
-                        </button>
-                        {visibleLevels.map(({ height, idx }) => (
-                          <button key={height} onClick={() => { onLevelChange(idx); setMenuView('home') }} className={optionClass(currentLevel === idx)}>
+                        </button>}
+                        {visibleLevels.map(({ height, idx, available }) => {
+                          const active = hasHlsQuality ? currentLevel === idx && idx >= 0 : measuredHeight === height
+                          return <button key={height} disabled={!hasHlsQuality || !available} aria-pressed={active}
+                            aria-label={`${height}p${!available ? ` ${t('player.qualityUnavailable')}` : active ? ' ✓' : ''}`}
+                            onClick={() => { if (hasHlsQuality && available) { onLevelChange(idx); setMenuView('home') } }}
+                            className={`${optionClass(active)} disabled:cursor-default ${!available ? 'opacity-40' : ''}`}>
                             <span>{height}p</span>
-                            {currentLevel === idx && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
+                            {!available && <span className="text-[10px]">{t('player.qualityUnavailable')}</span>}
+                            {active && <span className="text-violet-400 text-[10px] font-bold">✓</span>}
                           </button>
-                        ))}
+                        })}
                       </div>
                     )}
                   </div>
