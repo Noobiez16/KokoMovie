@@ -55,6 +55,8 @@ const frFR = {
     searchPlaceholder: 'Rechercher des films, séries et genres…',
   },
   catalog: {
+    featured: 'À la une',
+    genreNavigation: 'Explorer les genres',
     trending: 'Tendances', popularMovies: 'Films populaires', popularSeries: 'Séries populaires', topRatedMovies: 'Films les mieux notés', topRatedSeries: 'Séries les mieux notées',
     continueWatching: 'Continuer à regarder', recommendations: 'Vous aimerez aussi', viewAll: 'Tout voir', noResults: 'Aucun résultat', noResultsFor: 'Aucun résultat pour « {{query}} »',
     searchPlaceholder: 'Rechercher des films et des séries…', apiKeyRequired: 'Une clé API TMDB est requise', apiKeyDescription: 'KokoMovie utilise une clé TMDB gratuite pour charger le catalogue complet des films et séries.',

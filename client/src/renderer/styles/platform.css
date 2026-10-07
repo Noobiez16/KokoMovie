@@ -54,7 +54,43 @@
   .km-topbar { padding-inline: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .km-route-content, .km-menu-panel { animation: none; }
+  .km-route-content, .km-menu-panel { animation: none !important; }
   .km-shell *, .km-shell *::before, .km-shell *::after { scroll-behavior: auto !important; }
   .km-shell *:hover, .km-shell *:focus, .km-shell *:active { transform: none !important; }
+}
+
+/* Cinematic catalog. Components share the shell gutter and motion tokens. */
+@layer components {
+  .km-hero { height: 64vh; min-height: 360px; max-height: 620px; }
+  .km-hero-artwork { object-position: 72% center; transition-duration: var(--km-motion-hero); }
+  .km-hero-copy { padding-bottom: 48px; padding-top: 100px; }
+  .km-hero-title { font-size: clamp(32px, 4.4vw, 64px); max-width: 650px; }
+  .km-hero-copy > p { font-size: 15px; }
+  .km-hero-copy button { transition: transform var(--km-motion-press) var(--km-motion-ease), background-color var(--km-motion-hover) ease-out; }
+  .km-genre-navigation { display: flex; gap: 24px; overflow-x: auto; align-items: center; min-height: 72px; scrollbar-width: thin; margin-block: 8px 24px; }
+  .km-genre-link { white-space: nowrap; padding: 14px 0; border-bottom: 2px solid transparent; font-size: 14px; color: var(--km-text-muted); }
+  .km-genre-link[aria-current='page'] { border-color: var(--km-accent); color: var(--km-text); }
+  .km-genre-link:hover { color: var(--km-text); }
+  .km-genre-link:focus-visible { outline: 2px solid var(--km-accent-hover); outline-offset: 4px; border-radius: 3px; }
+  .km-row-track { padding-block: 12px 16px; gap: 20px; }
+  .km-content-card { transition: transform var(--km-motion-hover) var(--km-motion-ease); transform-origin: center center; }
+  .km-content-card:hover, .km-content-card:focus-within { transform: scale(1.035); }
+  .km-card-artwork { border-radius: 6px; box-shadow: none; border-color: rgb(var(--km-border-rgb) / .2); transition-duration: var(--km-motion-hover); }
+  .km-card-image, .km-card-overlay, .km-card-overlay > div { transition-duration: var(--km-motion-hover); }
+  .km-card-image { transform: none !important; }
+  .km-card-overlay { border-radius: 6px; }
+  .km-card-overlay > div { border-radius: 999px; }
+  .km-content-card--landscape { width: 280px; max-width: 80vw; }
+  .km-content-card--landscape.km-content-card--sm { width: 240px; }
+  .km-content-card--landscape.km-content-card--lg { width: 340px; }
+  .km-content-card--landscape .km-card-artwork { aspect-ratio: 16 / 9; }
+}
+@media (max-width: 640px) {
+  .km-hero { height: 60vh; min-height: 440px; }
+  .km-hero-copy { padding-bottom: 28px; }
+  .km-hero-copy > p { max-width: 90%; font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .km-shell *, .km-shell *::before, .km-shell *::after { animation: none !important; transition-duration: 0s !important; }
+  .km-content-card:hover, .km-content-card:focus-within { transform: none !important; }
 }

@@ -7,6 +7,7 @@ import { catalogApi } from '../api/catalog'
 import { AppLayout } from '../components/layout/AppLayout'
 import { HeroBanner } from '../components/catalog/HeroBanner'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { GenreNavigation } from '../components/catalog/GenreNavigation'
 import { ContentCard } from '../components/catalog/ContentCard'
 import { CatalogFallbackBanner } from '../components/catalog/CatalogFallbackBanner'
 import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/CategoryPagination'
@@ -67,6 +68,7 @@ export function MoviesPage() {
     if (isGenreLoading) {
       return (
         <AppLayout>
+          <GenreNavigation type="movie" />
           <div className="min-h-screen flex items-center justify-center">
             <div className="w-10 h-10 border-2 border-purple-500/10 border-t-km-accent rounded-full animate-spin" />
           </div>
@@ -77,6 +79,7 @@ export function MoviesPage() {
     if (isGenreError) {
       return (
         <AppLayout>
+          <GenreNavigation type="movie" />
           <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchGenre()}>{t('common.retry')}</button>} />
         </AppLayout>
       )
@@ -88,7 +91,8 @@ export function MoviesPage() {
 
     return (
       <AppLayout>
-        <div className="px-6 lg:px-10 py-7 animate-fade-in">
+          <GenreNavigation type="movie" />
+        <div className="km-catalog-gutter py-7 animate-fade-in">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <button
@@ -128,6 +132,7 @@ export function MoviesPage() {
   if (isHomeLoading) {
     return (
       <AppLayout>
+          <GenreNavigation type="movie" />
         <div className="min-h-screen flex items-center justify-center">
           <div className="w-10 h-10 border-2 border-purple-500/10 border-t-km-accent rounded-full animate-spin" />
         </div>
@@ -138,6 +143,7 @@ export function MoviesPage() {
   if (isHomeError) {
     return (
       <AppLayout>
+          <GenreNavigation type="movie" />
         <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />
       </AppLayout>
     )
@@ -152,6 +158,7 @@ export function MoviesPage() {
     <AppLayout transparentNav>
       {featured && <HeroBanner content={featured} />}
 
+      <GenreNavigation type="movie" />
       <CatalogFallbackBanner source={homeData?.meta?.source} />
 
       <div className="pt-6 pb-12 animate-fade-in">

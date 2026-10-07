@@ -56,6 +56,8 @@ const esES = {
     searchPlaceholder: 'Buscar películas, series y géneros…',
   },
   catalog: {
+    featured: 'Destacados',
+    genreNavigation: 'Explorar géneros',
     trending: 'Tendencias', popularMovies: 'Películas populares', popularSeries: 'Series populares', topRatedMovies: 'Películas mejor valoradas',
     topRatedSeries: 'Series mejor valoradas', continueWatching: 'Continuar viendo', recommendations: 'También te puede gustar', viewAll: 'Ver todo',
     noResults: 'No se encontraron resultados', noResultsFor: 'No se encontraron resultados para “{{query}}”', searchPlaceholder: 'Buscar películas y series…',

@@ -7,12 +7,13 @@ interface Props {
   title: string
   items: ContentSummary[]
   size?: 'sm' | 'md' | 'lg'
+  variant?: 'poster' | 'landscape'
   onViewAll?: () => void
   /** When set, each card shows a hover "remove" (×) button calling this with the item id. */
   onRemove?: (id: string) => void
 }
 
-export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: Props) {
+export function ContentRow({ title, items, size = 'md', variant = 'poster', onViewAll, onRemove }: Props) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
 
@@ -24,8 +25,8 @@ export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: P
   if (!items.length) return null
 
   return (
-    <section className="catalog-row mb-10">
-      <div className="flex items-center justify-between mb-4 px-6 lg:px-10">
+    <section className="catalog-row km-content-row mb-10">
+      <div className="flex items-center justify-between mb-4 km-catalog-gutter">
         <h2 className="text-white font-semibold text-lg tracking-tight">{title}</h2>
         {onViewAll && (
           <button
@@ -56,11 +57,11 @@ export function ContentRow({ title, items, size = 'md', onViewAll, onRemove }: P
 
         <div
           ref={ref}
-          className="flex gap-4 overflow-x-auto px-6 lg:px-10 py-2"
+          className="km-row-track flex gap-4 overflow-x-auto km-catalog-gutter"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {items.map((item) => (
-            <ContentCard key={item.id} content={item} size={size} onRemove={onRemove} />
+            <ContentCard key={item.id} content={item} size={size} variant={variant} onRemove={onRemove} />
           ))}
         </div>
 

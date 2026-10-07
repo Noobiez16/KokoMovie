@@ -6,19 +6,21 @@ import { useTranslation } from 'react-i18next'
 interface Props {
   content: ContentSummary
   size?: 'sm' | 'md' | 'lg'
+  variant?: 'poster' | 'landscape'
   /** When provided, shows a hover "remove" (×) button — used by the resume row. */
   onRemove?: (id: string) => void
 }
 
-export function ContentCard({ content, size = 'md', onRemove }: Props) {
+export function ContentCard({ content, size = 'md', variant = 'poster', onRemove }: Props) {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const [imgError, setImgError] = useState(false)
 
   const widths = { sm: 'w-32 max-w-full', md: 'w-40 max-w-full', lg: 'w-48 max-w-full' }
-  const cw = content as any
+  const artwork = variant === 'landscape' ? content.backdropUrl || content.s3Thumbnail : content.s3Thumbnail
+  const cw = content as ContentSummary & { positionSeconds?: number; durationSeconds?: number; episodeId?: string | null }
   const hasProgress = cw.positionSeconds !== undefined && cw.durationSeconds !== undefined && cw.durationSeconds > 0
-  const progressPercent = hasProgress ? (cw.positionSeconds / cw.durationSeconds) * 100 : 0
+  const progressPercent = hasProgress ? (cw.positionSeconds! / cw.durationSeconds!) * 100 : 0
 
   const go = () => {
     const navState: any = {}
@@ -40,7 +42,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
 
   return (
     <div
-      className={`${widths[size]} flex-shrink-0 group relative`}
+      className={`km-content-card km-content-card--${variant} km-content-card--${size} ${variant === 'poster' ? widths[size] : ''} flex-shrink-0 group relative`}
     >
       <button
         type="button"
@@ -50,12 +52,12 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
         className="block w-full text-left cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg"
       >
       {/* Poster */}
-      <div className="relative w-full aspect-[2/3] rounded-xl overflow-hidden bg-km-surface-2 border border-km-border/30 mb-2 shadow-md transition-all duration-300 group-hover:border-violet-500/50 group-hover:shadow-violet-500/10">
-        {content.s3Thumbnail && !imgError ? (
+      <div className="km-card-artwork relative w-full aspect-[2/3] rounded-xl overflow-hidden bg-km-surface-2 border border-km-border/30 mb-2 shadow-md transition-all duration-300 group-hover:border-violet-500/50 group-hover:shadow-violet-500/10">
+        {artwork && !imgError ? (
           <img
-            src={content.s3Thumbnail}
+            src={artwork}
             alt=""
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03] motion-reduce:transform-none"
+            className="km-card-image w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03] motion-reduce:transform-none"
             loading="lazy"
             onError={() => setImgError(true)}
           />
@@ -69,7 +71,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-km-bg/60 group-focus-within:bg-km-bg/60 transition-all duration-300 flex items-center justify-center">
+        <div className="km-card-overlay absolute inset-0 bg-black/0 group-hover:bg-km-bg/60 group-focus-within:bg-km-bg/60 transition-all duration-300 flex items-center justify-center">
           <div className="w-10 h-10 rounded-xl bg-km-accent flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 scale-95 group-hover:scale-100 group-focus-within:scale-100 motion-reduce:transform-none transition-all duration-300 shadow-lg text-white">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M11 10h2v7h-2zm0-3h2v2h-2z" /><path fillRule="evenodd" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 100 16 8 8 0 000-16z" />
@@ -77,26 +79,9 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
           </div>
         </div>
 
-        {/* Type badge */}
-        <div className="absolute top-1.5 left-1.5">
-          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
-            content.type === 'movie' ? 'bg-violet-600/80 text-white' : 'bg-fuchsia-600/80 text-white'
-          }`}>
-            {content.type === 'movie' ? t('common.movie') : t('common.series')}
-          </span>
-        </div>
-
-        {/* Score badge */}
-        {content.imdbScore && parseFloat(content.imdbScore) >= 7 && (
-          <div className="absolute top-1.5 right-1.5 bg-black/75 rounded-md px-1.5 py-0.5 flex items-center gap-0.5 backdrop-blur-sm">
-            <span className="text-yellow-400 text-[10px]">★</span>
-            <span className="text-white text-[10px] font-semibold">{parseFloat(content.imdbScore).toFixed(1)}</span>
-          </div>
-        )}
-
         {/* Resume progress bar */}
         {hasProgress && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+          <div className="km-card-progress absolute bottom-0 left-0 right-0 h-1 bg-white/20" role="progressbar" aria-label={content.title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, Math.max(0, progressPercent))}>
             <div
               className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
               style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
@@ -109,7 +94,7 @@ export function ContentCard({ content, size = 'md', onRemove }: Props) {
       <p className="text-purple-100 text-sm font-semibold line-clamp-2 min-h-10 group-hover:text-violet-400 transition-colors leading-tight">
         {content.title}
       </p>
-      <p className="text-purple-200/65 text-xs mt-1 font-medium">{content.releaseYear}</p>
+      <p className="text-purple-200/65 text-xs mt-1 font-medium">{[content.releaseYear, content.type === 'movie' ? t('common.movie') : t('common.series'), content.imdbScore ? `★ ${content.imdbScore}` : null].filter(Boolean).join(' · ')}</p>
       </button>
 
       {/* Separate sibling action prevents nested interactive controls. */}

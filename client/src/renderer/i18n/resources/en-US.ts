@@ -93,6 +93,8 @@ const enUS = {
     searchPlaceholder: 'Search movies, series, genres…',
   },
   catalog: {
+    featured: 'Featured',
+    genreNavigation: 'Browse genres',
     trending: 'Trending Now',
     popularMovies: 'Popular Movies',
     popularSeries: 'Popular Series',

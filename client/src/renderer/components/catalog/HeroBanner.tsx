@@ -82,13 +82,13 @@ export function HeroBanner({ content }: Props) {
   }, [])
 
   return (
-    <div ref={containerRef} className="relative w-full h-[52vh] min-h-[360px] max-h-[520px] overflow-hidden flex-shrink-0">
+    <div ref={containerRef} className="km-hero relative w-full overflow-hidden flex-shrink-0">
       {/* Backdrop */}
       {bg ? (
         <img
           src={bg}
           alt=""
-          className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-1000 motion-reduce:transition-none z-0 ${
+          className={`absolute inset-0 w-full h-full km-hero-artwork object-cover object-center transition-opacity duration-1000 motion-reduce:transition-none z-0 ${
             showTrailer ? 'opacity-0' : 'opacity-100'
           }`}
         />
@@ -120,7 +120,7 @@ export function HeroBanner({ content }: Props) {
       <div className="absolute inset-0 bg-gradient-to-t from-km-bg via-transparent to-black/20 z-20 pointer-events-none" />
 
       {/* Content */}
-      <div className="absolute bottom-0 left-0 right-0 px-6 lg:px-10 pb-8 z-30">
+      <div className="km-hero-copy absolute bottom-0 left-0 right-0 km-catalog-gutter pb-8 z-30">
         {/* Type label */}
         <div className="flex items-center gap-2 mb-3">
           <span className={`text-xs font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${
@@ -151,13 +151,13 @@ export function HeroBanner({ content }: Props) {
         </div>
 
         {/* Title */}
-        <h1 className="text-3xl lg:text-5xl font-bold tracking-tight text-white mb-3 leading-tight max-w-xl drop-shadow-lg bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-purple-200">
+        <h1 className="km-hero-title text-3xl lg:text-5xl font-bold tracking-tight text-white mb-3 leading-tight max-w-xl drop-shadow-lg bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-purple-200">
           {content.title}
         </h1>
 
         {/* Description */}
         {content.description && (
-          <p className="text-purple-100/80 text-sm leading-relaxed line-clamp-2 max-w-lg mb-6">
+          <p className="text-purple-100/80 text-sm leading-relaxed line-clamp-3 max-w-lg mb-6">
             {content.description}
           </p>
         )}
@@ -177,7 +177,7 @@ export function HeroBanner({ content }: Props) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => go(content.type === 'movie')}
-            className="flex items-center gap-2 bg-km-accent hover:bg-km-accent-hover text-white font-bold px-7 py-2.5 rounded-xl transition-colors duration-200 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg shadow-lg shadow-violet-600/25 active:scale-[0.98]"
+            className="flex items-center gap-2 bg-km-accent hover:bg-km-accent-hover text-white font-bold px-7 py-2.5 rounded-full transition-colors duration-200 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg shadow-lg shadow-violet-600/25 active:scale-[0.98]"
           >
             <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
@@ -186,7 +186,7 @@ export function HeroBanner({ content }: Props) {
           </button>
           {content.type === 'movie' && <button
             onClick={() => go()}
-            className="flex items-center gap-2 bg-white/5 border border-white/10 text-white font-semibold px-7 py-2.5 rounded-xl hover:bg-white/10 transition-colors duration-200 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg backdrop-blur-md active:scale-[0.98]"
+            className="flex items-center gap-2 bg-white/5 border border-white/10 text-white font-semibold px-7 py-2.5 rounded-full hover:bg-white/10 transition-colors duration-200 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-km-bg backdrop-blur-md active:scale-[0.98]"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10" />
