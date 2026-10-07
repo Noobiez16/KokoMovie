@@ -645,6 +645,10 @@ async function ensureServer(): Promise<number> {
       bindTorrentDownloadSource(serverPort, (token) => {
         const entry = served.get(token)
         return !!server?.listening && !!entry && isLiveTorrentFile(entry.torrent, entry.file)
+      }, (token) => {
+        const entry = served.get(token)
+        if (!entry || !isLiveTorrentFile(entry.torrent, entry.file)) throw new Error('Torrent is no longer available')
+        return caches!.reserve(entry.torrent)
       })
       log(`stream server on 127.0.0.1:${serverPort}`)
       resolve()
@@ -697,51 +701,44 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   const infoHash = hashMatch ? hashMatch[1]!.toLowerCase() : ''
   const requestedFileIdx = Math.max(0, Math.min(10_000, Number.parseInt(new URL(magnet).searchParams.get('x.km-file') ?? '0', 10) || 0))
 
-  // Keep only a couple of torrents alive at once so the temp cache doesn't grow unbounded.
-  const torrents: any[] = client.torrents ?? []
-  if (torrents.length >= 2) {
-    for (const t of torrents) {
-      if (t.infoHash?.toLowerCase() !== infoHash) { await caches!.dispose(t); break }
-    }
-  }
-
-  // NOTE: client.get() is async in webtorrent v3 (returns a Promise | null). Pass the full tracker
-  // list on `add` (in addition to the trackers baked into the magnet) so peer discovery starts wide
-  // immediately instead of waiting on DHT alone.
-  let torrent: any = (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet)
-  if (torrent?.destroyed) torrent = null
-  if (!torrent) {
-    const cachePath = caches!.allocate()
-    try {
-      // storeCacheSlots: 0 — disable WebTorrent's in-memory CacheChunkStore (default 20 pieces) so
-      // completed pieces are written straight to the on-disk file. Without this, short playbacks keep
-      // every piece in memory and the real file is never written → ffmpeg `-ss` seek fails with "No
-      // such file or directory" (the on-disk file simply doesn't exist yet).
-      torrent = client.add(magnet, { path: cachePath, store: caches!.storeConstructor(cachePath, ChunkStore), destroyStoreOnDestroy: true, deselect: true, storeCacheSlots: 0, strategy: 'sequential' })
-      caches!.attach(cachePath, torrent)
-      torrent.once('close', () => { void caches!.dispose(torrent).catch((err: Error) => log(`cache cleanup failed: ${err.message}`)) })
-      const trackFiles = () => {
-        for (const file of torrent.files ?? []) {
-          const createReadStream = file.createReadStream.bind(file)
-          file.createReadStream = (...args: any[]) => {
-            let stream: any
-            const release = caches!.retain(torrent, () => stream?.destroy())
-            try {
-              stream = createReadStream(...args)
-              stream.once('close', release)
-              return stream
-            } catch (err) { release(); throw err }
+  // Four bounded slots accommodate three downloads and one player. Lookup and
+  // allocation are serialized; metadata/probing retain their own attempt lease.
+  const attempt = await caches!.acquire(
+    async () => (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet),
+    async () => {
+      let torrent: any
+      const cachePath = caches!.allocate()
+      try {
+        // storeCacheSlots: 0 — disable WebTorrent's in-memory CacheChunkStore (default 20 pieces) so
+        // completed pieces are written straight to the on-disk file. Without this, short playbacks keep
+        // every piece in memory and the real file is never written → ffmpeg `-ss` seek fails with "No
+        // such file or directory" (the on-disk file simply doesn't exist yet).
+        torrent = client.add(magnet, { path: cachePath, store: caches!.storeConstructor(cachePath, ChunkStore), destroyStoreOnDestroy: true, deselect: true, storeCacheSlots: 0, strategy: 'sequential' })
+        caches!.attach(cachePath, torrent)
+        torrent.once('close', () => { void caches!.dispose(torrent).catch((err: Error) => log(`cache cleanup failed: ${err.message}`)) })
+        const trackFiles = () => {
+          for (const file of torrent.files ?? []) {
+            const createReadStream = file.createReadStream.bind(file)
+            file.createReadStream = (...args: any[]) => {
+              let stream: any
+              const release = caches!.retain(torrent, () => stream?.destroy())
+              try {
+                stream = createReadStream(...args)
+                stream.once('close', release)
+                return stream
+              } catch (err) { release(); throw err }
+            }
           }
         }
+        if (torrent.ready) trackFiles(); else torrent.once('ready', trackFiles)
+      } catch (error) {
+        if (torrent) await caches!.dispose(torrent)
+        else await caches!.discard(cachePath)
+        throw error
       }
-      if (torrent.ready) trackFiles(); else torrent.once('ready', trackFiles)
-    } catch {
-      await caches!.discard(cachePath)
-      // A concurrent add for the same hash can throw "duplicate torrent" — fetch it instead.
-      torrent = (infoHash ? await client.get(infoHash) : null) ?? await client.get(magnet)
-    }
-  }
-  if (!torrent) throw new Error('Could not add torrent')
+      return torrent
+  })
+  const torrent = attempt.torrent
 
   try {
   // Wait for metadata, but fail FAST when the swarm is genuinely dead: if not a single peer has
@@ -808,11 +805,12 @@ async function resolveTorrent(magnet: string, audioLang = ''): Promise<{
   // can show the TMDB runtime as the total instead of the buffered-end time growing in real time.
   // `audioLang` is what will really be audible — the renderer labels the Audio menu with THIS, and
   // a language hunt uses it to reject a release that only advertised the dub it doesn't ship.
+  caches!.reserve(torrent, 60_000) // bounded URL handoff gap, including HEAD before GET
   return { url, transcoded, audioLang: effectiveLang, requestedLang, audioLangs: probedLangs }
   } catch (err) {
-    await caches!.dispose(torrent).catch((cleanupError: Error) => log(`cache cleanup failed: ${cleanupError.message}`))
+    await attempt.fail().catch((cleanupError: Error) => log(`cache cleanup failed: ${cleanupError.message}`))
     throw err
-  }
+  } finally { attempt.release() }
 }
 
 export function registerTorrentIpc() {

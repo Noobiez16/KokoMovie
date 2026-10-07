@@ -197,3 +197,49 @@ describe('download IPC finalization with real staging and SQLite', () => {
     expect(existsSync(row(second.id).manifest_path)).toBe(true)
   })
 })
+
+it.each(['cancel', 'delete', 'expiry', 'shutdown'])('releases the accepted queued torrent lease on %s', async operation => {
+  for (let i = 0; i < 3; i++) await start()
+  await vi.waitFor(() => expect(state.children).toHaveLength(3))
+  const { bindTorrentDownloadSource } = await import('../../main/providers/torrent-download-source')
+  const { withLocalMediaCapability } = await import('../../main/providers/local-media-capability')
+  let held = 0
+  bindTorrentDownloadSource(43210, token => token === 'queued', () => { held++; return () => { held-- } })
+  const { id } = await start({ manifestUrl: withLocalMediaCapability('http://localhost:43210/t/queued.mp4') })
+  expect(row(id).status).toBe('pending'); expect(held).toBe(1)
+  if (operation === 'expiry') {
+    state.db.prepare('UPDATE downloads SET expires_at = ? WHERE id = ?').run('2000-01-01', id)
+    await downloads.purgeExpiredDownloads()
+  } else if (operation === 'shutdown') await downloads.shutdownDownloadJobs()
+  else await call(operation, id)
+  expect(held).toBe(0)
+})
+it('releases a torrent lease when accepting its destination fails', async () => {
+  const { bindTorrentDownloadSource } = await import('../../main/providers/torrent-download-source')
+  const { withLocalMediaCapability } = await import('../../main/providers/local-media-capability')
+  let held = 0
+  bindTorrentDownloadSource(43210, () => true, () => { held++; return () => { held-- } })
+  const blocked = join(state.root, 'file'); writeFileSync(blocked, 'occupied')
+  await expect(start({ manifestUrl: withLocalMediaCapability('http://localhost:43210/t/selected.mp4'), customDownloadPath: blocked })).rejects.toThrow()
+  expect(held).toBe(0)
+})
+it('releases a torrent job lease after successful media completion', async () => {
+  const http = await import('node:http')
+  const { bindTorrentDownloadSource } = await import('../../main/providers/torrent-download-source')
+  const { withLocalMediaCapability } = await import('../../main/providers/local-media-capability')
+  let held = 0
+  bindTorrentDownloadSource(43210, () => true, () => { held++; return () => { held-- } })
+  vi.spyOn(http.default, 'get').mockImplementation(((_url: any, _options: any, callback: any) => {
+    const request = new EventEmitter() as any
+    request.setTimeout = () => {}; request.destroy = (error: Error) => request.emit('error', error)
+    queueMicrotask(() => {
+      const response = Readable.from([Buffer.from('0000ftyp00000000')]) as any
+      response.statusCode = 200; response.headers = { 'content-length': '16' }; callback(response)
+    })
+    return request
+  }) as any)
+  const { id } = await start({ manifestUrl: withLocalMediaCapability('http://localhost:43210/t/selected.mp4') })
+  await vi.waitFor(() => expect(state.children).toHaveLength(1)); expect(held).toBe(1)
+  state.children[0].finish()
+  await vi.waitFor(() => { expect(row(id).status).toBe('completed'); expect(held).toBe(0) })
+})

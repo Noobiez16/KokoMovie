@@ -46,3 +46,23 @@ it('rejects destroyed torrents and files even while their token remains register
   file.destroyed = false; torrent.files = []
   expect(isLiveTorrentFile(torrent, file)).toBe(false)
 })
+
+import { TorrentDownloadLeases } from '../../main/providers/torrent-download-source'
+it('reserves accepted queued jobs until completion/cancel and releases idempotently', () => {
+  let held = 0
+  bindTorrentDownloadSource(43210, token => token === 'leased', () => { held++; return () => { held-- } })
+  const leases = new TorrentDownloadLeases()
+  const url = withLocalMediaCapability('http://localhost:43210/t/leased.mp4')
+  leases.accept('queued', url); leases.accept('running', url)
+  expect(held).toBe(2); expect([...leases.ids()]).toEqual(['queued', 'running'])
+  leases.release('queued'); leases.release('queued'); expect(held).toBe(1)
+  leases.release('running'); expect(held).toBe(0)
+  leases.accept('remote', 'https://example.com/movie.mp4'); expect([...leases.ids()]).toEqual([])
+})
+it('does not reserve a forged or stale URL', () => {
+  const leases = new TorrentDownloadLeases()
+  let held = 0
+  bindTorrentDownloadSource(43210, () => false, () => { held++; return () => {} })
+  leases.accept('bad', withLocalMediaCapability('http://localhost:43210/t/stale.mp4'))
+  expect(held).toBe(0)
+})

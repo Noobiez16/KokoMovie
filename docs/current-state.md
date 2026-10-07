@@ -38,6 +38,12 @@ Completed files remain until explicit removal; unfinished work has the visible 3
 Torrent caches are allocated per torrent, registered by the main process and removed only
 after consumers and filesystem stores close. Audio probes preserve successful EOF and are
 retained until FFmpeg closes. Application quit awaits both download and P2P teardown.
+Resolver lookup/allocation is serialized within four torrent slots. Routine eviction selects
+only idle entries; active streams/processes, accepted queued downloads and a 60-second URL
+handoff reservation protect their allocation. Failed language resolution cannot dispose a
+shared torrent. When all slots are reserved, translated copy asks the user to wait or retry.
+A buffered player after HTTP EOF and handoff expiry is idle; a later request may need fresh
+resolution if its cache was evicted. No persistent player-session lease was added.
 
 Production renderer scripts prohibit inline code and evaluation, with build-time file CSP
 and blob media-worker support. Trusted-frame headers do not replace third-party policies.
@@ -49,7 +55,7 @@ locally remember a country. TMDB/JustWatch information is grouped by subscriptio
 ads, rental and purchase, with validated landing links, attribution and cache notices.
 The country preference is stored locally; existing SQLite library export does not include it.
 
-Final checks passed: 471 deterministic tests, eight Electron tests, TypeScript, lint, build,
+Final checks passed: 487 deterministic tests, eight Electron tests, TypeScript, lint, build,
 licenses and a zero-finding production audit. The native download test used a generated
 H.264/AAC fixture and real FFmpeg; movie/episode outputs had different names and offline
 video decoding, seek and play worked with HTTP blocked.

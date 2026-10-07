@@ -24,7 +24,7 @@ import { headersForDownloadTarget } from '../download-header-policy.js'
 import { unwrapLocalMediaProxyUrl } from '../providers/local-media-capability.js'
 import { decorateHlsManifestWithLocalCapability, withLocalMediaCapability } from '../providers/local-media-capability.js'
 import { resolveValidatedRedirect } from '../providers/network-policy.js'
-import { isTrustedTorrentDownloadSource } from '../providers/torrent-download-source.js'
+import { isTrustedTorrentDownloadSource, TorrentDownloadLeases } from '../providers/torrent-download-source.js'
 import {
   createHlsDownloadPlan,
   materializeHlsObject,
@@ -453,15 +453,19 @@ function removeDownloadFiles(row: Pick<DownloadRow, 'id' | 'local_dir' | 'manife
   } else removeStaging(row)
 }
 
+const torrentLeases = new TorrentDownloadLeases()
+
 async function stopJob(id: string, reason: 'paused' | 'cancelled'): Promise<void> {
   const job = activeJobs.get(id)
   if (reason === 'paused') pauseSignals.set(id, true)
   else cancelSignals.set(id, true)
   job?.stop(reason)
   abortActiveRequests(id)
-  await job?.done.catch(() => {})
-  await artworkJobs.get(id)
-  artworkJobs.delete(id)
+  try {
+    await job?.done.catch(() => {})
+    await artworkJobs.get(id)
+    artworkJobs.delete(id)
+  } finally { torrentLeases.release(id) }
 }
 
 export async function downloadDirectVideo(
@@ -979,16 +983,18 @@ function launchJob(id: string, run: () => Promise<void>): Promise<void> {
   const job = new DownloadJob()
   activeJobs.set(id, job)
   job.done = Promise.resolve().then(run).finally(async () => {
-    await job.settleChildren()
-    job.rollback()
-    await artworkJobs.get(id)
-    if (activeJobs.get(id) === job) {
-      activeJobs.delete(id)
-      cancelSignals.delete(id)
-      pauseSignals.delete(id)
-      activeRequests.delete(id)
-      artworkJobs.delete(id)
-    }
+    try {
+      await job.settleChildren()
+      job.rollback()
+      await artworkJobs.get(id)
+      if (activeJobs.get(id) === job) {
+        activeJobs.delete(id)
+        cancelSignals.delete(id)
+        pauseSignals.delete(id)
+        activeRequests.delete(id)
+        artworkJobs.delete(id)
+      }
+    } finally { torrentLeases.release(id) }
     processQueue()
   })
   return job.done
@@ -1276,36 +1282,39 @@ export function registerDownloadIpc(): void {
     }
     if (shuttingDown) throw new Error('Downloads are stopping')
     const id = crypto.randomUUID()
-    const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
-    const localDir = join(baseDir, id)
-    mkdirSync(localDir, { recursive: true })
+    torrentLeases.accept(id, opts.manifestUrl)
+    try {
+      const baseDir = opts.customDownloadPath || join(app.getPath('userData'), 'downloads')
+      const localDir = join(baseDir, id)
+      mkdirSync(localDir, { recursive: true })
 
-    const expiresAt = new Date(Date.now() + DOWNLOAD_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
+      const expiresAt = new Date(Date.now() + DOWNLOAD_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
-    db.prepare(`
-      INSERT INTO downloads (id, content_id, episode_id, title, content_type, thumbnail_url, duration_mins,
-        s3_hls_key, drm_key_id, status, local_dir, expires_at, headers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-    `).run(
-      id, opts.contentId, opts.episodeId ?? null, opts.title, opts.contentType,
-      opts.thumbnailUrl ?? null, opts.durationMins ?? null,
-       unwrapLocalMediaProxyUrl(opts.manifestUrl, getStreamProxyPort()), opts.drmKeyId ?? null, localDir, expiresAt,
-      opts.headers ? JSON.stringify(opts.headers) : null
-    )
+      db.prepare(`
+        INSERT INTO downloads (id, content_id, episode_id, title, content_type, thumbnail_url, duration_mins,
+          s3_hls_key, drm_key_id, status, local_dir, expires_at, headers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+      `).run(
+        id, opts.contentId, opts.episodeId ?? null, opts.title, opts.contentType,
+        opts.thumbnailUrl ?? null, opts.durationMins ?? null,
+         unwrapLocalMediaProxyUrl(opts.manifestUrl, getStreamProxyPort()), opts.drmKeyId ?? null, localDir, expiresAt,
+        opts.headers ? JSON.stringify(opts.headers) : null
+      )
 
-    writeFileSync(join(localDir, 'content.kokomovie.json'), JSON.stringify({
-      schemaVersion: 1, downloadId: id, contentId: opts.contentId, episodeId: opts.episodeId ?? null,
-      title: opts.title, contentType: opts.contentType, durationMins: opts.durationMins ?? null,
-      createdAt: new Date().toISOString(),
-    }, null, 2), 'utf8')
-    const assetJobs: Promise<void>[] = []
-    if (opts.thumbnailUrl) assetJobs.push(cacheDownloadArtwork(id, opts.thumbnailUrl, localDir))
-    if (opts.subtitles?.length) assetJobs.push(cacheDownloadSubtitles(id, localDir, opts.subtitles))
-    if (assetJobs.length) artworkJobs.set(id, Promise.allSettled(assetJobs).then(() => undefined))
-    if (preflightPlan) pendingHlsPlans.set(id, preflightPlan)
+      writeFileSync(join(localDir, 'content.kokomovie.json'), JSON.stringify({
+        schemaVersion: 1, downloadId: id, contentId: opts.contentId, episodeId: opts.episodeId ?? null,
+        title: opts.title, contentType: opts.contentType, durationMins: opts.durationMins ?? null,
+        createdAt: new Date().toISOString(),
+      }, null, 2), 'utf8')
+      const assetJobs: Promise<void>[] = []
+      if (opts.thumbnailUrl) assetJobs.push(cacheDownloadArtwork(id, opts.thumbnailUrl, localDir))
+      if (opts.subtitles?.length) assetJobs.push(cacheDownloadSubtitles(id, localDir, opts.subtitles))
+      if (assetJobs.length) artworkJobs.set(id, Promise.allSettled(assetJobs).then(() => undefined))
+      if (preflightPlan) pendingHlsPlans.set(id, preflightPlan)
 
-    processQueue()
-    return { id, expiresAt }
+      processQueue()
+      return { id, expiresAt }
+    } catch (error) { torrentLeases.release(id); throw error }
   }))
 
   ipcMain.handle('download:pause', trustedIpcHandler(async (_event, rawId: unknown) => {
@@ -1594,7 +1603,7 @@ export async function purgeExpiredDownloads(): Promise<void> {
 /** Quiesce before Electron exits; startup safely reconciles preserved work. */
 export async function shutdownDownloadJobs(): Promise<void> {
   shuttingDown = true
-  const ids = [...new Set([...activeJobs.keys(), ...artworkJobs.keys()])]
+  const ids = [...new Set([...activeJobs.keys(), ...artworkJobs.keys(), ...torrentLeases.ids()])]
   await Promise.allSettled(ids.map(id => stopJob(id, 'cancelled')))
   await Promise.allSettled(artworkJobs.values())
   const db = getDb()

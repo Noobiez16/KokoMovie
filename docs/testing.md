@@ -1,6 +1,6 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0. Final source checks: 471 deterministic tests
+**Current verification:** 2026-10-07, v2.0.0. Final source checks: 487 deterministic tests
 and eight real Electron tests passed; both TypeScript targets, lint, build and licenses
 passed. The interface/core counts below record earlier completed blocks.
 
@@ -28,13 +28,19 @@ are retained and do not imply every live/manual scenario has been repeated for v
 
 ### v2.0.0 storage, security and regional discovery
 
-- Full suite: 471 passed. Eight Electron tests passed against the built renderer/main.
+- Storage/security/discovery block: 471 passed; final ownership correction: 487 passed.
+  Eight Electron tests passed again against the final built renderer/main.
 - Download regressions execute real IPC handlers with SQLite and staging directories;
   controlled FFmpeg children cover blocked stdin, pause/resume ordering, artwork waits,
   cancellation/deletion, shutdown recovery, equal-title collisions, sidecar exclusivity,
   unrelated directory preservation and expiry racing a completed transfer.
 - P2P tests include the installed fs-chunk-store and callback ordering. Audio probe tests
   distinguish normal EOF from interruption and retain the child until actual close.
+- Resolver tests exercise the production acquisition boundary with deterministic torrent
+  doubles: idle-only eviction, bounded all-busy rejection, same-torrent reuse, concurrent
+  acquisition, shared failure preservation, handoff expiry and forced shutdown. Real
+  download IPC/SQLite tests observe queued lease release on cancel/delete/expiry/shutdown,
+  destination setup failure and successful media completion. They do not certify a live swarm.
 - The native portable test generates H.264/AAC with bundled FFmpeg, downloads a movie and
   episode through a registered process-owned local fixture, checks distinct MP4/metadata
   outputs and removed staging, stops the origin, blocks HTTP and verifies offline Range,
@@ -56,6 +62,9 @@ Repeat native checks from `client` after `npm run build`, with TEMP/TMP under
 Live provider/swarm startup, long-duration seek/audio stability, installed upgrades and
 other platform packages still need their own verification. Availability fixtures do not
 establish today's regional service availability.
+After HTTP EOF and the 60-second URL handoff reservation, a fully buffered player is idle;
+eviction can require fresh resolution for a later media request. Active HTTP/process consumers
+and accepted queued downloads are protected, without a renderer player-session lease.
 
 ## Existing commands
 

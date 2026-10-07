@@ -20,7 +20,7 @@ The TMDB credential is stored for the single local identity in the OS keychain. 
 
 ## Extraction
 
-Each attempt uses a random ephemeral session and hidden window. Node integration and webviews are disabled; isolation and sandboxing are enabled; permissions, downloads, and popups are denied. Web security is relaxed only in this isolated window because current providers require cross-origin manifest extraction; `FORCE_WEB_SECURITY=true` enables it for testing. Attempts and lifetimes are bounded.
+Each attempt uses a random ephemeral session and hidden window. Node integration and webviews are disabled; isolation, sandboxing and web security are enabled; permissions, downloads, and popups are denied. Provider browser traffic uses the filtered proxy with loopback bypass disabled. Attempts and lifetimes are bounded.
 
 ## Filesystem, network, and updates
 
@@ -31,6 +31,10 @@ and process capability. Cache deletion is restricted to newly registered torrent
 with stream/process/store closure awaited first. Download jobs own their children and
 published files; cancellation and application quit wait for teardown. Finished portable
 files require explicit removal, and unfinished expiry revalidates state before claiming a row.
+The four-slot torrent pool evicts only idle, unreserved allocations. Serialized acquisition,
+short issued-URL reservations and accepted-job leases prevent ordinary source selection
+from cancelling another active consumer. Forced shutdown still cancels and awaits resources.
+Shared resolver failure does not confer ownership to destroy an existing allocation.
 
 The normal TMDB repository additionally permits the exact movie/TV watch-provider and
 country-list endpoints. Availability links are restricted to the matching HTTPS TMDB title
@@ -44,7 +48,7 @@ a separate release operation and signing identity.
 
 ## Residual risks
 
-- Provider compatibility currently needs relaxed extraction-window web security.
+- External provider pages and media still use broad compatible origins; browser isolation and the filtered proxy do not establish trust in their content.
 - Third-party streams, torrents, subtitles, and metadata are hostile inputs.
 - Remaining IPC surfaces need progressive schema hardening as Phase 6/7 contracts stabilize.
 - Dependency and Electron/Chromium advisories require continuous review.

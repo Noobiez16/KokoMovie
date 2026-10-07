@@ -6,6 +6,7 @@ interface CacheEntry {
   path: string
   torrent?: any
   resources: Map<() => void, () => Promise<void>>
+  reservations: Set<() => void>
   disposal?: Promise<void>
   storeDone?: Promise<void>
   storeError?: Error
@@ -16,12 +17,59 @@ export class TorrentCacheLifecycle {
   private readonly root: string
   private readonly entries = new Map<string, CacheEntry>()
   private readonly torrents = new Map<any, CacheEntry>()
-  constructor(root: string) { this.root = realpathSync(root) }
+  private acquisition: Promise<unknown> = Promise.resolve()
+  private closing = false
+  constructor(root: string, private readonly capacity = 4) { this.root = realpathSync(root) }
 
   allocate(): string {
     const path = mkdtempSync(join(this.root, 'torrent-'))
-    this.entries.set(path, { path, resources: new Map() })
+    this.entries.set(path, { path, resources: new Map(), reservations: new Set() })
     return path
+  }
+
+  /** Serialize lookup + eviction + creation, but not metadata/probing work. */
+  acquire(find: () => Promise<any>, create: () => any): Promise<{ torrent: any; release: () => void; fail: () => Promise<void> }> {
+    const operation = this.acquisition.then(async () => {
+      if (this.closing) throw new Error('Torrent cache is closing')
+      let torrent = await find()
+      if (this.closing) throw new Error('Torrent cache is closing')
+      if (torrent?.destroyed) torrent = null
+      const created = !torrent
+      if (!torrent) {
+        if (this.torrents.size >= this.capacity) {
+          const idle = [...this.torrents.entries()].find(([, entry]) => this.idle(entry))
+          if (!idle) throw new Error('TORRENT_CAPACITY_BUSY')
+          await this.dispose(idle[0])
+        }
+        if (this.closing) throw new Error('Torrent cache is closing')
+        torrent = await create()
+      }
+      const release = this.reserve(torrent)
+      return { torrent, release, fail: async () => {
+        release()
+        // A failing reuse never owns the shared allocation. A newly created entry
+        // can be removed only if no overlapping resolver or consumer owns it.
+        const entry = this.torrents.get(torrent)
+        if (created && entry && this.idle(entry)) await this.dispose(torrent)
+      } }
+    })
+    this.acquisition = operation.catch(() => {})
+    return operation
+  }
+
+  private idle(entry: CacheEntry): boolean {
+    return !entry.disposal && entry.resources.size === 0 && entry.reservations.size === 0
+  }
+
+  /** Passive ownership: forced teardown clears these without awaiting a consumer. */
+  reserve(torrent: any, ttlMs?: number): () => void {
+    const entry = this.torrents.get(torrent)
+    if (this.closing || !entry || entry.disposal || torrent.destroyed) throw new Error('Torrent cache is closing')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const release = () => { clearTimeout(timer); entry.reservations.delete(release) }
+    entry.reservations.add(release)
+    if (ttlMs !== undefined) { timer = setTimeout(release, ttlMs); timer.unref?.() }
+    return release
   }
 
   // Observe the actual store callback, including WebTorrent's internal error teardown.
@@ -74,6 +122,7 @@ export class TorrentCacheLifecycle {
     const entry = this.torrents.get(torrent)
     if (!entry) return Promise.resolve()
     if (entry.disposal) return entry.disposal
+    for (const release of entry.reservations) release()
     entry.disposal = Promise.resolve().then(async () => {
       const resources = [...entry.resources.values()].map((cancel) => cancel())
       await Promise.all(resources)
@@ -111,6 +160,8 @@ export class TorrentCacheLifecycle {
   }
 
   async shutdown(): Promise<void> {
+    this.closing = true
+    await this.acquisition
     await Promise.all([...this.torrents.keys()].map((torrent) => this.dispose(torrent)))
     await Promise.all([...this.entries.values()].filter((entry) => !entry.torrent).map((entry) => this.discard(entry.path)))
     // rmdir is deliberately nonrecursive: unknown contents are never removed.

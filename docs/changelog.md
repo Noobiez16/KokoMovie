@@ -27,6 +27,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Portable media and sidecars use exclusive creation, preserving existing files. Rollback removes only files allocated by the failed job. Expiration revalidates live unfinished rows before deletion, retaining downloads that completed during another job's teardown.
 - Completed portable downloads remain until explicit removal. Unfinished work retains the 30-day cleanup policy shown in Downloads and Storage settings; interrupted jobs retain recoverable encrypted staging.
 - Each torrent has its own registered cache directory. Cleanup waits for filesystem-store closure, streams, responses, audio probes and remux children. Unowned cache contents are preserved. fs-chunk-store 5.0.1 is now an explicit production dependency.
+- Torrent resolution serializes allocation within four slots and evicts only idle entries. Active consumers, issued URL handoff and accepted queued downloads retain ownership; failed audio lookup preserves shared torrents. All-busy responses explain the retry in EN/ES/FR, and job leases release on completion, failure, removal, expiry and shutdown.
 - Production renderer scripts permit only local modules; inline scripts and dynamic evaluation are blocked. Build-time file CSP permits media workers and retains existing media/frame compatibility. Development HMR permissions remain separate.
 - Fuse verification can inspect a supplied packaged executable without modifying it.
 - All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
@@ -35,9 +36,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - UI block: 366 deterministic tests, renderer/main TypeScript, lint, production build, six real Electron tests, and the license gate passed on Windows (2026-10-07).
 - Desktop layouts were inspected at 1440×900 and 1024×768 with synthetic catalog artwork; EN/ES/FR and local watchlist/resume persistence were exercised.
 - Core block: 417 tests and six real Electron tests passed; final IPv4 contract refinement passed 25 targeted tests. Renderer/main checks, lint, build, license gate and a dry-run locked install passed. Fresh production audit reports zero findings at every severity.
-- Final storage/security/discovery verification: 471 deterministic tests, eight real Electron tests, both TypeScript targets, zero-error/zero-warning lint, build and license checks passed. Fresh production audit reports zero findings at all severities.
+- Storage/security/discovery block passed 471 deterministic tests. Final ownership correction passed 487 deterministic tests and eight real Electron tests; both TypeScript targets, zero-error/zero-warning lint and build passed again. License checks passed, and the production audit reports zero findings at all severities.
 - A local Windows x64 unpacked package was generated with publication disabled; version, resources, native modules, bundled FFmpeg, file CSP and executable fuses were inspected. It remains unsigned and was not installed. Signed release/installed upgrade and live peer/provider endurance remain unverified.
 - Country availability tests use deterministic TMDB fixtures, not an assurance of current regional service availability. Source HTTP and redirect tests retain their fixture boundaries; real FFmpeg/offline playback adds coverage beyond those mocks.
+- A fully buffered player after HTTP EOF and the 60-second handoff reservation is eligible for idle eviction; a later media request can require fresh resolution. Persistent player-session ownership remains outside this block.
 
 ## [1.5.5] — 2026-08-24 — Reliability, Security & Offline Playback
 

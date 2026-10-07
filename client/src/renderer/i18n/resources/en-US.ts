@@ -176,6 +176,7 @@ const enUS = {
     chooseTorrentLanguage: 'Torrent · choose audio language',
   },
   player: {
+    torrentCapacityBusy: 'All P2P slots are in use. Wait for a download to finish, cancel one, or try again in a minute.',
     findingStream: 'Finding the best stream…',
     noStream: 'No stream found',
     streamError: 'Stream error',
