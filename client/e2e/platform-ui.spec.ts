@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { isolatedCredentials } from './isolated-credentials'
@@ -23,21 +23,32 @@ test.beforeAll(async () => {
     ipcMain.handle('keychain:clear-tmdb-key', () => undefined)
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://*/*', 'http://*/*'] }, (_details, callback) => callback({ cancel: true }))
     protocol.unhandle('catalog-cache')
-    protocol.handle('catalog-cache', () => new Response('<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1400"><rect width="1000" height="1400" fill="#37206d"/><circle cx="500" cy="430" r="200" fill="#7061a8"/><text x="500" y="820" fill="#eee" font-size="64" text-anchor="middle">KOKOMOVIE</text></svg>', { headers: { 'content-type': 'image/svg+xml' } }))
+    protocol.handle('catalog-cache', request => {
+      const seed = Array.from(request.url).reduce((value, character) => value + character.charCodeAt(0), 0)
+      const x = 700 + seed % 600
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#1b1333"/><stop offset="1" stop-color="#8b5cf6" stop-opacity=".7"/></linearGradient></defs><rect width="1600" height="900" fill="url(#sky)"/><circle cx="${x}" cy="${180 + seed % 120}" r="150" fill="#a78bfa" opacity=".55"/><path d="M0 760L400 ${360 + seed % 170}L700 680L1100 330L1600 680V900H0Z" fill="#100b21" opacity=".8"/><path d="M0 830L600 600L1100 860L1600 650V900H0Z" fill="#090611"/><path d="M${x - 60} 900V510Q${x} 400 ${x + 60} 510V900" fill="#f3e8ff" opacity=".1"/></svg>`
+      return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } })
+    })
     ipcMain.handle('tmdb:request', (_event, input: { path: string; params: Record<string, string> }) => {
       const number = Number(input.params.page ?? 1)
-      const items = Array.from({ length: 8 }, (_, i) => ({ id: number * 100 + i, title: `Fixture Movie ${number}-${i + 1}`, overview: 'A deterministic catalog fixture for desktop layout verification.', poster_path: '/fixture.jpg', backdrop_path: '/fixture.jpg', release_date: '2026-01-01', vote_average: 8.1, media_type: 'movie', original_language: 'en', runtime: 110 }))
+      const tv = /\/(?:tv|trending\/tv|discover\/tv|search\/tv)(?:\/|$)/.test(input.path)
+      const items = Array.from({ length: 8 }, (_, i) => ({ id: number * 100 + i, ...(tv ? { name: `Fixture Series ${number}-${i + 1}` } : { title: `Fixture Movie ${number}-${i + 1}` }), overview: 'A deterministic catalog fixture for desktop layout verification.', poster_path: `/poster-${number}-${i}.jpg`, backdrop_path: `/backdrop-${number}-${i}.jpg`, release_date: '2026-01-01', first_air_date: '2026-01-01', vote_average: 8.1, media_type: tv ? 'tv' : 'movie', original_language: 'en', runtime: 110 }))
       let result: unknown = { results: items, total_pages: 3, total_results: 24 }
-      if (/\/movie\/\d+$/.test(input.path)) result = { ...items[0], genres: [], credits: { cast: [] }, external_ids: { imdb_id: null }, release_dates: { results: [] }, videos: { results: [] } }
+      if (/\/(movie|tv)\/\d+$/.test(input.path)) result = { ...items[0], id: Number(input.path.split('/')[2]), genres: [], credits: { cast: [] }, external_ids: { imdb_id: null }, release_dates: { results: [] }, content_ratings: { results: [] }, videos: { results: [] }, seasons: [1, 2].map(n => ({ id: n, season_number: n, name: `Season ${n}`, episode_count: 4, poster_path: '/fixture.jpg' })), number_of_episodes: 8 }
+      if (/\/tv\/\d+\/season\/\d+$/.test(input.path)) {
+        const n = Number(input.path.split('/')[4])
+        result = { id: n, season_number: n, name: `Season ${n}`, episodes: Array.from({ length: 4 }, (_, i) => ({ id: n * 1000 + i, episode_number: i + 1, season_number: n, show_id: Number(input.path.split('/')[2]), name: `Fixture Episode ${n}-${i + 1}`, overview: 'A deterministic episode description for season selection and desktop layout verification.', runtime: 45 + i, still_path: '/fixture.jpg', air_date: '2026-01-01' })) }
+      }
       if (input.path === '/configuration/countries') result = [
         { iso_3166_1: 'BO', english_name: 'Bolivia', native_name: 'Bolivia' },
         { iso_3166_1: 'FR', english_name: 'France', native_name: 'France' },
       ]
-      if (/\/movie\/\d+\/watch\/providers$/.test(input.path)) {
+      if (/\/(movie|tv)\/\d+\/watch\/providers$/.test(input.path)) {
         const id = Number(input.path.split('/')[2])
+        const type = input.path.split('/')[1]
         result = { id, results: {
-          BO: { link: `https://www.themoviedb.org/movie/${id}/watch?locale=BO`, flatrate: [{ provider_id: 1, provider_name: 'Fixture Subscription', logo_path: '/fixture.jpg', display_priority: 1 }] },
-          FR: { link: `https://www.themoviedb.org/movie/${id}/watch?locale=FR`, rent: [{ provider_id: 2, provider_name: 'Fixture Rental', logo_path: '/fixture.jpg', display_priority: 1 }] },
+          BO: { link: `https://www.themoviedb.org/${type}/${id}/watch?locale=BO`, flatrate: [{ provider_id: 1, provider_name: 'Fixture Subscription', logo_path: '/fixture.jpg', display_priority: 1 }] },
+          FR: { link: `https://www.themoviedb.org/${type}/${id}/watch?locale=FR`, rent: [{ provider_id: 2, provider_name: 'Fixture Rental', logo_path: '/fixture.jpg', display_priority: 1 }] },
         } }
       }
       if (input.path.endsWith('/release_dates') || input.path.endsWith('/content_ratings')) result = { results: [] }
@@ -63,12 +74,17 @@ async function screenshot(name: string, width = 1440, height = 900) {
 }
 
 test('desktop navigation, URL search state, library and translated settings', async () => {
-  const nav = page.locator('aside nav')
-  await expect(nav.getByRole('link', { name: 'My List', exact: true })).toBeVisible()
+  const nav = page.locator('.km-primary-nav')
+  await expect(nav.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('searchbox')).toHaveCount(0)
   await expect(page.getByText('Fixture Movie 1-1').first()).toBeVisible()
   await screenshot('home')
   await screenshot('home', 1024, 768)
-  await expect(page.locator('aside')).toHaveAttribute('data-compact', 'true')
+  await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeHidden()
+  await page.getByRole('button', { name: 'Library and tools', exact: true }).click()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Home', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Library and tools', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'More Info', exact: true }).click()
   await expect(page).toHaveURL(/content\//)
   await expect(page.getByRole('heading', { name: 'Fixture Movie 1-1', exact: true })).toBeVisible()
@@ -87,7 +103,8 @@ test('desktop navigation, URL search state, library and translated settings', as
   await expect(page.getByText('Fixture Subscription', { exact: true })).toBeVisible()
   await screenshot('detail')
   await screenshot('detail', 1024, 768)
-  await nav.getByRole('link', { name: 'Home', exact: true }).click()
+  await primary('Home')
+  await page.locator('.km-header-actions').getByRole('link', { name: 'Search', exact: true }).click()
   const search = page.getByRole('searchbox')
   await expect(search).toHaveCount(1)
   await search.fill('fixture moon')
@@ -108,9 +125,12 @@ test('desktop navigation, URL search state, library and translated settings', as
   await search.fill('fixture stars')
   await expect(page).not.toHaveURL(/page=2/)
   await expect(page).toHaveURL(/type=movie/)
-  await nav.getByRole('link', { name: 'My List', exact: true }).click()
+  await library('My List')
   await expect(page).toHaveURL(/history\?tab=list/)
-  await expect(nav.getByRole('link', { name: 'My List', exact: true })).toHaveAttribute('aria-current', 'page')
+  await page.getByRole('button', { name: 'Library and tools', exact: true }).click()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My List', exact: true })).toHaveAttribute('aria-current', 'page')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Library and tools', exact: true })).toBeFocused()
   await screenshot('library')
   await screenshot('library', 1024, 768)
   await page.evaluate(() => window.electronAPI.watchlistAdd('00000001-0000-4000-8000-000000000064', 'movie'))
@@ -118,7 +138,7 @@ test('desktop navigation, URL search state, library and translated settings', as
   await expect(page.getByText('Fixture Movie 1-1').first()).toBeVisible()
   await screenshot('library-saved')
   await screenshot('library-saved', 1024, 768)
-  await nav.getByRole('link', { name: 'Continue Watching', exact: true }).click()
+  await library('Continue Watching')
   await expect(page).toHaveURL(/continue-watching/)
   await expect(page.getByText('Nothing to resume yet')).toBeVisible()
   await screenshot('continue')
@@ -128,29 +148,160 @@ test('desktop navigation, URL search state, library and translated settings', as
   await expect(page.getByText('Fixture Movie 1-1').first()).toBeVisible()
   await screenshot('continue-saved')
   await screenshot('continue-saved', 1024, 768)
+  await primary('Home')
+  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Continue Watching', exact: true })).toBeVisible()
+  const landscape = page.locator('.km-content-card--landscape').first()
+  expect(await landscape.evaluate(element => (element as HTMLElement).offsetWidth)).toBeLessThanOrEqual(360)
+  const landscapeSize = await landscape.locator('.km-card-artwork').evaluate(element => ({ width: (element as HTMLElement).offsetWidth, height: (element as HTMLElement).offsetHeight }))
+  expect(landscapeSize.width / landscapeSize.height).toBeCloseTo(16 / 9, 1)
+  await screenshot('home-saved')
+  await screenshot('home-saved', 1024, 768)
+  await screenshot('home-library')
+  await page.getByRole('heading', { name: 'My List', exact: true }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(visual, 'home-library-1440.png'), animations: 'disabled' })
   for (const [name, route] of [['Downloads', 'downloads'], ['Providers', 'providers'], ['Settings', 'settings']]) {
-    await nav.getByRole('link', { name, exact: true }).click()
+    await library(name)
     await expect(page).toHaveURL(new RegExp(route))
     await screenshot(route)
     await screenshot(route, 1024, 768)
   }
   await page.locator('button[role=combobox]').click()
   await page.getByRole('option', { name: 'Español', exact: true }).click()
-  await expect(nav.getByRole('link', { name: 'Mi lista', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Biblioteca y herramientas', exact: true }).click()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Mi lista', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await screenshot('settings-es')
   await screenshot('settings-es', 1024, 768)
+  await primary('Películas')
+  await expect(page.getByRole('link', { name: 'Acción', exact: true })).toBeVisible()
+  await screenshot('movies-featured-es')
+  await screenshot('movies-featured-es', 1024, 768)
+  await library('Configuración')
   await page.locator('button[role=combobox]').click()
   await page.getByRole('option', { name: 'Français', exact: true }).click()
-  await expect(nav.getByRole('link', { name: 'Ma liste', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Bibliothèque et outils', exact: true }).click()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Ma liste', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await screenshot('settings-fr')
   await screenshot('settings-fr', 1024, 768)
+  await primary('Films')
+  await expect(page.getByRole('link', { name: 'Comédie', exact: true })).toBeVisible()
+  await screenshot('movies-featured-fr')
+  await screenshot('movies-featured-fr', 1024, 768)
+  await library('Paramètres')
   await page.locator('button[role=combobox]').click()
   await page.getByRole('option', { name: 'English', exact: true }).click()
   await screenshot('settings-en')
-  await page.getByRole('button', { name: 'Compact navigation', exact: true }).click()
-  await expect(page.locator('aside')).toHaveAttribute('data-compact', 'true')
-  await expect(nav.getByRole('link', { name: 'My List', exact: true })).toBeVisible()
-  await screenshot('compact', 1024, 768)
+  await page.getByRole('button', { name: 'Library and tools', exact: true }).click()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My List', exact: true })).toBeVisible()
+  await screenshot('library-menu', 1024, 768)
+  await page.keyboard.press('Escape')
   await page.keyboard.press('Control+k')
+  await expect(page).toHaveURL(/search/)
   await expect(page.getByRole('searchbox')).toBeFocused()
+  await page.getByRole('button', { name: 'Library and tools', exact: true }).focus()
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByRole('searchbox')).toBeFocused()
+})
+
+async function library(name: string) {
+  await page.locator('.km-library-menu > button').click()
+  await page.locator('.km-menu-panel').getByRole('link', { name, exact: true }).click()
+}
+
+async function primary(name: string) {
+  const link = page.locator('.km-primary-nav').getByRole('link', { name, exact: true })
+  if (await link.isVisible()) await link.click()
+  else await library(name)
+}
+
+test('featured movies and selected series retain genre and keyboard season navigation', async () => {
+  await screenshot('catalog-start')
+  await primary('Movies')
+  await expect(page.getByRole('button', { name: 'More Info', exact: true })).toBeVisible()
+  await screenshot('movies-featured')
+  await screenshot('movies-featured', 1024, 768)
+  const action = page.getByRole('link', { name: 'Action', exact: true })
+  await action.click()
+  await expect(page).toHaveURL(/movies.*genre=action/)
+  await expect(action).toHaveAttribute('aria-current', 'page')
+  await screenshot('movies-action')
+  await primary('Movies')
+  await expect(page).not.toHaveURL(/genre=/)
+  await expect(page.getByRole('button', { name: 'More Info', exact: true })).toBeVisible()
+  await primary('Series')
+  await page.getByRole('button', { name: 'View episodes', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Fixture Series 1-1', exact: true })).toBeVisible()
+  const tabs = page.getByRole('tab')
+  await expect(tabs).toHaveCount(2)
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: 'Fixture Episode 1-1', exact: true })).toBeVisible()
+  await screenshot('series-selected')
+  await episodeGeometry(4)
+  await screenshot('series-selected', 1152, 820)
+  await episodeGeometry(3)
+  await screenshot('series-selected', 1024, 768)
+  await episodeGeometry(2)
+  await tabs.nth(0).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(tabs.nth(1)).toBeFocused()
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: 'Fixture Episode 2-1', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Fixture Episode 1-1', exact: true })).toHaveCount(0)
+  await screenshot('series-season-2')
+  await screenshot('series-season-2', 1024, 768)
+  await page.keyboard.press('Home')
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: 'Fixture Episode 1-1', exact: true })).toBeVisible()
+})
+
+async function episodeGeometry(columns: number) {
+  const cards = page.locator('.km-episode-card')
+  await expect(cards).toHaveCount(4)
+  const tops = await cards.evaluateAll(elements => elements.map(element => (element as HTMLElement).offsetTop))
+  expect(tops.filter(top => top === tops[0])).toHaveLength(columns)
+  const size = await page.locator('.km-episode-visual').first().evaluate(element => ({ width: (element as HTMLElement).offsetWidth, height: (element as HTMLElement).offsetHeight }))
+  expect(size.width / size.height).toBeCloseTo(16 / 9, 1)
+}
+
+test('desktop motion preserves focus and honors reduced movement', async () => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await primary('Home')
+  await screenshot('motion-home')
+  await page.mouse.move(5, 80)
+  const card = page.getByRole('button', { name: 'Fixture Movie 1-1', exact: true }).first()
+  const artwork = card.locator('img').first()
+  await card.scrollIntoViewIfNeeded()
+  const restingWidth = await artwork.evaluate(element => (element as HTMLElement).offsetWidth)
+  await artwork.screenshot({ path: join(visual, 'motion-card-rest.png'), animations: 'allow' })
+  await card.hover()
+  await expect.poll(async () => (await artwork.evaluate(element => element.getBoundingClientRect().width)) / restingWidth).toBeGreaterThan(1.015)
+  const hoveredWidth = await artwork.evaluate(element => element.getBoundingClientRect().width)
+  expect(hoveredWidth / restingWidth).toBeLessThanOrEqual(1.036)
+  await artwork.screenshot({ path: join(visual, 'motion-card-hover.png'), animations: 'allow' })
+  const toggle = page.getByRole('button', { name: 'Library and tools', exact: true })
+  await toggle.click()
+  const panel = page.locator('.km-menu-panel')
+  const metrics = await panel.evaluate(element => ({ menuDuration: getComputedStyle(element).animationDuration, menuAnimation: getComputedStyle(element).animationName, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches }))
+  await panel.screenshot({ path: join(visual, 'motion-menu-open.png'), animations: 'allow' })
+  await page.keyboard.press('Escape')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).toBeFocused()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
+  await expect.poll(() => page.locator('.km-route-content').evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  await card.hover()
+  await expect.poll(async () => (await artwork.evaluate(element => element.getBoundingClientRect().width)) / restingWidth).toBeCloseTo(1, 3)
+  await artwork.screenshot({ path: join(visual, 'motion-card-reduced.png'), animations: 'allow' })
+  const arrow = page.locator('.km-content-row').first().getByRole('button', { name: /Previous$/ })
+  const arrowTop = await arrow.evaluate(element => element.getBoundingClientRect().top)
+  await arrow.hover()
+  await expect.poll(() => arrow.evaluate(element => element.getBoundingClientRect().top)).toBeCloseTo(arrowTop, 2)
+  await toggle.click()
+  await expect.poll(() => panel.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  await page.keyboard.press('Escape')
+  await expect(toggle).toBeFocused()
+  await writeFile(join(visual, 'hbo-motion-metrics.json'), JSON.stringify({ ...metrics, restingWidth, hoveredWidth, hoverScale: hoveredWidth / restingWidth, reducedRouteAnimation: 'none', reducedHoverScale: await artwork.evaluate(element => element.getBoundingClientRect().width) / restingWidth }, null, 2))
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
 })
