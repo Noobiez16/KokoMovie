@@ -46,7 +46,7 @@ describe('provider source statuses', () => {
       .toEqual(['hd', 'cam', 'searching', 'unavailable', 'timed-out'])
   })
 
-  it('starts progressively for a non-CAM source but never picks CAM while providers are searching', () => {
+  it('waits for pending providers below validated non-CAM 2160p', () => {
     const standard = classifySourceQuality({ url: 'https://x/web-dl/a.m3u8', resolution: 720, mediaValidated: true })
     const cam = classifySourceQuality({ url: 'https://x/cam/a.m3u8', resolution: 1080, mediaValidated: true })
     const searching: ProviderSourceStatus[] = [
@@ -54,9 +54,21 @@ describe('provider source statuses', () => {
       { providerId: 'b', providerName: 'B', state: 'searching' },
     ]
 
-    expect(shouldResolveAutomaticSource('progressive', standard, searching)).toBe(true)
+    expect(shouldResolveAutomaticSource('progressive', standard, searching)).toBe(false)
     expect(shouldResolveAutomaticSource('progressive', cam, searching)).toBe(false)
     expect(shouldResolveAutomaticSource('complete', standard, searching)).toBe(false)
     expect(shouldResolveAutomaticSource('progressive', cam, searching.map((item) => item.state === 'searching' ? { ...item, state: 'unavailable' } : item))).toBe(true)
+  })
+
+  it.each([
+    [1440, true, 'unknown', false], [2160, true, 'unknown', true],
+    [2160, true, 'standard', true], [2160, false, 'standard', false],
+    [2160, true, 'cam', false], [2160, true, 'telesync', false],
+  ] as const)('readiness for %ip validated=%s release=%s is %s', (resolution, mediaValidated, releaseType, ready) => {
+    const quality = { ...classifySourceQuality({ url: 'https://x/a', resolution, mediaValidated }), releaseType }
+    const statuses: ProviderSourceStatus[] = [{ providerId: 'pending', providerName: 'Pending', state: 'searching' }]
+    expect(shouldResolveAutomaticSource('progressive', quality, statuses)).toBe(ready)
+    expect(shouldResolveAutomaticSource('complete', quality, statuses)).toBe(false)
+    expect(shouldResolveAutomaticSource('progressive', quality, [])).toBe(true)
   })
 })

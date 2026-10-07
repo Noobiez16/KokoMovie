@@ -197,13 +197,41 @@ export function getStreamProxyPort(): number {
 // Pure Node-level fetch helper that ignores Electron's forbidden header rules
 function fetchNode(
   url: string,
-  options: { headers?: Record<string, string>; method?: string; maxRedirects?: number } = {},
-): Promise<{ status: number; headers: Record<string, string>; buffer: Buffer }> {
-  return new Promise((resolve, reject) => {
+  options: { headers?: Record<string, string>; method?: string; maxRedirects?: number; probe?: { maxBytes: number; deadlineMs: number; signal?: AbortSignal } } = {},
+): Promise<{ status: number; headers: Record<string, string>; buffer: Buffer; finalUrl: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
     const maxRedirects = options.maxRedirects ?? 5
     let currentRedirects = 0
+    let settled = false
+    let activeRequest: nodeHttp.ClientRequest | undefined
+    let activeResponse: nodeHttp.IncomingMessage | undefined
+    let deadline: NodeJS.Timeout | undefined
+    const cleanup = () => {
+      if (deadline) clearTimeout(deadline)
+      options.probe?.signal?.removeEventListener('abort', onAbort)
+    }
+    const reject = (error: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (options.probe) { activeResponse?.destroy(); activeRequest?.destroy() }
+      rejectPromise(error)
+    }
+    const resolve = (value: { status: number; headers: Record<string, string>; buffer: Buffer; finalUrl: string }) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolvePromise(value)
+    }
+    const onAbort = () => reject(new Error('Media probe cancelled'))
+    if (options.probe) {
+      if (options.probe.signal?.aborted) { onAbort(); return }
+      options.probe.signal?.addEventListener('abort', onAbort, { once: true })
+      deadline = setTimeout(() => reject(new Error('Media probe deadline exceeded')), options.probe.deadlineMs)
+    }
 
     function makeRequest(currentUrl: string) {
+      if (settled) return
       try {
          const urlObj = validateProxyTargetUrl(currentUrl)
         const isHttps = urlObj.protocol === 'https:'
@@ -212,7 +240,8 @@ function fetchNode(
         if (options.headers) {
           for (const [k, v] of Object.entries(options.headers)) {
             const lowerK = k.toLowerCase()
-            if (lowerK !== 'host') {
+            const crossOriginProbe = options.probe && new URL(currentUrl).origin !== new URL(url).origin
+            if (lowerK !== 'host' && !(crossOriginProbe && ['authorization', 'cookie', 'proxy-authorization'].includes(lowerK))) {
               reqHeaders[k] = v
             }
           }
@@ -232,6 +261,11 @@ function fetchNode(
         }
 
         const handleResponse = (nodeRes: nodeHttp.IncomingMessage) => {
+          activeResponse = nodeRes
+          let discardedRedirect = false
+          nodeRes.on('error', () => { if (!discardedRedirect) reject(new Error('Media response failed')) })
+          if (options.probe) nodeRes.on('aborted', () => { if (!discardedRedirect) reject(new Error('Media response aborted')) })
+          if (settled) { nodeRes.destroy(); return }
           try {
             if ([301, 302, 303, 307, 308].includes(nodeRes.statusCode ?? 0)) {
               const location = nodeRes.headers.location
@@ -242,21 +276,32 @@ function fetchNode(
                   return
                 }
                 const absoluteLocation = resolveValidatedRedirect(currentUrl, location).toString()
+                if (options.probe) { discardedRedirect = true; nodeRes.destroy() }
                 makeRequest(absoluteLocation)
                 return
               }
             }
 
             const chunks: Buffer[] = []
-            nodeRes.on('data', (chunk: Buffer) => chunks.push(chunk))
+            let receivedBytes = 0
+            nodeRes.on('data', (chunk: Buffer) => {
+              if (settled) return
+              receivedBytes += chunk.length
+              if (options.probe && receivedBytes > options.probe.maxBytes) {
+                reject(new Error('Media probe body too large'))
+                return
+              }
+              chunks.push(chunk)
+            })
             nodeRes.on('end', () => {
+              if (settled) return
               try {
                 let buffer = Buffer.concat(chunks)
                 const encoding = nodeRes.headers['content-encoding']
                 if (encoding === 'gzip') {
-                  buffer = zlib.gunzipSync(buffer)
+                  buffer = zlib.gunzipSync(buffer, options.probe ? { maxOutputLength: options.probe.maxBytes } : undefined)
                 } else if (encoding === 'deflate') {
-                  buffer = zlib.inflateSync(buffer)
+                  buffer = zlib.inflateSync(buffer, options.probe ? { maxOutputLength: options.probe.maxBytes } : undefined)
                 }
 
                 const resHeaders: Record<string, string> = {}
@@ -270,6 +315,7 @@ function fetchNode(
                   status: nodeRes.statusCode ?? 200,
                   headers: resHeaders,
                   buffer,
+                  finalUrl: currentUrl,
                 })
               } catch {
                 reject(new Error('Failed to process response body'))
@@ -283,6 +329,7 @@ function fetchNode(
         const req = isHttps
           ? nodeHttps.request(currentUrl, { ...reqOpts, agent: nodeHttpsAgent }, handleResponse)
           : (nodeHttp as any)[HTTP_REQUEST_KEY](currentUrl, { ...reqOpts, agent: nodeHttpAgent }, handleResponse)
+        activeRequest = req
 
         req.on('error', (_err: Error) => {
           reject(new Error('Connection error during request'))
@@ -1042,12 +1089,13 @@ function toProxyUrl(url: string): string {
 }
 
 export function getStandardHeight(width: number, height: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height <= 0) return 0
   const w = width || 0
   const h = height || 0
   if (w >= 3840 || h >= 2160) return 2160
-  if (w >= 2560 || h >= 1400) return 1440
-  if (w >= 1920 || h >= 800) return 1080
-  if (w >= 1280 || h >= 530) return 720
+  if (w >= 2560 || h >= 1440) return 1440
+  if (w >= 1920 || h >= 1080) return 1080
+  if (w >= 1280 || h >= 720) return 720
   if (w >= 960 || h >= 540) return 540
   if (w >= 854 || h >= 480) return 480
   return h
@@ -1089,14 +1137,31 @@ function isLikelyFullLengthPlaylist(text: string): boolean {
   return duration === 0 || duration >= 180
 }
 
-function probeDirectVideo(url: string, headers: Record<string, string>): Promise<{ status: number; headers: Record<string, string>; firstBytes: Buffer }> {
-  return new Promise((resolve, reject) => {
+function probeDirectVideo(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ status: number; headers: Record<string, string>; firstBytes: Buffer }> {
+  return new Promise((resolve, rejectPromise) => {
     let settled = false
+    let activeRequest: nodeHttp.ClientRequest | undefined
+    let activeResponse: nodeHttp.IncomingMessage | undefined
+    let deadline: NodeJS.Timeout | undefined
+    const cleanup = () => { if (deadline) clearTimeout(deadline); signal?.removeEventListener('abort', onAbort) }
+    const reject = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      activeResponse?.destroy()
+      activeRequest?.destroy()
+      rejectPromise(error)
+    }
+    const onAbort = () => reject(new Error('Direct-video probe cancelled'))
     const finish = (value: { status: number; headers: Record<string, string>; firstBytes: Buffer }) => {
       if (settled) return
       settled = true
+      cleanup()
       resolve(value)
     }
+    if (signal?.aborted) { onAbort(); return }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    deadline = setTimeout(() => reject(new Error('Direct-video probe deadline exceeded')), 15000)
 
     try {
       const parsed = new URL(url)
@@ -1119,21 +1184,26 @@ function probeDirectVideo(url: string, headers: Record<string, string>): Promise
         lookup: resilientLookup as nodeHttp.RequestOptions["lookup"],
       }
       const onResponse = (response: nodeHttp.IncomingMessage) => {
+        activeResponse = response
+        response.on("error", (error) => { if (!settled) reject(error) })
+        response.once("aborted", () => { if (!settled) reject(new Error('Direct-video response aborted')) })
+        if (settled) { response.destroy(); return }
         const responseHeaders: Record<string, string> = {}
         for (const [key, value] of Object.entries(response.headers)) {
           if (value != null) responseHeaders[key] = Array.isArray(value) ? value.join(", ") : String(value)
         }
         const status = response.statusCode ?? 0
         response.once("data", (chunk: Buffer) => {
+          if (settled) return
           finish({ status, headers: responseHeaders, firstBytes: Buffer.from(chunk.subarray(0, 128)) })
           response.destroy()
         })
         response.once("end", () => finish({ status, headers: responseHeaders, firstBytes: Buffer.alloc(0) }))
-        response.once("error", (error) => { if (!settled) reject(error) })
       }
       const request = isHttps
         ? nodeHttps.request(url, { ...requestOptions, agent: nodeHttpsAgent }, onResponse)
         : (nodeHttp as any)[HTTP_REQUEST_KEY](url, { ...requestOptions, agent: nodeHttpAgent }, onResponse)
+      activeRequest = request
       request.once("timeout", () => request.destroy(new Error("Direct-video probe timeout")))
       request.once("error", (error: Error) => { if (!settled) reject(error) })
       request.end()
@@ -1143,7 +1213,7 @@ function probeDirectVideo(url: string, headers: Record<string, string>): Promise
   })
 }
 
-async function getMaxResolution(url: string, headers: Record<string, string>): Promise<{ resolution: number; audioLangs: string[]; manifestText: string; mediaValidated: boolean }> {
+async function getMaxResolution(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ resolution: number; audioLangs: string[]; manifestText: string; mediaValidated: boolean }> {
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
     if (isDirect) {
@@ -1162,7 +1232,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
         return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
       }
       try {
-        const probe = await probeDirectVideo(url, headers)
+        const probe = await probeDirectVideo(url, headers, signal)
         if (probe.status !== 200 && probe.status !== 206) {
           logExtraction("Rejected direct video with HTTP " + probe.status + ": " + url.slice(0, 140))
           return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
@@ -1184,19 +1254,23 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
         logExtraction("Rejected unprobeable direct video: " + (error instanceof Error ? error.message : String(error)))
         return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
       }
-      return { resolution: 1080, audioLangs: [], manifestText: '', mediaValidated: true }
+      return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: true }
     }
 
-    const proxyUrl = toProxyUrl(url)
-    const response = await fetchNode(proxyUrl, {
+    // Main-process probes fetch the validated upstream directly. The local proxy URL is
+    // intentionally forbidden by fetchNode's public-target policy.
+    const probe = { maxBytes: 2 * 1024 * 1024, deadlineMs: 15000, signal }
+    const response = await fetchNode(url, {
+      probe,
       headers: {
+        ...headers,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       }
     })
 
     if (response.status < 200 || response.status >= 300) {
       logExtraction(`getMaxResolution got non-ok status ${response.status} for ${url}`)
-      return { resolution: 720, audioLangs: [], manifestText: '', mediaValidated: false } // fallback if resolution check fails
+      return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
     }
     const text = response.buffer.toString('utf8')
 
@@ -1206,7 +1280,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
     }
 
     if (!text.includes('#EXTM3U')) {
-      return { resolution: 1080, audioLangs: [], manifestText: text, mediaValidated: true } // Assume direct stream (like mp4)
+      return { resolution: 0, audioLangs: [], manifestText: text, mediaValidated: true }
     }
 
     const audioLangs = parseAudioLangs(text)
@@ -1216,12 +1290,12 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
         logExtraction('Rejected short HLS placeholder playlist')
         return { resolution: 0, audioLangs, manifestText: text, mediaValidated: false }
       }
-      return { resolution: 1080, audioLangs, manifestText: text, mediaValidated: true }
+      return { resolution: 0, audioLangs, manifestText: text, mediaValidated: true }
     }
 
     const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
     if (matches.length === 0) {
-      return { resolution: 720, audioLangs, manifestText: text, mediaValidated: true } // default guess
+      return { resolution: 0, audioLangs, manifestText: text, mediaValidated: true }
     }
 
     const masterLines = text.split(/\r?\n/)
@@ -1229,8 +1303,8 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
     const firstVariant = firstVariantIndex >= 0 ? masterLines[firstVariantIndex + 1]?.trim() : ""
     if (firstVariant && !firstVariant.startsWith("#")) {
       try {
-        const variantUrl = new URL(firstVariant, proxyUrl).toString()
-        const variantResponse = await fetchNode(variantUrl, { headers: { "User-Agent": "Mozilla/5.0" } })
+        const variantUrl = new URL(firstVariant, response.finalUrl).toString()
+        const variantResponse = await fetchNode(variantUrl, { probe, headers: { ...getStreamHeaders(variantUrl), "User-Agent": "Mozilla/5.0" } })
         const variantText = variantResponse.buffer.toString("utf8")
         if (variantText.includes("#EXTINF") && !isLikelyFullLengthPlaylist(variantText)) {
           logExtraction("Rejected short HLS placeholder master")
@@ -1245,10 +1319,10 @@ async function getMaxResolution(url: string, headers: Record<string, string>): P
       return getStandardHeight(w, h)
     }).filter((h) => !isNaN(h))
 
-    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 720, audioLangs, manifestText: text, mediaValidated: true }
+    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 0, audioLangs, manifestText: text, mediaValidated: true }
   } catch (err) {
     logExtraction(`Failed to check resolution for ${url}: ${err}`)
-    return { resolution: 720, audioLangs: [], manifestText: '', mediaValidated: false } // default fallback
+    return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
   }
 }
 
@@ -1384,7 +1458,7 @@ export function registerProvidersIpc(): void {
       autoRegisterHeaders(result.url, result.headers, p.sessionName)
       providerCircuits.recordSuccess(p.id)
 
-      const probe = await getMaxResolution(result.url, result.headers)
+      const probe = await getMaxResolution(result.url, result.headers, requestLifecycle.signal)
       const qualityInfo = classifySourceQuality({
         url: result.url,
         resolution: probe.resolution,
@@ -1413,16 +1487,8 @@ export function registerProvidersIpc(): void {
 
   // Try all enabled providers with staggered parallel racing.
   //
-  // SPEED: the caller (the "Finding Best Stream" overlay) is resolved the INSTANT an
-  // acceptable stream is chosen — it does NOT wait for the full set of alternatives to be
-  // collected. Previously this handler blocked for an extra 8s "collect" window (plus up to
-  // a 5s quality-wait) AFTER a stream was already found, which is what made playback feel
-  // like it took 30s+ to start. Now:
-  //   1. ≥1080p  → resolve the caller immediately (best possible quality).
-  //   2. ≥720p   → acceptable; resolve after a short quality-wait so a 1080p that's about to
-  //                finish can still win, but we never sit idle for long.
-  //   3. <720p   → kept only as a last resort; we keep waiting for a ≥720p stream and only
-  //                fall back to sub-720p if nothing better arrives (quality MUST be 720p/1080p).
+  // Progressive mode resolves immediately only for validated non-CAM 2160p while
+  // providers are pending. Lower or unknown tiers wait for completion or the deadline.
   // Fast & Progressive resolves once the ranked acceptable choice is ready, then keeps every
   // bounded worker running in the background. Complete Scan resolves only after every worker
   // finishes or the hard deadline. Both modes publish live source/status snapshots through the
@@ -1447,11 +1513,6 @@ export function registerProvidersIpc(): void {
       setMaxListeners(30, signal)
     } catch { /* ignore */ }
 
-    // Quality floor the user requires. A stream below this is only ever used as a last
-    // resort (when no ≥720p stream is found by any provider).
-    const ACCEPTABLE_RES = 720
-    // How long to keep waiting for a 1080p after an acceptable (≥720p) stream is in hand.
-    const QUALITY_WAIT_MS = 3500
     let bestResult: ProviderResult | null = null
     let bestResolution = 0
     const collectedStreams: ProviderResult[] = []
@@ -1477,7 +1538,6 @@ export function registerProvidersIpc(): void {
       let callerResolved = false
       let collectionDone = false
       const timers: NodeJS.Timeout[] = []
-      let qualityWaitTimer: NodeJS.Timeout | null = null
 
       const publishSnapshot = () => {
         if (!searchId) return
@@ -1499,7 +1559,6 @@ export function registerProvidersIpc(): void {
       const finishCollecting = () => {
         if (collectionDone) return
         collectionDone = true
-        if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
         timers.forEach(clearTimeout)
         controller.abort()
         logExtraction(`COLLECTION DONE: ${collectedStreams.length} total streams collected`)
@@ -1511,7 +1570,6 @@ export function registerProvidersIpc(): void {
       const resolveCaller = () => {
         if (callerResolved || !bestResult) return
         callerResolved = true
-        if (qualityWaitTimer) clearTimeout(qualityWaitTimer)
         logExtraction(`RESOLVING CALLER NOW with ${bestResolution}p (${collectedStreams.length} stream(s) so far) — collecting alternatives in background`)
         resolve({ ...bestResult, allStreams: [...collectedStreams], sourceStatuses: [...sourceStatuses] })
       }
@@ -1576,9 +1634,10 @@ export function registerProvidersIpc(): void {
             providerCircuits.recordSuccess(provider.id)
 
             // Check resolution + alternate audio (dub) languages of the found stream
-            const { resolution, audioLangs, manifestText, mediaValidated } = await getMaxResolution(result.url, result.headers)
+            const { resolution, audioLangs, manifestText, mediaValidated } = await getMaxResolution(result.url, result.headers, signal)
             logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | Audio: [${audioLangs.join(',')}] | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
-            if (resolution <= 0) {
+            if (signal.aborted) return
+            if (!mediaValidated) {
               logExtraction(`REJECTED: ${provider.name} returned a non-playable stream`)
               setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'Stream validation failed' })
               return
@@ -1606,25 +1665,9 @@ export function registerProvidersIpc(): void {
             // Publish ranked snapshots so renderer fallback also treats CAM/TS as a last resort.
             setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'available', qualityInfo })
 
-            if (!callerResolved) {
-              if (resolution >= ACCEPTABLE_RES && shouldResolveAutomaticSource(discoveryMode, qualityInfo, sourceStatuses)) {
-                // Good enough (≥720p). Give a 1080p a brief chance to finish, then resolve.
-                if (!qualityWaitTimer) {
-                  logExtraction(`Acceptable ${resolution}p stream in hand — ${QUALITY_WAIT_MS}ms quality-wait for a 1080p…`)
-                  qualityWaitTimer = setTimeout(() => {
-                    qualityWaitTimer = null
-                    const bestQuality = bestResult?.streams[0]?.qualityInfo
-                    if (!callerResolved && bestResult && bestQuality && shouldResolveAutomaticSource(discoveryMode, bestQuality, sourceStatuses)) {
-                      logExtraction(`Quality-wait expired. Returning best stream found (${bestResolution}p)`)
-                      resolveCaller()
-                    }
-                  }, QUALITY_WAIT_MS)
-                }
-              } else {
-                // Below the 720p floor — keep it only as a last resort and keep racing for
-                // a ≥720p stream. checkFinish() will fall back to it if nothing better lands.
-                logExtraction(`Sub-720p stream (${resolution}p) from ${provider.name} held as last resort — still seeking ≥720p`)
-              }
+            const bestQuality = bestResult?.streams[0]?.qualityInfo
+            if (!callerResolved && bestQuality && shouldResolveAutomaticSource(discoveryMode, bestQuality, sourceStatuses)) {
+              resolveCaller()
             }
           } else {
             if (!signal.aborted) setProviderStatus({ providerId: provider.id, providerName: provider.name, state: 'unavailable', error: 'No stream found' })
