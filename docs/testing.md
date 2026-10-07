@@ -21,7 +21,16 @@ an empty value during Home navigation. The test now awaits the Home URL and uses
 Playwright's retrying CSS assertion against the rendered header, still requiring
 exactly `0px`. No application style or fullscreen assertion is relaxed.
 
-**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
+Recovery run [37697214096](https://github.com/Noobiez16/KokoMovie/actions/runs/37697214096)
+passed the complete Linux quality/security gate (662 deterministic tests, TypeScript,
+lint, production audit, licences, build and fuses) and all 17 native Electron tests.
+The corrected native suite also passes locally on Windows (39.5s), with clean lint
+and renderer/main/E2E TypeScript. Installer packaging is verified separately by the
+release workflow: this recovery run also passed Windows NSIS and Linux x64/ARM64
+AppImage/deb packaging with native architecture and LGPL resource checks. Publication
+was correctly skipped for the branch dispatch; the replacement tag triggers it.
+
+**Original release preparation verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-source-priority`.
 Release preparation rechecked 662/662 units, 17/17 native Electron tests (38.9s),
 TypeScript, lint and the production audit policy. Fresh isolated fixture setup reproduced
 ENOENT in both media tests and a missing FFmpeg prerequisite in the Electron CI job;

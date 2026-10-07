@@ -46,7 +46,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Torrent resolution serializes allocation within four slots and evicts only idle entries. Active consumers, issued URL handoff and accepted queued downloads retain ownership; failed audio lookup preserves shared torrents. All-busy responses explain the retry in EN/ES/FR, and job leases release on completion, failure, removal, expiry and shutdown.
 - Production renderer scripts permit only local modules; inline scripts and dynamic evaluation are blocked. Build-time file CSP permits media workers and retains existing media/frame compatibility. Development HMR permissions remain separate.
 - Fuse verification can inspect a supplied packaged executable without modifying it.
-- All current package versions target 2.0.0. This branch remains unpublished; previously released installers are unchanged.
+- All current package versions target 2.0.0. Installer publication is handled by the tag-triggered release workflow after all gates succeed.
 
 ### Fixed
 - Opening the development renderer in a regular browser now shows localized desktop guidance instead of crashing on absent Electron subscriptions. App and PlayerHost mount only when the preload bridge exists; no desktop API is exposed through HTTP.
