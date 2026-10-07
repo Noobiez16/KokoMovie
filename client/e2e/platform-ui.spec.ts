@@ -29,11 +29,19 @@ test.beforeAll(async () => {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#1b1333"/><stop offset="1" stop-color="#8b5cf6" stop-opacity=".7"/></linearGradient></defs><rect width="1600" height="900" fill="url(#sky)"/><circle cx="${x}" cy="${180 + seed % 120}" r="150" fill="#a78bfa" opacity=".55"/><path d="M0 760L400 ${360 + seed % 170}L700 680L1100 330L1600 680V900H0Z" fill="#100b21" opacity=".8"/><path d="M0 830L600 600L1100 860L1600 650V900H0Z" fill="#090611"/><path d="M${x - 60} 900V510Q${x} 400 ${x + 60} 510V900" fill="#f3e8ff" opacity=".1"/></svg>`
       return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } })
     })
-    ipcMain.handle('tmdb:request', (_event, input: { path: string; params: Record<string, string> }) => {
+    ipcMain.handle('tmdb:request', async (_event, input: { path: string; params: Record<string, string> }) => {
       const number = Number(input.params.page ?? 1)
       const tv = /\/(?:tv|trending\/tv|discover\/tv|search\/tv)(?:\/|$)/.test(input.path)
       const items = Array.from({ length: 8 }, (_, i) => ({ id: number * 100 + i, ...(tv ? { name: `Fixture Series ${number}-${i + 1}` } : { title: `Fixture Movie ${number}-${i + 1}` }), overview: 'A deterministic catalog fixture for desktop layout verification.', poster_path: `/poster-${number}-${i}.jpg`, backdrop_path: `/backdrop-${number}-${i}.jpg`, release_date: '2026-01-01', first_air_date: '2026-01-01', vote_average: 8.1, media_type: tv ? 'tv' : 'movie', original_language: 'en', runtime: 110 }))
       let result: unknown = { results: items, total_pages: 3, total_results: 24 }
+      if (input.path.startsWith('/search/') && input.params.query?.startsWith('inline ')) {
+        if (input.params.query === 'inline slow') {
+          process.env.KOKOMOVIE_INLINE_PENDING = '1'
+          await new Promise(resolve => setTimeout(resolve, 900))
+          process.env.KOKOMOVIE_INLINE_SETTLED = '1'
+        }
+        result = { results: items.map(item => ({ ...item, title: `${input.params.query} ${item.id}` })), total_pages: 1, total_results: 8 }
+      }
       if (/\/(movie|tv)\/\d+$/.test(input.path)) result = { ...items[0], id: Number(input.path.split('/')[2]), genres: [], credits: { cast: [] }, external_ids: { imdb_id: null }, release_dates: { results: [] }, content_ratings: { results: [] }, videos: { results: [] }, seasons: [1, 2].map(n => ({ id: n, season_number: n, name: `Season ${n}`, episode_count: 4, poster_path: '/fixture.jpg' })), number_of_episodes: 8 }
       if (/\/tv\/\d+\/season\/\d+$/.test(input.path)) {
         const n = Number(input.path.split('/')[4])
@@ -105,7 +113,8 @@ test('desktop navigation, URL search state, library and translated settings', as
   await screenshot('detail')
   await screenshot('detail', 1024, 768)
   await primary('Home')
-  await page.locator('.km-header-actions').getByRole('link', { name: 'Search', exact: true }).click()
+  // Keep legacy links and URL-filter/history behavior covered independently of the inline control.
+  await page.goto(page.url().split('#')[0] + '#/search')
   const search = page.getByRole('searchbox')
   await expect(search).toHaveCount(1)
   await search.fill('fixture moon')
@@ -126,10 +135,13 @@ test('desktop navigation, URL search state, library and translated settings', as
   await search.fill('fixture stars')
   await expect(page).not.toHaveURL(/page=2/)
   await expect(page).toHaveURL(/type=movie/)
-  await library('My List')
+  await library('My Library')
+  await expect(page.getByRole('heading', { name: 'My Library', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'My List', exact: true }).click()
   await expect(page).toHaveURL(/history\?tab=list/)
   await page.getByRole('button', { name: 'Library and tools', exact: true }).click()
-  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My List', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My Library', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: /^(My List|Viewing History)$/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Library and tools', exact: true })).toBeFocused()
   await screenshot('library')
@@ -150,7 +162,7 @@ test('desktop navigation, URL search state, library and translated settings', as
   await screenshot('continue-saved')
   await screenshot('continue-saved', 1024, 768)
   await primary('Home')
-  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Continue Watching', exact: true })).toBeVisible()
   const landscape = page.locator('.km-content-card--landscape').first()
   expect(await landscape.evaluate(element => (element as HTMLElement).offsetWidth)).toBeLessThanOrEqual(360)
@@ -159,7 +171,7 @@ test('desktop navigation, URL search state, library and translated settings', as
   await screenshot('home-saved')
   await screenshot('home-saved', 1024, 768)
   await screenshot('home-library')
-  await page.getByRole('heading', { name: 'My List', exact: true }).scrollIntoViewIfNeeded()
+  await page.getByRole('heading', { name: 'Continue Watching', exact: true }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: join(visual, 'home-library-1440.png'), animations: 'disabled' })
   for (const [name, route] of [['Downloads', 'downloads'], ['Providers', 'providers'], ['Settings', 'settings']]) {
     await library(name)
@@ -170,7 +182,7 @@ test('desktop navigation, URL search state, library and translated settings', as
   await page.locator('button[role=combobox]').click()
   await page.getByRole('option', { name: 'Español', exact: true }).click()
   await page.getByRole('button', { name: 'Biblioteca y herramientas', exact: true }).click()
-  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Mi lista', exact: true })).toBeVisible()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Mi biblioteca', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await screenshot('settings-es')
   await screenshot('settings-es', 1024, 768)
@@ -182,7 +194,7 @@ test('desktop navigation, URL search state, library and translated settings', as
   await page.locator('button[role=combobox]').click()
   await page.getByRole('option', { name: 'Français', exact: true }).click()
   await page.getByRole('button', { name: 'Bibliothèque et outils', exact: true }).click()
-  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Ma liste', exact: true })).toBeVisible()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'Ma bibliothèque', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await screenshot('settings-fr')
   await screenshot('settings-fr', 1024, 768)
@@ -195,15 +207,17 @@ test('desktop navigation, URL search state, library and translated settings', as
   await page.getByRole('option', { name: 'English', exact: true }).click()
   await screenshot('settings-en')
   await page.getByRole('button', { name: 'Library and tools', exact: true }).click()
-  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My List', exact: true })).toBeVisible()
+  await expect(page.locator('.km-menu-panel').getByRole('link', { name: 'My Library', exact: true })).toBeVisible()
   await screenshot('library-menu', 1024, 768)
   await page.keyboard.press('Escape')
+  const beforeShortcut = page.url()
   await page.keyboard.press('Control+k')
-  await expect(page).toHaveURL(/search/)
-  await expect(page.getByRole('searchbox')).toBeFocused()
+  await expect(page).toHaveURL(beforeShortcut)
+  await expect(page.locator('[data-header-search]')).toBeFocused()
   await page.getByRole('button', { name: 'Library and tools', exact: true }).focus()
   await page.keyboard.press('Meta+k')
-  await expect(page.getByRole('searchbox')).toBeFocused()
+  await expect(page.locator('[data-header-search]')).toBeFocused()
+  await page.keyboard.press('Escape')
 })
 
 async function library(name: string) {
@@ -326,7 +340,7 @@ test('catalog without a featured hero keeps local records and genres below the t
   const headerBottom = await page.locator('.km-topbar').evaluate(element => element.getBoundingClientRect().bottom)
   const resumeHeading = page.getByRole('heading', { name: 'Continue Watching', exact: true })
   expect(await resumeHeading.evaluate(element => element.getBoundingClientRect().top)).toBeGreaterThanOrEqual(headerBottom)
-  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'My List', exact: true })).toHaveCount(0)
   for (const destination of ['Movies', 'Series']) {
     await primary(destination)
     await expect(page.locator('.km-hero')).toHaveCount(0)
@@ -339,7 +353,7 @@ test('catalog without a featured hero keeps local records and genres below the t
 
 test('same-route search results enter after valid data and honor reduced motion', async () => {
   await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '0' })
-  await page.locator('.km-header-actions').getByRole('link', { name: 'Search', exact: true }).click()
+  await page.goto(page.url().split('#')[0] + '#/search')
   await page.reload()
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   const search = page.getByRole('searchbox')
@@ -361,5 +375,77 @@ test('same-route search results enter after valid data and honor reduced motion'
   await expect(results).toBeVisible()
   expect(await results.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
   await writeFile(join(visual, 'hbo-data-motion-metrics.json'), JSON.stringify({ ...motion, reducedAnimation: 'none', validIdentityRemounted: true }, null, 2))
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+})
+
+test('inline search expands left, suggests current titles and preserves catalog navigation', async () => {
+  await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '0' })
+  await primary('Home')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const header = page.locator('.km-topbar')
+  const field = page.locator('[data-header-search]')
+  const control = page.locator('.km-header-actions').getByRole('button', { name: 'Search', exact: true })
+  const suggestions = page.locator('.km-header-search-panel')
+  const route = page.url()
+  expect(await header.evaluate(element => getComputedStyle(element).borderBottomWidth)).toBe('0px')
+  await expect(page.locator('.km-header-actions').getByRole('link', { name: 'Search', exact: true })).toHaveCount(0)
+  await control.click()
+  await expect(field).toBeFocused()
+  await field.fill('i')
+  await expect(suggestions.getByRole('option')).toHaveCount(0)
+  await field.fill('inline slow')
+  await expect.poll(() => application.evaluate(() => process.env.KOKOMOVIE_INLINE_PENDING)).toBe('1')
+  await field.fill('inline fresh')
+  await expect(suggestions.getByRole('option')).toHaveCount(8)
+  await expect(suggestions).toContainText('inline fresh 100')
+  await expect.poll(() => application.evaluate(() => process.env.KOKOMOVIE_INLINE_SETTLED)).toBe('1')
+  await expect(suggestions).not.toContainText('inline slow')
+  await expect(page).toHaveURL(route)
+  const normalDuration = await field.evaluate(element => getComputedStyle(element).animationDuration)
+  expect(normalDuration).not.toBe('0s')
+  expect(await field.evaluate(element => getComputedStyle(element).animationName)).toBe('km-search-expand')
+  for (const width of [1440, 1024, 960]) {
+    await screenshot('inline-search', width, width === 1440 ? 900 : 768)
+    const geometry = await page.evaluate(() => {
+      const box = (selector: string) => {
+        const rect = document.querySelector(selector)!.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
+      }
+      return { field: box('[data-header-search]'), brand: box('.km-brand'), menu: box('.km-library-menu'), panel: box('.km-header-search-panel') }
+    })
+    expect(geometry.field.left).toBeGreaterThanOrEqual(geometry.brand.right + 8)
+    expect(geometry.field.right).toBeLessThanOrEqual(geometry.menu.left)
+    expect(geometry.panel.left).toBeGreaterThanOrEqual(0)
+    expect(geometry.panel.right).toBeLessThanOrEqual(width)
+    expect(geometry.panel.top).toBeGreaterThanOrEqual(geometry.field.bottom)
+  }
+  await page.keyboard.press('Escape')
+  await expect(suggestions).toHaveCount(0)
+  await expect(control).toBeFocused()
+  await page.keyboard.press('Control+k')
+  await expect(field).toBeFocused()
+  await expect(page).toHaveURL(route)
+  await field.fill('inline fresh')
+  await expect(suggestions.getByRole('option')).toHaveCount(8)
+  await field.press('ArrowDown')
+  await expect(suggestions.getByRole('option').first()).toHaveAttribute('aria-selected', 'true')
+  await field.press('Enter')
+  await expect(page).toHaveURL(/content\/00000001-0000-4000-8000-000000000064/)
+  await expect(page.getByRole('heading', { name: 'Fixture Movie 1-1', exact: true })).toBeVisible()
+  await expect(suggestions).toHaveCount(0)
+  await primary('Home')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await control.click()
+  await expect(field).toBeFocused()
+  await field.fill('inline fresh')
+  await expect(suggestions.getByRole('option')).toHaveCount(8)
+  expect(await field.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  await screenshot('inline-search-reduced', 1024, 768)
+  const libraryToggle = page.getByRole('button', { name: 'Library and tools', exact: true })
+  await libraryToggle.click()
+  await expect(suggestions).toHaveCount(0)
+  await expect(libraryToggle).toBeFocused()
+  await page.keyboard.press('Escape')
+  await writeFile(join(visual, 'inline-search-metrics.json'), JSON.stringify({ normalDuration, reducedAnimation: 'none', widths: [1440, 1024, 960], routeStableWhileTyping: true, delayedOldResponseSuppressed: true }, null, 2))
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 })

@@ -22,21 +22,22 @@
 
 **Interfaces:** Consume catalogApi.search(q, params?, 'local'), settings store, existing content summary identity and detail links. Produce HeaderSearch integrated in AppLayout. Existing /search route remains unchanged and the header omits its redundant search control there; Ctrl/Cmd+K focuses its existing input.
 
-- [ ] Read design doc, inspect existing tests/query invalidation/locale policy, and write focused failing tests for behavior changes. Avoid mirror tests for simple CSS/copy.
-- [ ] Run focused tests and record meaningful RED evidence.
-- [ ] Remove topbar separator; remove Home watchlist row/query; keep one real Continue Watching row and preserved no-hero layout.
-- [ ] Replace duplicate library links with Mi biblioteca (localized) and give History page a shared heading/description while preserving tabs and deep links.
-- [ ] Implement left-expanding header search and panel below field, debounce 300 ms, minimum two characters, up to eight results, no route change on typing, keyboard selection, Escape/focus/outside behavior, errors/retry, stale suppression, locale/maturity invalidation and reduced motion. Preserve actual API boundaries.
-- [ ] Run focused tests, TypeScript and lint for changed files; self-review. Do not alter native tests or docs yet, do not commit (root commits verified results with scoped git approval).
-- [ ] Report changed files, commands/results, RED/GREEN evidence, concerns to client/.codex/inline-implementation-report.md.
+- [x] Read design doc, inspect existing tests/query invalidation/locale policy, and write focused failing tests for behavior changes. Avoid mirror tests for simple CSS/copy.
+- [x] Run focused tests and record meaningful RED evidence.
+- [x] Remove topbar separator; remove Home watchlist row/query; keep one real Continue Watching row and preserved no-hero layout.
+- [x] Replace duplicate library links with Mi biblioteca (localized) and give History page a shared heading/description while preserving tabs and deep links.
+- [x] Implement left-expanding header search and panel below field, debounce 300 ms, minimum two characters, up to eight results, no route change on typing, keyboard selection, Escape/focus/outside behavior, errors/retry, stale suppression, locale/maturity invalidation and reduced motion. Preserve actual API boundaries.
+- [x] Run focused tests, TypeScript and lint for changed files; self-review. Do not alter native tests or docs yet, do not commit (root commits verified results with scoped git approval).
+- [x] Report changed files, commands/results, RED/GREEN evidence, concerns to client/.codex/inline-implementation-report.md.
 
 ### Task 2: Native integration, documentation and verification (root)
 
 **Files:** client/e2e/platform-ui.spec.ts, README.md, docs/current-state.md, docs/testing.md, docs/changelog.md; output report/captures; no product scope expansion.
 
-- [ ] Update native expectations for consolidated menu and removed Home watchlist; preserve SQLite library/history workflows.
-- [ ] Test real Electron inline search route stability, actual suggestions/details, keyboard/closing, normal/reduced animation, clean header and width geometry; capture screenshots.
-- [ ] Run full unit suite, renderer/main TypeScript, lint, build and native suite once on final implementation; investigate failures before changing code.
+- [x] Update native expectations for consolidated menu and removed Home watchlist; preserve SQLite library/history workflows.
+- [x] Test real Electron inline search route stability, actual suggestions/details, keyboard/closing, normal/reduced animation, clean header and width geometry; capture screenshots.
+- [x] Run full unit suite, renderer/main TypeScript, lint, build and native suite once on final implementation; investigate failures before changing code.
 - [ ] Review task diff using a fresh reviewer, fix Important/Critical issues, then broad final branch review.
-- [ ] Update v2.0.0 documents with verified results and regenerate/check local Windows package. Original installed shortcut is not replaced.
+- [x] Update v2.0.0 documents with verified results and regenerate/check local Windows package. Original installed shortcut is not replaced.
 - [ ] Commit scoped files, preserve unrelated workflow modification and recovery branches; finish on local branch.
+

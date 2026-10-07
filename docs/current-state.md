@@ -1,20 +1,26 @@
 # KokoMovie Current State
 
 **Current review:** 2026-10-07
-**Source target:** v2.0.0, branch `codex/kokomovie-v2-hbo-ui`, based on `c465dbb`.
-**Recovery point:** `codex/kokomovie-v2-0-0` remains at `c465dbb`.
+**Source target:** v2.0.0, branch `codex/kokomovie-v2-inline-search`, based on `2d9ec65`.
+**Recovery points:** `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
 **Release status:** development source; no v2.0.0 installer published or installed by this work.
 
 ## Verified v2.0.0 interface
 
 The desktop shell follows the approved five-screen HBO Max-inspired composition: a 76px
-topbar with Home/Movies/Series, the original centered logo, Search and a Library/tools menu.
-Compact windows move the primary links into that disclosure. The single Search input lives
-on SearchPage and retains URL filters, pagination, history and Ctrl+K/Cmd+K focus. The shared
+topbar without a separator, Home/Movies/Series, the original centered logo, Search and a Library/tools menu.
+Compact windows move the primary links into that disclosure. Search expands left in the header,
+showing up to eight real poster/title suggestions beneath the field after a 300ms debounce and
+at least two characters. Typing keeps the current route; selecting opens details. Keyboard selection,
+Escape focus, outside/Tab closure, Ctrl+K/Cmd+K and stale-response suppression are covered.
+Legacy `/search` links retain their single page field, URL filters, pagination and history; the
+redundant header control is omitted there. The shared
 scroll area and single PlayerHost outside Routes are preserved. No login or profiles were added.
 
-Home prioritizes real Continue Watching records in 16:9 cards and My List in 2:3 posters,
-followed by catalog rows. Movies/Series expose actual genre and trending destinations.
+Home prioritizes one real Continue Watching row in 16:9 cards, followed by catalog rows.
+Its former My List row and query are removed. A single My Library menu entry and shared
+page heading join the existing history/list tabs; `/history?tab=list` remains valid and saved
+records remain in the library. Movies/Series expose actual genre and trending destinations.
 Integrated detail artwork, keyboard season tabs and independent episode play/download
 buttons retain the existing source, resume and demand-loading workflows. Episodes form
 four/three/two columns at 1440/1152/1024px. Without a featured hero, content keeps the header
@@ -76,7 +82,7 @@ locally remember a country. TMDB/JustWatch information is grouped by subscriptio
 ads, rental and purchase, with validated landing links, attribution and cache notices.
 The country preference is stored locally; existing SQLite library export does not include it.
 
-Final source checks passed: 520 deterministic tests, thirteen Electron tests, both TypeScript
+Final source checks passed: 531 deterministic tests, fourteen Electron tests, both TypeScript
 targets, zero-error/zero-warning lint, build and licenses (227 packages/three FFmpeg targets).
 The preceding core block returned a zero-finding production audit; dependencies did not
 change during this UI refinement. The native download test used a generated

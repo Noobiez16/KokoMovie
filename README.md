@@ -41,9 +41,11 @@ artifact whose architecture matches `uname -m` (`x86_64` â†’ `x64`, `aarch64` â†
 
 The **2.0.0 development branch** introduces an HBO Max-inspired desktop composition:
 top navigation with the original centered logo, cinematic title artwork, a landscape
-Continue Watching row, My List posters, genre navigation and keyboard-operated season tabs.
-Library and tools remain available in the header menu. Search has one dedicated input with
-URL-based filters and pagination. The existing purple palette and logo bytes are preserved;
+Continue Watching row, genre navigation and keyboard-operated season tabs. The clean header
+has no separator line; My Library joins saved titles and viewing history under one menu entry.
+Search expands left in the header and suggests titles below the field as you type, keeping
+the current page until you select a detail. Existing `/search` links retain filters and pagination.
+The existing purple palette and logo bytes are preserved;
 motion respects the system's reduced-motion preference. Login and profiles are not added.
 It also adds regional viewing information, permanent completed downloads, controlled
 transfer teardown and a stricter renderer script policy.

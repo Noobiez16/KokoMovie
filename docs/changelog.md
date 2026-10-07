@@ -9,14 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
-- Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, My List posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
-- A single URL-based search field with movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
+- Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, saved-library posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
+- Inline header search expands left and progressively suggests real posters/titles below the field, without leaving the current page while typing. Selection opens details; keyboard navigation, Escape, shortcuts, retries and stale-response protection are included.
+- Existing URL-based `/search` links retain their page field, movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
 - Shared page headings and empty/error states with real retry actions; a separate Library tab for existing import/export controls.
 - Deterministic UI behavior tests and real Electron desktop smoke coverage with temporary SQLite data and credentials intercepted before startup.
 - Regional Where to watch section with an explicitly selected local country preference, separate access models, validated TMDB viewing links, JustWatch attribution and saved/outdated data notices.
 - Actual IPC/SQLite lifecycle regression coverage and a real FFmpeg/Electron test that publishes equal-title movie/episode fixtures and decodes, seeks and plays saved media with HTTP blocked.
 
 ### Changed
+- Removed the topbar separator. Home now has one Continue Watching row instead of a My List row/query. A single localized My Library menu entry and shared page heading join existing saved-list/history tabs while preserving their records and deep links.
 - Refined hero, cards, rows and details around the five approved reference compositions while preserving the logo bytes and original base palette. Shared header space remains reserved when the optional hero is absent.
 - Added scoped card/menu/route and valid Search/season entry motion with reduced-motion support. Same-route results remount only behind existing valid-data guards; loading episode placeholders do not receive the data-entry animation.
 - Movie hero Play runs existing source discovery after approved metadata; series opens episodes. Playback intent is consumed once, retaining cancellation, maturity and CAM checks.
@@ -38,6 +40,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Opening the development renderer in a regular browser now shows localized desktop guidance instead of crashing on absent Electron subscriptions. App and PlayerHost mount only when the preload bridge exists; no desktop API is exposed through HTTP.
 
 ### Verification and remaining work
+- Integrated search/library refinement: 531 deterministic tests and fourteen real Electron tests passed, both TypeScript targets, full lint with zero errors/warnings and build. Actual header/panel geometry passes at 1440/1024/960px, normal/reduced motion and delayed-response suppression are verified; original logo/palette and version 2.0.0 are preserved.
 - Renderer runtime correction: 520 deterministic tests and thirteen real Electron tests passed, with both TypeScript targets, zero-error/zero-warning lint and build. The development browser and compiled no-preload Chromium guidance were verified.
 - Final HBO-inspired UI block: 518 deterministic tests and twelve real Electron tests passed, alongside both TypeScript targets, zero-error/zero-warning lint, production build and licenses. Native checks cover 1440/1152/1024 episode geometry, EN/ES/FR, no-hero header space, same-route results, keyboard seasons and reduced motion.
 - Inspected motion belongs to KokoMovie; exact HBO Max macOS timings remain unverified. The selected Behance concept is static and unofficial. Existing Vite/SQLite/build warnings remain documented separately from clean lint.

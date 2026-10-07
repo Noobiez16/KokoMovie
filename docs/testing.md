@@ -1,9 +1,36 @@
 # Testing and Regression Baseline
 
-**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-hbo-ui`.
-Final source checks: 520 deterministic tests and thirteen real Electron tests passed;
+**Current verification:** 2026-10-07, v2.0.0, `codex/kokomovie-v2-inline-search`.
+Final source checks: 531 deterministic tests and fourteen real Electron tests passed;
 both TypeScript targets, lint (zero errors/warnings), build and licenses passed.
 The interface/core counts below record earlier completed blocks.
+
+### Integrated search and library refinement
+
+- Native RED reproduced the old 1px topbar separator; the compiled header now has no border.
+  Home has one Continue Watching row with real SQLite positions and no saved-list row/query.
+  One My Library entry and shared heading retain list/history tabs, deep links and saved records.
+- Ten focused inline regressions cover 300ms debounce/minimum length, delayed responses,
+  eight-result limit, keyboard detail identity, errors/retry/empty state, focus, shortcuts,
+  same-page navigation/Back cleanup and locale/maturity refresh suppression. Menu/search
+  overlap was reproduced RED and corrected with focus-preserving disclosure closure.
+- Real Electron verifies no typing navigation, actual IPC-backed suggestions, an old delayed
+  response arriving after the latest result, keyboard selection, Escape and outside focus.
+  Captures and actual geometry at 1440/1024/960px show no overlap with brand/menu or viewport overflow.
+  Chromium confirms the 260ms left-reveal input animation and its removal under reduced motion.
+- Legacy `/search` links retain URL/type/page/Back and result-entry coverage. EN/ES/FR,
+  SQLite library/resume persistence, no-hero spacing, privileged boundaries and real offline
+  FFmpeg playback remain covered. Closed inline search performs no preference/catalog queries.
+- Fresh final gate: 531 units, fourteen native tests (28.2s), both TypeScript targets,
+  build and full lint with zero errors/warnings. No dependencies, main/IPC or player changes.
+  Logo hash/base palette match the recovery source; all versions remain 2.0.0.
+- The local Windows x64 unpacked package was regenerated with publication disabled.
+  Version 2.0.0, resources, native modules, FFmpeg, production CSP and executable fuses
+  passed inspection; its renderer bundle matches the tested source build and includes
+  inline search. The unsigned package was not installed; the desktop shortcut remains unchanged.
+
+The dedicated Search field and Home saved-list composition in the historical HBO block
+below were superseded by the user's integrated-search/library refinement.
 
 ### Desktop runtime guidance
 
