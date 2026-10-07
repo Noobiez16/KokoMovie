@@ -8,7 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [2.0.0] — Unreleased
 
 ### Added
--Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
+- Top navigation with the original centered logo, compact library/tools disclosure, keyboard search shortcuts, and a direct Continue Watching page using existing local records. Login and profile selection remain outside scope.
 - Cinematic Home/Movies Featured, real genre navigation, landscape resume cards, My List posters, integrated detail heroes, keyboard season tabs and responsive episode cards with separate play/download controls.
 - A single URL-based search field with movie/series endpoints, pagination, filter-preserving submission, Back/Forward support and usable cached/downloaded fallback pages.
 - Shared page headings and empty/error states with real retry actions; a separate Library tab for existing import/export controls.
