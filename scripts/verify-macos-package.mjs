@@ -15,7 +15,7 @@ for (const binary of [join(app, 'Contents/MacOS/KokoMovie'), ffmpeg,
   join(resources, `app.asar.unpacked/node_modules/better-sqlite3/prebuilds/darwin-${arch}.node`),
   join(resources, 'app.asar.unpacked/node_modules/keytar/build/Release/keytar.node')]) {
   if (!existsSync(binary)) throw new Error(`Missing packaged macOS binary: ${binary}`)
-  execFileSync('lipo', ['-verify_arch', binaryArch, binary], { stdio: 'inherit' })
+  execFileSync('lipo', [binary, '-verify_arch', binaryArch], { stdio: 'inherit' })
 }
 execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app], { stdio: 'inherit' })
 if (!readFileSync(join(resources, 'ffmpeg/LICENSE.txt'), 'utf8').includes('LESSER GENERAL PUBLIC LICENSE')) throw new Error('Missing LGPL license')

@@ -28,8 +28,14 @@ quarantined downloads, Apple notarization or a real installed upgrade on custome
 The complete assembly gate runs before tags through workflow_dispatch. It requires all five
 native targets, validates actual updater hashes, combines architecture-specific Mac metadata,
 includes licenses/corresponding Mac FFmpeg source and checks every flat SHA256SUMS.txt entry.
-Only the tag-triggered publication job creates a release. CI evidence will be appended here
-before tagging; local Linux checks alone cannot establish Mac packaging success.
+Only the tag-triggered publication job creates a release. The initial preparation run
+[40277401500](https://github.com/Noobiez16/KokoMovie/actions/runs/40277401500) passed hosted
+quality, all twenty Linux Electron tests, Windows and both Linux package jobs. Both Mac
+runners built FFmpeg and passed all seven native Electron checks. Apple Silicon DMG/ZIP
+packaging succeeded, then the package verifier failed because lipo interpreted the trailing
+binary path as another architecture. The command now puts its input before -verify_arch.
+No release tag was created. Complete Mac verification and final artifact assembly must pass
+on the corrected preparation commit before tagging; local Linux checks alone are insufficient.
 
 ## Provider recovery and 4K — 2026-10-26
 

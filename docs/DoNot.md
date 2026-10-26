@@ -14,6 +14,11 @@ match the runner. BtbN has no Mac binaries: build the pinned official LGPL sourc
 disable external-library autodetection and verify only system dylibs are required. Do not
 substitute an npm binary whose license metadata differs from its configure flags.
 
+Apple lipo's -verify_arch consumes every following argument as an architecture. Put the
+input binary first: lipo <binary> -verify_arch <architecture>. The initial Mac preparation
+run built both native runtimes but caught this verifier argument-order error after Apple
+Silicon packaging; do not weaken or remove the architecture check to bypass it.
+
 Changing Electron fuses invalidates its original signature. Explicit ad-hoc signing follows
 packing, and the bundle needs JIT and disable-library-validation entitlements. Verify deep
 signatures and launch the actual hardened bundle; never disable fuses to make automation work.

@@ -1,5 +1,9 @@
 # Changelog
 
+All notable changes to KokoMovie PC are documented here.  
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
+Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [2.1.0] — 2026-10-26
 
 - Added native macOS Intel (x64) and Apple Silicon (arm64) DMG and ZIP builds. macOS
@@ -10,7 +14,6 @@
 - macOS builds are ad-hoc signed and use manual updates. They are not Apple-notarized;
   Gatekeeper approval may be required. Windows and Linux update delivery is unchanged.
 - App, lockfiles, changelog and release tag use v2.1.0 consistently. The default local packager now dispatches to the same configuration as the native release job.
-
 - Added a persistent Like toggle and Home suggestions ranked from local likes, meaningful
   watch history and My List, with bounded related-title lookups and maturity filtering.
 - Added likes to manual library portability, retaining imports of older exports.
@@ -29,9 +32,6 @@
   probe the highest compatible master variant and prefer 4K for compatible HLS downloads.
   Explicit HEVC/Dolby Vision variants follow the existing unsupported-codec policy.
 
-All notable changes to KokoMovie PC are documented here.  
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
-Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 ## [2.0.0] — 2026-10-07
