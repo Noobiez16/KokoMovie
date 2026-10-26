@@ -2,6 +2,20 @@
 
 ## v2.1.0 Mac release preparation — 2026-10-26
 
+**Final pre-tag verification:** [40280426316](https://github.com/Noobiez16/KokoMovie/actions/runs/40280426316)
+passed the complete corrected workflow on source commit `d7161c1`. Hosted quality passes 723
+units, strict types/lint, audit, licensing/build and fuses. All 20 Linux Electron tests pass.
+Windows x64 NSIS, Linux x64/ARM64 AppImage/deb and macOS Intel/Apple Silicon DMG/ZIP jobs pass.
+Each Mac runner passes seven native Electron/SQLite/security cases, staged Mach-O architecture,
+deep ad-hoc signature verification, actual packaged FFmpeg AAC/MP4 execution, bounded hardened
+startup and production-fuse readback before archive creation. Mac ARM64 completed in 6m44s
+and Intel in 9m38s; these are observed job timings, not a general performance guarantee.
+
+The final assembly job passed in 2m1s, validating required assets, actual SHA-512 updater hashes,
+combined Mac metadata, the exact FFmpeg source archive, notices and flat SHA256SUMS.txt entries.
+Publication was correctly skipped for manual dispatch. The v2.1.0 tag must point to this verified
+source plus documentation-only evidence updates; its own workflow determines publication.
+
 Local preparation verification passes **721 deterministic tests across 98 files**, **20 real
 Electron tests in 1.8 minutes**, strict renderer/main/E2E TypeScript, zero-warning lint,
 production build, production audit, 227-package/LGPL license checks and runtime fuse checks.

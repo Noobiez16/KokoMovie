@@ -2,7 +2,7 @@
 
 **Current review:** 2026-10-26
 **Source target:** v2.1.0. Root/client packages, lockfile and changelog use 2.1.0; release tag is v2.1.0.
-**Status:** release preparation on `codex/kokomovie-v2-1-0-macos`; tag creation waits for hosted CI. Preparation runs caught a Mac lipo argument-order error and direct-source connection timeouts. The verifier is corrected; source acquisition is shared through a verified artifact with bounded retries, and staged Mac bundles are checked before compression. A complete hosted rerun is required. Local verification passes 723 units, 20 Electron tests, strict TypeScript, lint, build, audit, licenses and fuses. See testing.md.
+**Status:** v2.1.0 source and all five installer targets are verified. Preparation run [40280426316](https://github.com/Noobiez16/KokoMovie/actions/runs/40280426316) passed hosted quality, native Electron/Mac startup/media/signature/fuse checks, every package job and complete artifact assembly. The tag-triggered workflow determines publication at [v2.1.0](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.1.0). Local verification passes 723 units, 20 Electron tests, strict TypeScript, lint, build, audit, licenses and fuses. Earlier preparation failures and their corrections are recorded in testing.md.
 **Platforms:** Windows x64; Linux x64/amd64 and ARM64; macOS Intel x64 and Apple Silicon ARM64 (macOS 12+).
 
 The v2.1.0 release combines local Likes/personal suggestions, CAM evidence/player warnings,
