@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 interface Props {
   title: string
+  description?: string
   items: ContentSummary[]
   size?: 'sm' | 'md' | 'lg'
   variant?: 'poster' | 'landscape'
@@ -13,7 +14,7 @@ interface Props {
   onRemove?: (id: string) => void
 }
 
-export function ContentRow({ title, items, size = 'md', variant = 'poster', onViewAll, onRemove }: Props) {
+export function ContentRow({ title, description, items, size = 'md', variant = 'poster', onViewAll, onRemove }: Props) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
 
@@ -27,7 +28,9 @@ export function ContentRow({ title, items, size = 'md', variant = 'poster', onVi
   return (
     <section className="catalog-row km-content-row mb-10">
       <div className="flex items-center justify-between mb-4 km-catalog-gutter">
-        <h2 className="text-white font-semibold text-lg tracking-tight">{title}</h2>
+        <div><h2 className="text-white font-semibold text-lg tracking-tight">{title}</h2>
+          {description && <p className="mt-1 text-sm text-purple-200/60">{description}</p>}
+        </div>
         {onViewAll && (
           <button
             type="button"

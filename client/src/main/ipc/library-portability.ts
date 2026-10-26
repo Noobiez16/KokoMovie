@@ -12,7 +12,7 @@ import {
 import { basename, join } from 'path'
 import { z } from 'zod'
 import { getDb } from '../db/sqlite.js'
-import type { PositionRow, PreferencesRow, WatchlistRow } from './library.js'
+import type { LikeRow, PositionRow, PreferencesRow, WatchlistRow } from './library.js'
 import { trustedIpcHandler } from './security.js'
 import {
   incomingWins,
@@ -69,6 +69,7 @@ export function buildPayload(includeArtwork: boolean): LibraryExportPayload {
     library: {
       watchlist: db.prepare('SELECT * FROM watchlist ORDER BY added_at').all() as WatchlistRow[],
       positions: db.prepare('SELECT * FROM playback_positions ORDER BY updated_at').all() as PositionRow[],
+      likes: db.prepare('SELECT * FROM likes ORDER BY updated_at').all() as LikeRow[],
       preferences: db.prepare(
         'SELECT language, subtitle_default, autoplay, maturity_rating, source_discovery_mode FROM preferences WHERE id = 1',
       ).get() as PreferencesRow,
@@ -90,6 +91,7 @@ function previewPayload(payload: LibraryExportPayload): LibraryImportPreview {
   return {
     watchlist: payload.library.watchlist.length,
     positions: payload.library.positions.length,
+    likes: payload.library.likes?.length ?? 0,
     artwork: payload.artwork?.length ?? 0,
     watchlistConflicts: payload.library.watchlist.filter((row) => watchlistIds.has(row.content_id)).length,
     positionConflicts: payload.library.positions.filter((row) => positionIds.has(positionKey(row))).length,
@@ -130,12 +132,14 @@ function restoreArtwork(payload: LibraryExportPayload): number {
 export function applyPayload(payload: LibraryExportPayload, mode: 'merge' | 'replace'): {
   watchlist: number
   positions: number
+  likes: number
 } {
   const db = getDb()
   const apply = db.transaction(() => {
     if (mode === 'replace') {
       db.prepare('DELETE FROM watchlist').run()
       db.prepare('DELETE FROM playback_positions').run()
+      db.prepare('DELETE FROM likes').run()
     }
 
     const watchlistExisting = db.prepare(
@@ -187,6 +191,17 @@ export function applyPayload(payload: LibraryExportPayload, mode: 'merge' | 'rep
       }
     }
 
+    let likes = 0
+    const likeExisting = db.prepare('SELECT updated_at FROM likes WHERE content_id = ?')
+    const likeWrite = db.prepare(`INSERT INTO likes (content_id, content_type, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(content_id) DO UPDATE SET content_type = excluded.content_type, updated_at = excluded.updated_at`)
+    for (const row of payload.library.likes ?? []) {
+      const existing = likeExisting.get(row.content_id) as { updated_at: string } | undefined
+      if (mode === 'replace' || !existing || incomingWins(existing.updated_at, row.updated_at)) {
+        likeWrite.run(row.content_id, row.content_type, row.updated_at)
+        likes++
+      }
+    }
     const preferences = payload.library.preferences
     db.prepare(
       `UPDATE preferences SET language = ?, subtitle_default = ?, autoplay = ?, maturity_rating = ?, source_discovery_mode = ?
@@ -198,7 +213,7 @@ export function applyPayload(payload: LibraryExportPayload, mode: 'merge' | 'rep
       preferences.maturity_rating,
       preferences.source_discovery_mode,
     )
-    return { watchlist, positions }
+    return { watchlist, positions, likes }
   })
   return apply()
 }

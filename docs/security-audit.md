@@ -1,3 +1,13 @@
+# v2.1.0 distribution update — 2026-10-26
+
+The audit below is historical. Current macOS Intel/Apple Silicon packages are ad-hoc signed,
+not Apple-notarized, and use manual updates. Native package checks cover architecture,
+code-signature integrity, FFmpeg execution, provenance and Electron fuses. Official Mac FFmpeg
+source is SHA-256-pinned and published with the release; GPL/nonfree/external autodetection
+are disabled. Release assembly verifies actual updater hashes and all platform assets before
+publication. Windows/Linux publisher-identity limitations remain. See SECURITY-MODEL.md,
+THIRD-PARTY-NOTICES.md and testing.md for current evidence and residual limits.
+
 # KokoMovie — Security Audit
 
 **Version:** 1.5.2
@@ -181,8 +191,7 @@ a manual save dialog. Nothing is transmitted automatically. No telemetry or anal
 - **Updates.** `electron-updater` over HTTPS from GitHub Releases with SHA-512 block-map
   verification; downgrades are refused. Installers are **unsigned** on Windows and Linux — users
   may see OS trust prompts and there is no platform-level publisher identity. Every release
-  therefore publishes `SHA256SUMS.txt` for manual verification. macOS stays build-only until Apple
-  signing and notarization are configured.
+  therefore publishes `SHA256SUMS.txt` for manual verification. The original Mac build-only limitation is superseded by the v2.1.0 update above.
 
 ---
 

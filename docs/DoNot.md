@@ -4,6 +4,66 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 
 ---
 
+## DN-057: Mac release targets need native media, valid signatures and collision-free metadata
+
+**Date:** 2026-10-26
+**Area:** Mac packaging, FFmpeg vendoring, updater and release workflow.
+
+A DMG target alone is not Mac support. Native SQLite/keytar/Electron/FFmpeg architecture must
+match the runner. BtbN has no Mac binaries: build the pinned official LGPL source natively,
+disable external-library autodetection and verify only system dylibs are required. Do not
+substitute an npm binary whose license metadata differs from its configure flags.
+
+Changing Electron fuses invalidates its original signature. Explicit ad-hoc signing follows
+packing, and the bundle needs JIT and disable-library-validation entitlements. Verify deep
+signatures and launch the actual hardened bundle; never disable fuses to make automation work.
+Ad-hoc is not Apple Developer ID/notarization, so use manual updates until a separately
+validated signing migration supports automatic upgrades.
+
+Separate Intel and ARM jobs each emit latest-mac.yml. Keep them in separate artifact folders,
+validate actual hashes, and merge both architecture entries before publication. Run complete
+artifact assembly on branch workflow_dispatch, not only after a tag. Package/lock/changelog/tag
+versions must agree. Use the platform dispatcher for local builds so the default config cannot
+drift back to obsolete signing keys or omit bundled FFmpeg.
+
+## DN-056: A pinned source must still have a terminal loading state
+
+**Date:** 2026-10-26
+**Area:** provider IPC, `VideoPlayer.tsx`, playback deadlines and HLS recovery.
+
+A manual source/audio pick prevents silent automatic replacement; it does not permit endless
+loading. A no-progress startup expires after 12 seconds, progressing startup after 45 seconds,
+and torrent seek preparation after 90 seconds. Cached sources bypass redundant extraction and
+header-registration waits. All switch exits must clear the overlay, restore a usable outgoing
+source or show a recoverable error, and reject late responses from superseded sessions.
+Keep the local-media capability when constructing torrent seek URLs.
+
+HLS.js handles nonfatal retries itself. Fatal network errors have already exhausted its load
+policy; repeatedly calling `startLoad()` resets the retry budget. Media recovery needs a real
+media error, a minimum five-second spacing and a finite count. A rejected autoplay request
+needs an explicit Play action. Retry must obtain a fresh media lifecycle even for the same URL.
+Probe the highest compatible master rendition before assigning 4K; file dimensions do not
+certify release quality. Do not manufacture missing quality options or disable HLS AUTO.
+
+References: [hls.js fatal error recovery](https://github.com/video-dev/hls.js/blob/master/docs/API.md#fatal-error-recovery),
+[HTMLMediaElement.play](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/play),
+[playing event](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/playing_event).
+
+## DN-055: Release evidence and encoded resolution are separate
+
+**Date:** 2026-10-26
+**Area:** `source-quality.ts`, main provider probes and player notices.
+
+CAM copies may be encoded at 1080p or 4K. Classification must retain root/redirect URL,
+server-filename and inspected child-playlist evidence, decode bounded release markers,
+and let camera evidence override WEB-DL claims. Unknown is not a verified clean release;
+show the unverified movie notice while preserving real encoded quality choices. Ordinary
+`.ts` transport-stream segment extensions are not a telesync label.
+
+Identical validation probes may be shared within one search only when both URL and headers
+match. Never carry that cache into a fresh lookup or share it across different credentials.
+Keep CAM confirmation and the persistent player's identity unchanged.
+
 ## DN-001: VideoPlayer must handle both HLS and direct video URLs
 
 **Date:** 2026-05-19  

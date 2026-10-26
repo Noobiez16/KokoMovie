@@ -8,6 +8,17 @@ export interface ManagedProviderRequest {
   finish: () => void
 }
 
+/** Covers async operations (such as DNS) whose callback API has no AbortSignal. */
+export function abortableProviderOperation<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => { cleanup(); reject(new Error('Provider request cancelled or timed out')) }
+    const cleanup = () => signal.removeEventListener('abort', aborted)
+    operation.then(value => { cleanup(); resolve(value) }, error => { cleanup(); reject(error) })
+    if (signal.aborted) { aborted(); return }
+    signal.addEventListener('abort', aborted, { once: true })
+  })
+}
+
 /** Keeps at most one bounded direct-provider extraction per renderer. */
 export class SupersedingRequestRegistry {
   private readonly active = new Map<number, ActiveRequest>()

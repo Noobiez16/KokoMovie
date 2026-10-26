@@ -30,5 +30,12 @@ Obligations satisfied for each release:
 - FFmpeg's corresponding source is available from BtbN/FFmpeg-Builds and ffmpeg.org.
 - The executable is installed outside `app.asar` so users can replace it (LGPL §4).
 
-macOS is build-only and no LGPL FFmpeg binary is vendored for it; a macOS build must source and
-verify one before that platform ships. See `THIRD-PARTY-NOTICES.md`. This is not legal advice.
+macOS Intel and Apple Silicon packages compile unmodified official FFmpeg 8.1.2 source with
+LGPLv3 enabled, GPL/nonfree disabled and external-library autodetection disabled. The source
+archive is checksum-pinned, published with the release and identified in packaged provenance.
+See `THIRD-PARTY-NOTICES.md` for the exact source URL and integrity pin.
+
+Windows/Linux artifacts are unsigned. macOS artifacts are ad-hoc signed and not notarized;
+this does not provide Apple Developer ID publisher identity. Mac users may need per-app
+Gatekeeper approval and install updates manually. SHA256SUMS.txt covers all release assets.
+This is not legal advice.

@@ -1,10 +1,20 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SupersedingRequestRegistry } from '../../main/providers/request-lifecycle'
+import { SupersedingRequestRegistry, abortableProviderOperation } from '../../main/providers/request-lifecycle'
 
 afterEach(() => vi.useRealTimers())
 
 describe('SupersedingRequestRegistry', () => {
+  it('settles a DNS callback that never returns when the request expires', async () => {
+    vi.useFakeTimers()
+    const request = new SupersedingRequestRegistry().begin(7, 1000)
+    const pending = abortableProviderOperation(new Promise(() => {}), request.signal)
+    const assertion = expect(pending).rejects.toThrow('Provider request cancelled or timed out')
+    await vi.advanceTimersByTimeAsync(1000)
+    await assertion
+    request.finish()
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it('aborts the previous request for the same renderer', () => {
     const registry = new SupersedingRequestRegistry()
     const first = registry.begin(7, 20_000)

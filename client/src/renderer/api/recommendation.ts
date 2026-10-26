@@ -4,6 +4,7 @@ import { applyCatalogMaturity, catalogApi, tmdbItemsToSummaries } from './catalo
 import { createTmdbClient, decodeTmdbContentId } from '../lib/tmdb'
 import { useSettingsStore } from '../store/settings'
 import i18n from '../i18n'
+import { rankRecommendations, selectRecommendationSeeds } from '../lib/personal-recommendations'
 
 export interface RecommendationRow {
   id: string
@@ -12,6 +13,22 @@ export interface RecommendationRow {
 }
 
 export const recommendationApi = {
+  getPersonalized: async () => {
+    const bridge = window.electronAPI
+    if (!bridge || !useSettingsStore.getState().tmdbApiKey?.trim()) return { data: [] as ContentSummary[] }
+    const [likes, watchlist, positions] = await Promise.all([
+      bridge.likesList?.() ?? [], bridge.watchlistList(), bridge.positionList(),
+    ])
+    const seeds = selectRecommendationSeeds({ likes, watchlist, positions })
+    const excluded = new Set([...likes, ...watchlist, ...positions].map(row => row.content_id))
+    // At most six existing, cache-backed TMDB recommendation endpoints. Only seed
+    // title IDs are used for catalog requests; the library itself stays on-device.
+    const pools = await Promise.all(seeds.map(async seed => {
+      try { return { weight: seed.weight, items: (await recommendationApi.getSimilar(seed.contentId)).data } }
+      catch { return { weight: seed.weight, items: [] as ContentSummary[] } }
+    }))
+    return { data: rankRecommendations(pools, excluded) }
+  },
   getHomeRows: async (_profileId?: string) => {
     const home = await catalogApi.getHome({})
     const rows: RecommendationRow[] = [

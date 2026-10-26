@@ -12,6 +12,7 @@ const boundary = vi.hoisted(() => ({
   mode: 'progressive',
   extract: vi.fn(),
   request: vi.fn(),
+  lookup: vi.fn(),
 }))
 
 vi.mock('electron', () => ({
@@ -26,7 +27,7 @@ vi.mock('fs', async (original) => {
       ? JSON.stringify(boundary.preferences) : (actual.readFileSync as any)(path, ...args) }
 })
 vi.mock('dns', async (original) => ({ ...await original<typeof import('dns')>(),
-  lookup: (_hostname: string, _options: unknown, callback: (...args: any[]) => void) => callback(null, '8.8.8.8', 4),
+  lookup: boundary.lookup,
 }))
 vi.mock('https', async (original) => ({ ...await original<typeof import('https')>(), request: boundary.request }))
 vi.mock('../../main/db/sqlite', () => ({ getDb: () => ({ prepare: () => ({ get: () => ({ source_discovery_mode: boundary.mode }) }) }) }))
@@ -38,11 +39,11 @@ import { getStandardHeight, registerProvidersIpc } from '../../main/ipc/provider
 import { setTrustedRendererWebContentsId } from '../../main/ipc/security'
 
 type SearchResult = ProviderResult & { allStreams?: ProviderResult[]; sourceStatuses?: ProviderSourceStatus[] }
-interface Fixture { delay?: number; resolution?: number; release?: string; body?: string; status?: number; hang?: boolean; direct?: boolean; probeDelay?: number; neverEnd?: boolean; redirect?: string; headers?: Record<string, string>; gzip?: boolean; responseFailure?: 'error' | 'aborted' }
+interface Fixture { url?: string; variantBody?: string; disposition?: string; delay?: number; resolution?: number; release?: string; body?: string; status?: number; hang?: boolean; direct?: boolean; probeDelay?: number; neverEnd?: boolean; redirect?: string; headers?: Record<string, string>; gzip?: boolean; responseFailure?: 'error' | 'aborted' }
 const fixtures = new Map<string, Fixture>()
 const request = { type: 'movie', tmdbId: 123 } as const
 const frame = { url: 'http://localhost:5173/' }
-const sender = { id: 19, mainFrame: frame, send: vi.fn() }
+const sender = { id: 19, mainFrame: frame, send: vi.fn(), once: vi.fn(), removeListener: vi.fn() }
 const event = { sender, senderFrame: frame } as unknown as IpcMainInvokeEvent
 
 function sources(entries: Array<[string, Fixture]>) {
@@ -68,6 +69,7 @@ beforeEach(() => {
   boundary.mode = 'progressive'
   boundary.extract.mockReset()
   boundary.request.mockReset()
+  boundary.lookup.mockReset().mockImplementation((_host: string, _options: unknown, callback: (...args: unknown[]) => void) => callback(null, '8.8.8.8', 4))
   sender.send.mockClear()
   setTrustedRendererWebContentsId(sender.id, frame.url)
   registerProvidersIpc()
@@ -76,14 +78,14 @@ beforeEach(() => {
     const provider = getBundledProviders().find((item) => new URL(item.getEmbedUrl(request)!).hostname === new URL(embedUrl).hostname)!
     return new Promise((resolve) => {
       if (fixture.hang) { options.signal.addEventListener('abort', () => resolve(null), { once: true }); return }
-      setTimeout(() => resolve({ url: `https://cdn.example.test/${provider.id}/${fixture.release ?? 'unknown'}/video.${fixture.direct ? 'mp4' : 'm3u8'}`, headers: fixture.headers ?? {} }), fixture.delay ?? 0)
+      setTimeout(() => resolve({ url: fixture.url ?? `https://cdn.example.test/${provider.id}/${fixture.release ?? 'unknown'}/video.${fixture.direct ? 'mp4' : 'm3u8'}`, headers: fixture.headers ?? {} }), fixture.delay ?? 0)
     })
   })
   boundary.request.mockImplementation((url: string, _options: unknown, callback: (response: EventEmitter) => void) => {
     const fixture = fixtures.get(new URL(url).pathname.split('/')[1]!)!
-    const body = fixture.body ?? `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=${(fixture.resolution ?? 720) * 16 / 9}x${fixture.resolution ?? 720}\nvariant.m3u8`
+    const body = (!new URL(url).pathname.endsWith('/video.m3u8') ? fixture.variantBody : undefined) ?? fixture.body ?? `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=${(fixture.resolution ?? 720) * 16 / 9}x${fixture.resolution ?? 720}\nvariant.m3u8`
     const redirected = fixture.redirect && new URL(url).pathname.endsWith('video.m3u8')
-    const response = Object.assign(new EventEmitter(), { statusCode: redirected ? 302 : fixture.status ?? 200, headers: { 'content-type': fixture.direct ? 'video/mp4' : 'application/vnd.apple.mpegurl', ...(redirected ? { location: fixture.redirect } : {}), ...(fixture.gzip ? { 'content-encoding': 'gzip' } : {}) }, destroy: vi.fn(function (this: EventEmitter) { this.emit('aborted'); this.emit('error', new Error('fixture response destroyed')) }) })
+    const response = Object.assign(new EventEmitter(), { statusCode: redirected ? 302 : fixture.status ?? 200, headers: { 'content-type': fixture.direct ? 'video/mp4' : 'application/vnd.apple.mpegurl', ...(redirected ? { location: fixture.redirect } : {}), ...(fixture.gzip ? { 'content-encoding': 'gzip' } : {}), ...(fixture.disposition ? { 'content-disposition': fixture.disposition } : {}) }, destroy: vi.fn(function (this: EventEmitter) { this.emit('aborted'); this.emit('error', new Error('fixture response destroyed')) }) })
     const outgoing = Object.assign(new EventEmitter(), { destroy: vi.fn(), end: () => {
       callback(response)
       const sendBody = () => {
@@ -103,6 +105,85 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); setTrustedRendererWebContentsId(null) })
 
 describe('registered source discovery IPC', () => {
+  it('probes the highest compatible 4K variant instead of validating only the first 720p entry', async () => {
+    sources([['vidbinge', { body: '#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1280x720,BANDWIDTH=2000000,CODECS="avc1.64001f"\n720.m3u8\n#EXT-X-STREAM-INF:RESOLUTION=3840x2160,BANDWIDTH=12000000,CODECS="avc1.640033"\n4k.m3u8', variantBody: '#EXTM3U\n#EXTINF:200,\nsegment.ts\n#EXT-X-ENDLIST' }]])
+    const lookup = search()
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await lookup.promise)?.streams[0]?.qualityInfo?.resolution).toBe(2160)
+    expect(boundary.request.mock.calls[1]?.[0]).toBe('https://cdn.example.test/vidbinge/unknown/4k.m3u8')
+  })
+
+  it('does not advertise an explicitly unsupported HEVC 4K rendition as the best playable tier', async () => {
+    sources([['vidbinge', { body: '#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=3840x2160,CODECS="hvc1.1.6.L153.B0"\n4k.m3u8\n#EXT-X-STREAM-INF:RESOLUTION=1920x1080,CODECS="avc1.640028"\n1080.m3u8', variantBody: '#EXTM3U\n#EXTINF:200,\nsegment.ts\n#EXT-X-ENDLIST' }]])
+    const lookup = search()
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await lookup.promise)?.streams[0]?.qualityInfo?.resolution).toBe(1080)
+    expect(boundary.request.mock.calls[1]?.[0]).toContain('/1080.m3u8')
+  })
+
+  it.each([{ status: 403 }, { body: 'upstream temporarily unavailable' }, { variantBody: '<HTML>Forbidden</HTML>' }])('rejects invalid manual-provider streams instead of opening an endless loader: %j', async fixture => {
+    sources([['vidbinge', fixture]])
+    const pending = boundary.handlers.get('providers:getStream')!(event, 'vidbinge', request) as Promise<ProviderResult>
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await pending).streams).toEqual([])
+  })
+
+  it('applies the direct-provider deadline even when DNS never calls back', async () => {
+    sources([['vidbinge', {}]])
+    boundary.lookup.mockImplementation(() => {})
+    const pending = boundary.handlers.get('providers:getStream')!(event, 'vidbinge', request) as Promise<ProviderResult>
+    await vi.advanceTimersByTimeAsync(20001)
+    expect((await pending).streams).toEqual([])
+    expect(boundary.extract).not.toHaveBeenCalled()
+  })
+
+  it('cancels the actual main-process provider request before late DNS completion', async () => {
+    sources([['vidbinge', {}]])
+    boundary.lookup.mockImplementation(() => {})
+    const pending = boundary.handlers.get('providers:getStream')!(event, 'vidbinge', request) as Promise<ProviderResult>
+    expect(boundary.handlers.get('providers:cancel-request')!(event)).toEqual({ ok: true })
+    expect((await pending).streams).toEqual([])
+    expect(boundary.extract).not.toHaveBeenCalled()
+  })
+
+  it('keeps CAM evidence from a child playlist even when the master claims WEB-DL 1080p', async () => {
+    sources([['vidbinge', { resolution: 1080, release: 'web-dl', variantBody: '#EXTM3U\n#EXTINF:200,\nMovie.HDCAMRip.1080p.ts\n#EXT-X-ENDLIST' }]])
+    const lookup = search()
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await lookup.promise)?.streams[0]?.qualityInfo).toMatchObject({ releaseType: 'cam', displayLabel: 'CAM', resolution: 1080 })
+  })
+
+  it('keeps a server filename warning for a direct video', async () => {
+    sources([['vidbinge', { direct: true, disposition: 'inline; filename="Movie.HDCAMRip.mp4"' }]])
+    const lookup = search()
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await lookup.promise)?.streams[0]?.qualityInfo?.releaseType).toBe('cam')
+  })
+
+  it('validates a shared stream once per search without reusing results in a fresh lookup', async () => {
+    const url = 'https://cdn.example.test/shared/web-dl/video.m3u8'
+    sources([['vidbinge', { url }], ['vidsrc', { url }]])
+    fixtures.set('shared', { resolution: 2160, probeDelay: 200 })
+    const first = search('first-shared')
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await first.promise)?.allStreams).toHaveLength(1)
+    expect(boundary.request).toHaveBeenCalledTimes(2) // one master and one variant
+    const second = search('second-shared')
+    await vi.advanceTimersByTimeAsync(500)
+    await second.promise
+    expect(boundary.request).toHaveBeenCalledTimes(4)
+  })
+
+  it('never shares probes with different source credentials', async () => {
+    const url = 'https://cdn.example.test/shared/web-dl/video.m3u8'
+    sources([['vidbinge', { url, headers: { Referer: 'https://first.example/' } }], ['vidsrc', { url, headers: { Referer: 'https://second.example/' } }]])
+    fixtures.set('shared', { resolution: 2160, probeDelay: 200 })
+    const lookup = search()
+    await vi.advanceTimersByTimeAsync(500)
+    await lookup.promise
+    expect(boundary.request).toHaveBeenCalledTimes(4)
+  })
+
   it.each([1440, 2160])('waits beyond 3500ms for later %ip instead of early 720p', async (resolution) => {
     sources([['vidbinge', { delay: 100, resolution: 720, release: 'web-dl' }], ['vidsrc', { delay: 8000, resolution }]])
     const lookup = search()

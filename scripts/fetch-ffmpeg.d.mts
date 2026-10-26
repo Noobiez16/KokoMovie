@@ -11,3 +11,8 @@ export declare const FFMPEG_RELEASE: string
 export declare const FFMPEG_VERSION: string
 export declare const FFMPEG_TARGETS: Record<string, FfmpegTargetSpec>
 export declare function fetchTarget(target: string): Promise<string>
+export declare const MACOS_FFMPEG_SOURCE: { version: string; release: string; asset: string; url: string; sha256: string }
+export declare const MACOS_FFMPEG_TARGETS: string[]
+export declare function macosConfigureArgs(arch: string): string[]
+export declare function assertLgplConfiguration(binaryPath: string, target: string): string
+export declare function buildMacosTarget(target: string): Promise<string>

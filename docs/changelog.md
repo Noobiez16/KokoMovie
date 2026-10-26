@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.1.0] — 2026-10-26
+
+- Added native macOS Intel (x64) and Apple Silicon (arm64) DMG and ZIP builds. macOS
+  bundles a checksum-pinned, native LGPL FFmpeg build from official 8.1.2 source.
+- Added Mac runner, architecture, native-module, code-signature, FFmpeg execution and
+  Electron security checks. Release assembly validates every platform before publication,
+  combines Mac metadata without architecture collisions and hashes all downloadable assets.
+- macOS builds are ad-hoc signed and use manual updates. They are not Apple-notarized;
+  Gatekeeper approval may be required. Windows and Linux update delivery is unchanged.
+- App, lockfiles, changelog and release tag use v2.1.0 consistently. The default local packager now dispatches to the same configuration as the native release job.
+
+- Added a persistent Like toggle and Home suggestions ranked from local likes, meaningful
+  watch history and My List, with bounded related-title lookups and maturity filtering.
+- Added likes to manual library portability, retaining imports of older exports.
+- Strengthened CAM/TS release evidence and added visible CAM/unverified-source notices.
+  Pixel dimensions remain separate from release quality; unknown sources are not certified.
+- Coalesced identical stream validation within each search while preserving quality priority,
+  fresh-search validation and credential isolation.
+- Updated Zod validation schemas and ip-address to clear current production advisories.
+- Genre navigation uses rounded buttons matching the primary navigation.
+- Provider switches reuse collected streams immediately, support cancellation and ignore stale
+  replies. Failed extraction restores usable outgoing playback; retries obtain fresh media
+  and preserve position. Explicit provider/audio choices end in recoverable errors when stalled.
+- Bound first-frame loading by actual progress and a firm cap; stop repeated HLS loader resets,
+  throttle media recovery and provide a Play action when autoplay is blocked.
+- Expose genuine 4K / 1080p / 720p availability, prefer the highest-bitrate matching rendition,
+  probe the highest compatible master variant and prefer 4K for compatible HLS downloads.
+  Explicit HEVC/Dolby Vision variants follow the existing unsupported-codec policy.
+
 All notable changes to KokoMovie PC are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

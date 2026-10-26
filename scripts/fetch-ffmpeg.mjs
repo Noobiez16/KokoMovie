@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { availableParallelism } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,9 +27,9 @@ export const FFMPEG_RELEASE = 'autobuild-2026-07-31-14-10'
 export const FFMPEG_VERSION = 'n8.1.2-34-g9b6c8969e0'
 const BASE_URL = `https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_RELEASE}`
 
-// Targets KokoMovie actually publishes installers for. macOS stays build-only: BtbN does not
-// publish macOS artifacts, so a macOS FFmpeg must be sourced and re-verified before that
-// platform leaves build-only status.
+// Linux/Windows use pinned upstream LGPL binaries. macOS builds the unmodified official
+// release natively, with external-library autodetection disabled so Homebrew cannot introduce
+// GPL components or machine-specific dylib dependencies.
 //
 // The sha256 values are public integrity pins for the upstream release archives, not secrets.
 // Secret scanners flag them as generic high-entropy strings; see .gitguardian.yaml. They must
@@ -52,6 +53,26 @@ export const FFMPEG_TARGETS = {
   },
 }
 
+export const MACOS_FFMPEG_SOURCE = {
+  version: '8.1.2',
+  release: 'ffmpeg-8.1.2',
+  asset: 'ffmpeg-8.1.2.tar.xz',
+  url: 'https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz',
+  sha256: '464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c',
+}
+export const MACOS_FFMPEG_TARGETS = ['darwin-x64', 'darwin-arm64']
+
+export function macosConfigureArgs(arch) {
+  if (!['x64', 'arm64'].includes(arch)) throw new Error(`Unsupported macOS architecture: ${arch}`)
+  return [
+    '--prefix=/kokomovie-ffmpeg', '--cc=clang', `--arch=${arch === 'x64' ? 'x86_64' : 'aarch64'}`,
+    '--disable-autodetect', '--disable-gpl', '--disable-nonfree', '--enable-version3',
+    '--disable-shared', '--enable-static', '--disable-doc', '--disable-debug',
+    '--disable-ffplay', '--disable-ffprobe', '--disable-network', '--disable-x86asm',
+    '--extra-cflags=-mmacosx-version-min=12.0', '--extra-ldflags=-mmacosx-version-min=12.0',
+  ]
+}
+
 // GPL/non-free configure switches that must never appear in a shipped build. FFmpeg embeds its
 // full configure line in the executable, so this check reads the binary directly and therefore
 // works for cross-architecture targets that cannot be executed on the build host.
@@ -69,7 +90,7 @@ async function download(url) {
 
 // The configure line is stored as a NUL-terminated ASCII string inside the executable. Scanning
 // the raw bytes proves the shipped artifact's licensing rather than trusting the asset filename.
-function assertLgplConfiguration(binaryPath, target) {
+export function assertLgplConfiguration(binaryPath, target) {
   const contents = readFileSync(binaryPath)
   const marker = contents.indexOf('--prefix=')
   if (marker === -1) throw new Error(`${target}: no FFmpeg configure string found in the binary`)
@@ -84,6 +105,52 @@ function assertLgplConfiguration(binaryPath, target) {
     throw new Error(`${target}: expected an --enable-version3 (LGPL-3.0) FFmpeg build`)
   }
   return configuration
+}
+
+export async function buildMacosTarget(target) {
+  if (!MACOS_FFMPEG_TARGETS.includes(target)) throw new Error(`Unknown FFmpeg target: ${target}`)
+  if (process.platform !== 'darwin' || target !== `darwin-${process.arch}`) {
+    throw new Error(`${target}: FFmpeg must be built on a matching native macOS runner`)
+  }
+  const destination = join(vendorRoot, target)
+  const configureArgs = macosConfigureArgs(process.arch)
+  const stampPath = join(destination, 'PROVENANCE.json')
+  if (existsSync(stampPath) && existsSync(join(destination, 'ffmpeg')) && existsSync(join(destination, 'LICENSE.txt')) && existsSync(join(destination, MACOS_FFMPEG_SOURCE.asset))) {
+    const stamp = JSON.parse(readFileSync(stampPath, 'utf8'))
+    if (stamp.release === MACOS_FFMPEG_SOURCE.release && stamp.sha256 === MACOS_FFMPEG_SOURCE.sha256
+      && JSON.stringify(stamp.configureArgs) === JSON.stringify(configureArgs)) {
+      assertLgplConfiguration(join(destination, 'ffmpeg'), target)
+      console.log(`${target}: already built from verified official source`)
+      return destination
+    }
+  }
+  const workDir = mkdtempSync(join(tmpdir(), 'kokomovie-ffmpeg-macos-'))
+  try {
+    const archive = await download(MACOS_FFMPEG_SOURCE.url)
+    if (sha256(archive) !== MACOS_FFMPEG_SOURCE.sha256) throw new Error(`${target}: FFmpeg source SHA-256 mismatch`)
+    const archivePath = join(workDir, MACOS_FFMPEG_SOURCE.asset)
+    writeFileSync(archivePath, archive)
+    extractArchive(archivePath, workDir)
+    const source = join(workDir, MACOS_FFMPEG_SOURCE.release)
+    execFileSync('./configure', configureArgs, { cwd: source, stdio: 'inherit' })
+    execFileSync('make', [`-j${Math.min(availableParallelism(), 6)}`, 'ffmpeg'], { cwd: source, stdio: 'inherit' })
+    const binary = join(source, 'ffmpeg')
+    const configuration = assertLgplConfiguration(binary, target)
+    // No executable may depend on Homebrew or a temporary build directory.
+    const libraries = execFileSync('otool', ['-L', binary], { encoding: 'utf8' }).split('\n').slice(1).map(line => line.trim()).filter(Boolean)
+    if (libraries.some(line => !line.startsWith('/usr/lib/') && !line.startsWith('/System/Library/'))) {
+      throw new Error(`${target}: FFmpeg has a non-system dynamic dependency: ${libraries.join(', ')}`)
+    }
+    mkdirSync(destination, { recursive: true })
+    moveInto(binary, join(destination, 'ffmpeg'))
+    chmodSync(join(destination, 'ffmpeg'), 0o755)
+    copyFileSync(join(source, 'COPYING.LGPLv3'), join(destination, 'LICENSE.txt'))
+    writeFileSync(join(destination, MACOS_FFMPEG_SOURCE.asset), archive)
+    writeFileSync(stampPath, JSON.stringify({ source: MACOS_FFMPEG_SOURCE.url, release: MACOS_FFMPEG_SOURCE.release,
+      version: MACOS_FFMPEG_SOURCE.version, sha256: MACOS_FFMPEG_SOURCE.sha256, license: 'LGPL-3.0-or-later',
+      target, configureArgs, configuration, vendoredAt: new Date().toISOString() }, null, 2) + '\n')
+    return destination
+  } finally { rmSync(workDir, { recursive: true, force: true }) }
 }
 
 // Zip extraction has to work on both the Linux runners (GNU tar cannot read zip, so `unzip` is
@@ -132,6 +199,7 @@ function moveInto(source, target) {
 }
 
 export async function fetchTarget(target) {
+  if (MACOS_FFMPEG_TARGETS.includes(target)) return buildMacosTarget(target)
   const spec = FFMPEG_TARGETS[target]
   if (!spec) throw new Error(`Unknown FFmpeg target: ${target}`)
 
@@ -139,7 +207,8 @@ export async function fetchTarget(target) {
   const stampPath = join(destination, 'PROVENANCE.json')
   if (existsSync(stampPath)) {
     const stamp = JSON.parse(readFileSync(stampPath, 'utf8'))
-    if (stamp.release === FFMPEG_RELEASE && stamp.sha256 === spec.sha256) {
+    if (stamp.release === FFMPEG_RELEASE && stamp.sha256 === spec.sha256 && existsSync(join(destination, spec.binary)) && existsSync(join(destination, 'LICENSE.txt'))) {
+      assertLgplConfiguration(join(destination, spec.binary), target)
       console.log(`${target}: already vendored (${FFMPEG_VERSION})`)
       return destination
     }
@@ -189,12 +258,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const targets = requested.length > 0 ? requested : [`${process.platform}-${process.arch}`]
 
   for (const target of targets) {
-    if (!FFMPEG_TARGETS[target]) {
-      // macOS and other unsupported hosts can still run the app; FFmpeg-dependent features
-      // report a clear error instead of failing the whole install.
-      console.warn(`No LGPL FFmpeg build is vendored for ${target}; remux and download finalization will be unavailable.`)
-      continue
-    }
     await fetchTarget(target)
   }
 }

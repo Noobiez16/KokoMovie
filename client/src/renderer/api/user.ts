@@ -213,11 +213,12 @@ export const userApi = {
   },
   confirmAvatar: async (avatarUrl: string, _profileId?: string) => ({ success: true as const, data: { avatarUrl } }),
   exportData: async () => {
-    const [watchlist, history, preferences] = await Promise.all([
+    const [watchlist, history, preferences, likes] = await Promise.all([
       api().watchlistList(),
       api().positionList(),
       api().prefsGet(),
+      api().likesList?.() ?? [],
     ])
-    return { watchlist, history, preferences }
+    return { watchlist, history, preferences, likes }
   },
 }

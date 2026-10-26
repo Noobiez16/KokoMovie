@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { z } from 'zod'
 import { getDb } from '../db/sqlite'
 import { normalizeSourceDiscoveryMode, type SourceDiscoveryMode } from '../providers/source-discovery'
 import {
@@ -30,6 +31,8 @@ export interface PositionRow {
   updated_at: string
 }
 
+export interface LikeRow { content_id: string; content_type: string; updated_at: string }
+
 export interface PreferencesRow {
   language: string
   subtitle_default: string | null
@@ -40,6 +43,19 @@ export interface PreferencesRow {
 
 export function registerLibraryIpc(): void {
   const db = getDb()
+
+  ipcMain.handle('library:likes:list', trustedIpcHandler(() =>
+    db.prepare('SELECT * FROM likes ORDER BY updated_at DESC').all() as LikeRow[],
+  ))
+  ipcMain.handle('library:likes:set', trustedIpcHandler((_event, input: unknown) => {
+    const request = z.object({ contentId: contentIdSchema, contentType: contentTypeSchema, liked: z.boolean() }).strict().parse(input)
+    if (request.liked) {
+      db.prepare(`INSERT INTO likes (content_id, content_type, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(content_id) DO UPDATE SET content_type = excluded.content_type, updated_at = excluded.updated_at`)
+        .run(request.contentId, request.contentType, new Date().toISOString())
+    } else db.prepare('DELETE FROM likes WHERE content_id = ?').run(request.contentId)
+    return { ok: true }
+  }))
 
   // ─── Watchlist ───────────────────────────────────────────────────────────
   ipcMain.handle('library:watchlist:list', trustedIpcHandler(() =>

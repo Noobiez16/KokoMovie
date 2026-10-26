@@ -16,7 +16,14 @@ files:
 extraResources:
   - from: build/icons
     to: icons
+  - from: vendor/ffmpeg/darwin-${arch}
+    to: ffmpeg
+    filter:
+      - ffmpeg
+      - LICENSE.txt
+      - PROVENANCE.json
 
+npmRebuild: false
 asar: true
 asarUnpack:
   - "**/*.node"
@@ -24,27 +31,25 @@ asarUnpack:
   - node_modules/keytar/**/*
 compression: maximum
 
-# NOTE: macOS remains build-only. BtbN publishes no macOS FFmpeg artifact, so no LGPL binary is
-# vendored for darwin and torrent remuxing / download finalization are unavailable in a macOS
-# build. Source and verify a macOS LGPL build before macOS leaves build-only status.
-
 mac:
+  artifactName: "${productName}-${version}-mac-${arch}.${ext}"
   target:
-    - target: dmg
-      arch: [x64, arm64]
+    - dmg
+    - zip
   icon: build/icons/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.entertainment
-  # electron-builder 26 takes `notarize` as a boolean; the team is read from APPLE_TEAM_ID (or
-  # APPLE_API_* / APPLE_KEYCHAIN_*) in the environment. macOS is build-only and unsigned, and no
-  # Apple credentials exist in CI, so notarization stays off until macOS is properly released.
+  minimumSystemVersion: '12.0'
+  # No Developer ID or Apple notarization credentials are configured. Explicit ad-hoc signing
+  # keeps the arm64 runtime valid after fuses are changed; it does not confer publisher trust.
+  identity: '-'
   notarize: false
 
 dmg:
-  sign: true
+  sign: false
   contents:
     - x: 130
       y: 220

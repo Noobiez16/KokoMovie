@@ -19,6 +19,12 @@ export const portablePositionSchema = z.object({
   updated_at: isoTimestamp,
 }).strict()
 
+export const portableLikeSchema = z.object({
+  content_id: boundedId,
+  content_type: z.enum(['movie', 'tv', 'series']),
+  updated_at: isoTimestamp,
+}).strict()
+
 export const portablePreferencesSchema = z.object({
   language: z.string().trim().min(1).max(35),
   subtitle_default: z.string().trim().max(35).nullable(),
@@ -35,6 +41,7 @@ export const libraryExportSchema = z.object({
   library: z.object({
     watchlist: z.array(portableWatchlistSchema).max(10_000),
     positions: z.array(portablePositionSchema).max(50_000),
+    likes: z.array(portableLikeSchema).max(10_000).optional(),
     preferences: portablePreferencesSchema,
   }).strict(),
   artwork: z.array(z.object({
@@ -79,6 +86,7 @@ export function hasValidArtworkSignature(file: string, bytes: Uint8Array): boole
 export interface LibraryImportPreview {
   watchlist: number
   positions: number
+  likes: number
   artwork: number
   watchlistConflicts: number
   positionConflicts: number

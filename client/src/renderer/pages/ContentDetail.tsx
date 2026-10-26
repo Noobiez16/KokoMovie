@@ -12,6 +12,7 @@ import { providersApi, torrentApi } from '../api/providers'
 import { playbackApi } from '../api/playback'
 import { AppLayout } from '../components/layout/AppLayout'
 import { ContentRow } from '../components/catalog/ContentRow'
+import { LikeButton } from '../components/catalog/LikeButton'
 import { ResponsiveArtwork } from '../components/catalog/ResponsiveArtwork'
 import { SeasonTabs } from '../components/catalog/SeasonTabs'
 import { EpisodeCard } from '../components/catalog/EpisodeCard'
@@ -192,6 +193,7 @@ export function ContentDetailPage() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] })
       qc.invalidateQueries({ queryKey: ['watchlist', profileId] })
+      qc.invalidateQueries({ queryKey: ['recommendations', 'personalized'] })
     },
   })
 
@@ -218,6 +220,7 @@ export function ContentDetailPage() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['watchlist-check', id, profileId] })
       qc.invalidateQueries({ queryKey: ['watchlist', profileId] })
+      qc.invalidateQueries({ queryKey: ['recommendations', 'personalized'] })
     },
   })
 
@@ -845,6 +848,8 @@ export function ContentDetailPage() {
             >
               {inWatchlist ? `✓ ${t('detail.inMyList')}` : `+ ${t('history.myList')}`}
             </button>
+
+            <LikeButton contentId={content.id} contentType={content.type} />
 
             {/* 3-dots Actions Dropdown next to + My List */}
             {content && (

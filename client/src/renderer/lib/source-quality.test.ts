@@ -18,6 +18,23 @@ function result(
 }
 
 describe('source quality classification', () => {
+  it.each([
+    'https://cdn.example/Movie.1080p.HDCAMRip/master.m3u8',
+    'https://cdn.example/Movie%252EHD%252DCAM/master.m3u8',
+    'https://cdn.example/Movie%2EHD%2DCAM/master.m3u8?broken=%ZZ',
+    'https://cdn.example/master.m3u8?source=https%3A%2F%2Fmedia.example%2FHD-CAM%2Ffilm',
+  ])('detects camera-release evidence in %s', (url) => {
+    expect(classifySourceQuality({ url, resolution: 1080, mediaValidated: true }).releaseType).toBe('cam')
+  })
+
+  it('retains negative evidence even when another label claims WEB-DL', () => {
+    expect(classifySourceQuality({ url: 'https://cdn.example/HDCAM/master.m3u8', declaredQuality: 'WEB-DL 1080p', resolution: 1080 }).releaseType).toBe('cam')
+    expect(classifySourceQuality({ url: 'https://cdn.example/web-dl/master.m3u8', manifestText: '#EXTM3U\n# release: Movie.HD-TS.1080p', resolution: 1080 }).releaseType).toBe('telesync')
+  })
+
+  it('does not confuse ordinary transport-stream segments or movie titles with CAM evidence', () => {
+    expect(classifySourceQuality({ url: 'https://cdn.example/camera/cambridge/master.m3u8', manifestText: '#EXTM3U\n#EXTINF:10,\nsegment01.ts', resolution: 1080 }).releaseType).toBe('unknown')
+  })
   it('lets an explicit CAM URL override a 1080p encoding', () => {
     expect(classifySourceQuality({
       url: 'https://cdn.example/releases/cam/master.m3u8',

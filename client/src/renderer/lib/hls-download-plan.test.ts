@@ -14,6 +14,12 @@ import {
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), 'src/renderer/lib/fixtures/hls', name), 'utf8')
 
 describe('HLS download planning', () => {
+  it('prefers real compatible 4K over 1080p and rejects an HEVC-only master', () => {
+    const master = parseHlsPlaylist('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080,CODECS="avc1.640028"\n1080.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=16000000,RESOLUTION=3840x2160,CODECS="avc1.640033"\n4k.m3u8', 'https://cdn.example/master.m3u8')
+    if (master.kind !== 'master') throw new Error('Expected a master fixture')
+    expect(selectHlsVariant(master).height).toBe(2160)
+    expect(() => selectHlsVariant({ ...master, variants: master.variants.map(variant => ({ ...variant, codecs: 'hvc1.1.6.L153.B0' })) })).toThrow('DOWNLOAD_UNSUPPORTED_PLAYLIST')
+  })
   it('resolves relative MPEG-TS segments and preserves discontinuities', () => {
     const playlist = parseHlsPlaylist(fixture('mpegts-relative.m3u8'), 'https://media.example/a/master/list.m3u8')
     expect(playlist.kind).toBe('media')

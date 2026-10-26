@@ -1,5 +1,100 @@
 # Testing and Regression Baseline
 
+## v2.1.0 Mac release preparation — 2026-10-26
+
+Local preparation verification passes **721 deterministic tests across 98 files**, **20 real
+Electron tests in 1.8 minutes**, strict renderer/main/E2E TypeScript, zero-warning lint,
+production build, production audit, 227-package/LGPL license checks and runtime fuse checks.
+The official actionlint 1.7.12 binary was checksum-verified and accepts the complete workflow.
+A temporary five-target assembly fixture exercised real source-archive integrity, merged Mac
+metadata and 18 flat checksum entries; focused release tests pass after the final cross-architecture
+metadata guard. Native Mac packaging still requires the hosted-runner validation below.
+
+The version preflight checks root/client manifests, both lockfile package entries, changelog
+and tag consistency. Configs are validated against the installed electron-builder 26.15.7
+schema, including the default native-platform dispatcher. Release helper tests cover both Mac
+metadata files, missing architectures/assets, wrong versions, unsafe filenames, actual SHA-512
+verification, tampered bytes and changelog extraction. Updater IPC tests require manual delivery
+for packaged ad-hoc Mac builds, no Squirrel download and trusted/validated callers.
+
+Native Mac CI uses macos-15-intel/x64 and macos-15/arm64. Each compiles pinned official FFmpeg
+8.1.2 source with external-library autodetection disabled, checks LGPL configuration/provenance
+and system-only dylibs, rebuilds native modules and runs real Electron security/SQLite tests.
+After DMG/ZIP packaging, checks read Mach-O architectures and code signatures, execute AAC/MP4
+encoding/decoding with packaged FFmpeg, launch the actual hardened app for a bounded startup
+smoke and read production fuses from the packaged executable. These checks do not validate
+quarantined downloads, Apple notarization or a real installed upgrade on customer hardware.
+
+The complete assembly gate runs before tags through workflow_dispatch. It requires all five
+native targets, validates actual updater hashes, combines architecture-specific Mac metadata,
+includes licenses/corresponding Mac FFmpeg source and checks every flat SHA256SUMS.txt entry.
+Only the tag-triggered publication job creates a release. CI evidence will be appended here
+before tagging; local Linux checks alone cannot establish Mac packaging success.
+
+## Provider recovery and 4K — 2026-10-26
+
+- Final source checks: 712 tests across 96 files, strict renderer/main/E2E TypeScript,
+  zero-warning lint and production build pass. Audit has no high/critical production findings;
+  license checks verify 227 production packages and the Linux x64 LGPL FFmpeg target.
+- Final serialized Electron run: 20/20 passed in 1.8 minutes on the completed build. A prior
+  overlapping build/unit/native run hit a first-window startup timeout and a Continue Watching
+  navigation assertion; the completed-build run passes both unchanged checks. The final HLS
+  fixture records 12,343ms to the stalled-source error, a 320ms cached switch including menu
+  interaction, successful retry/rollback, and decoded 3840×2160.
+- Renderer checks cover prompt cached switching even with a hung legacy header-registration
+  IPC, rejected torrent resolution, explicit cancellation, late replies after a new title,
+  paused/playing rollback, actual resolved dub labels, missing-dub fallthrough, fresh retry
+  retaining playback position, autoplay rejection and bounded concurrent audio/video startup.
+- Main IPC cases cover highest compatible 4K child probing, HEVC exclusion, invalid manual
+  media/child responses, non-returning DNS, explicit cancellation and unchanged trust/SSRF rules.
+  Quality-menu cases require genuine 4K availability and highest-bitrate selection within a tier;
+  compatible offline HLS selection also prefers 4K.
+- Real Electron tests generate local H.264 video with the vendored LGPL FFmpeg. Fullscreen tests
+  now require decoded 3840×2160 alongside 720p/1080p, with the same element/source and no reload.
+  A dedicated HLS test uses three real tiers and a server that deliberately sends no headers:
+  it requires a recoverable error within 18 seconds, a fresh successful retry, decoded 4K,
+  a cached 720p switch within five seconds, and continued outgoing playback after extraction fails.
+- Recorded controlled runs: stalled-provider error in 12.2–12.5 seconds and cached switch in
+  0.32–0.36 seconds including menu interaction. These measurements describe the local fixture,
+  not every remote CDN or connection. Metrics/screenshots are under `client/.codex/visual/`.
+- Isolated live main-process discovery plus actual Electron/hls.js decoding succeeded for
+  The Matrix (1999) and Breaking Bad S1E1: each collected four validated alternatives, played
+  1920×1080, and reported thirteen upstream sources unavailable. Whole smoke runs took 28.6s
+  and 27.9s including remaining discovery. These runs do not establish universal uptime,
+  per-provider first-frame latency, 4K availability, or endurance. Unverified release labels
+  remained visible; playable resolution does not certify a clean recording.
+- Recovery decisions follow the installed hls.js load-policy API and its
+  [fatal-error guidance](https://github.com/video-dev/hls.js/blob/master/docs/API.md#fatal-error-recovery),
+  plus MDN's [play promise](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/play)
+  and [playing event](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/playing_event).
+
+## Local suggestions, CAM evidence and shared probes — 2026-10-26
+
+- Baseline: 662 units passed before feature changes. On the local Node 26.12.1 runtime,
+  its built-in Web Storage interferes with jsdom globals. Run units with
+  `NODE_OPTIONS=--no-experimental-webstorage npm test`; this restores jsdom storage without
+  changing the product runtime or weakening assertions. The initial unconfigured run failed
+  six existing storage tests, and the corrected baseline passed all 662.
+- Final deterministic suite: 687 tests across 95 files. New cases cover local interest
+  ranking, accidental-play exclusion, recency and seed bounds, series deduplication,
+  partial failure and no-interest/no-key behavior, real SQLite/IPC likes and strict input
+  rejection, merge/replace/older-export portability, Like interaction and query invalidation.
+- CAM regressions cover encoded and partially malformed URL evidence, HDCAMRip,
+  negative-over-positive evidence, ordinary `.ts` false positives, child-playlist and server
+  filename clues, player notices and 1080p encoded variants coexisting with CAM warnings.
+- Shared-probe fixtures require two requests instead of four for an identical master and
+  variant, new validation on subsequent searches and isolation for different source headers.
+  Existing highest-resolution, CAM-last, cancellation, deadline and redirect/security cases pass.
+- TypeScript (renderer/main/E2E), zero-warning lint and production build pass. Licence gate:
+  227 production packages and the Linux x64 LGPL FFmpeg target. Production audit passes after
+  Zod 4.6.7 / ip-address 10.7.5 updates; no advisory exceptions are introduced.
+- Final real Electron suite: 18/18 passed in 54.5 seconds on the final build and dependencies.
+  Coverage includes Like persistence across reload, actual Home suggestions,
+  known-title exclusion, unlike, desktop/compact captures, prior navigation/locale/security,
+  real generated 720p/1080p decoding/fullscreen continuity and portable offline downloads.
+  Tests use isolated profiles and deterministic catalog/media fixtures. Live CAM visual
+  identification, all-provider latency, swarm endurance and installed upgrades are not implied.
+
 ## v2.0.0 Linux CI recovery
 
 The first tag run (`37695253042`) stopped before packaging or publication. Quality

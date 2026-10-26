@@ -45,7 +45,7 @@
 - **Context:** `ffmpeg-static` bundles a binary configured `--enable-gpl --enable-version3`. That forced GPL-3.0 obligations onto every installer and, with no project license selected, blocked the release. KokoMovie only uses stream copy, the native AAC encoder, the MP4/MOV muxers, and the Matroska/AVI/MOV/MPEG-TS demuxers — none of which are GPL-only.
 - **Decision:** Vendor a checksum-pinned LGPL-3.0 FFmpeg 8.1 build from BtbN/FFmpeg-Builds through `scripts/fetch-ffmpeg.mjs`, ship it via `extraResources` outside the asar archive with its license text and provenance, and license KokoMovie itself GPL-3.0-or-later. `npm run check:licenses` enforces both.
 - **Alternatives:** `@ffmpeg-installer/ffmpeg` — rejected: it declares LGPL-2.1 but ships a 2018 binary configured `--enable-gpl --enable-libx264 --enable-libx265`. Building FFmpeg from source per release — rejected as disproportionate. Dropping remux support — rejected: it would remove torrent dub selection and portable MP4 output.
-- **Consequences:** Distribution is compliant and auditable, and FFmpeg advances 7.0.2 → 8.1. The LGPL binary is larger (115 MB vs ~78 MB), which grows the Linux x64 AppImage to ~164 MB. macOS has no vendored binary and stays build-only.
+- **Consequences:** Distribution is compliant and auditable, and FFmpeg advances 7.0.2 → 8.1. The LGPL binary is larger (115 MB vs ~78 MB), which grows the Linux x64 AppImage to ~164 MB. macOS originally had no vendored binary and stayed build-only; ADR-010 supersedes that limitation.
 
 ## ADR-006: Upgrade to Electron 43 and electron-builder 26
 
@@ -82,3 +82,21 @@
 - **Decision:** Preserve commit c241a2d on archive/pre-phase-2-legacy, then remove the unused stack and target the client as the only npm workspace.
 - **Alternatives:** Leave deprecated code in place; split it into another repository immediately.
 - **Consequences:** Clean installs are smaller and cannot accidentally start obsolete infrastructure. Historical code remains recoverable from the local archive branch.
+
+## ADR-010: Publish native Mac builds with auditable FFmpeg and manual updates
+
+**Date:** 2026-10-26. Extends ADR-005's original build-only Mac decision.
+
+- **Decision:** Build Intel and Apple Silicon DMG/ZIP packages on matching Mac runners. Compile
+  unmodified, SHA-256-pinned official FFmpeg 8.1.2 source with LGPLv3 enabled, external-library
+  autodetection disabled and only system dynamic dependencies. Publish the source archive.
+- **Reason:** BtbN has no macOS artifacts, and package metadata alone does not establish a
+  binary's license or architecture. Source compilation is bounded to the two Mac targets;
+  audited Linux/Windows binary distribution remains unchanged.
+- **Signing:** No Apple signing secrets are configured. Use explicit ad-hoc signatures with
+  JIT and native-addon entitlements, retain production fuses, document Gatekeeper approval,
+  and provide manual updates. Developer ID/notarization and automatic Mac upgrades need a
+  separate verified signing migration.
+- **Release gate:** Run assembly validation on preparation-branch dispatches before tagging.
+  Require all platform artifacts and actual updater hashes; merge Mac metadata deterministically
+  and publish only the validated bundle. Version metadata and tag must all be v2.1.0.

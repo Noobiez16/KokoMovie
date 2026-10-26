@@ -17,17 +17,25 @@ That means:
 ```
 client/release/
 ├── linux/      # .AppImage, .deb, latest-linux.yml, linux-unpacked/
-└── windows/    # KokoMovie-Setup-${version}.exe, latest.yml
+├── windows/    # KokoMovie-Setup-${version}.exe, latest.yml
+└── mac/        # KokoMovie-${version}-mac-{x64,arm64}.{dmg,zip}, latest-mac.yml
 ```
 
-Only the latest build for each platform is kept. Older artifacts are deleted before a new build runs.
+Release output is ignored by Git. Use an isolated working directory/profile for validation; never delete existing artifacts without a requested replacement build.
 
 ## When the owner does ask for a build
 
-1. Confirm the version string with the owner (e.g., `1.0.3-beta`).
+1. Use the version already authorized by the owner. This release is **v2.1.0**, including the app, changelog and tag.
 2. Set that string in `client/package.json` and commit if not already done.
-3. Wipe `client/release/linux/*` and `client/release/windows/*`.
+3. Validate the committed preparation branch with workflow_dispatch before creating a release tag.
 4. Build:
    - Linux: `npm run dist:linux --workspace=client`
    - Windows (from Linux host): `docker run --rm -v "$PWD":/project -w /project electronuserland/builder:wine npm run dist:win --workspace=client`
+   - macOS: `npm run dist:mac:x64 --workspace=client` or `npm run dist:mac:arm64 --workspace=client`, on a matching Mac. These include native LGPL FFmpeg and produce ad-hoc signed DMG/ZIP files.
 5. Verify each artifact's filename contains the owner-supplied version before reporting done.
+
+CI stages a `release-ready` bundle only after Windows, Linux x64/ARM64, Mac x64/ARM64 and
+artifact assembly succeed. The bundle contains flat checksums, licenses, changelog release
+notes, combined Mac metadata and corresponding Mac FFmpeg source. A matching `v2.1.0` tag
+publishes it. Mac users may need Gatekeeper approval and install updates manually; no Apple
+Developer ID/notarization is claimed.

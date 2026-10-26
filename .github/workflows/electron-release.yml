@@ -18,6 +18,8 @@ jobs:
           cache: 'npm'
       - name: Install locked dependencies
         run: npm ci
+      - name: Verify release versions and changelog
+        run: node scripts/verify-release-version.mjs
       - name: Lint
         run: npm run lint
       - name: Typecheck renderer, main process and Electron tests
@@ -28,7 +30,7 @@ jobs:
         run: npm run audit:production
       # Vendor FFmpeg first: the licence gate verifies the recorded provenance of every LGPL
       # build present, and a release must never ship a GPL-configured binary.
-      - name: Vendor LGPL FFmpeg for every shipped target
+      - name: Vendor pinned LGPL FFmpeg for Linux and Windows
         run: npm run vendor:ffmpeg --workspace=client -- linux-x64 linux-arm64 win32-x64
       - name: Distribution licence gate
         run: npm run check:licenses -- --report
@@ -416,81 +418,137 @@ jobs:
             client/release/windows/*.blockmap
           retention-days: 1
 
-  # ─── Release: collect artifacts → single GitHub Release ─────────────────────
-  create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    name: Publish GitHub Release
-    needs: [build-linux, package-linux-arm64, build-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+  # Native builds avoid mixing Intel and Apple Silicon native modules or FFmpeg.
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    needs: [quality, electron-e2e]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+            app-directory: mac
+          - arch: arm64
+            runner: macos-15
+            app-directory: mac-arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify native runner architecture
+        run: test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+      - name: Cache native LGPL FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: client/vendor/ffmpeg/darwin-${{ matrix.arch }}
+          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('scripts/fetch-ffmpeg.mjs') }}
+      - name: Build LGPL FFmpeg from pinned official source
+        run: npm run vendor:ffmpeg --workspace=client -- darwin-${{ matrix.arch }}
+      - name: Distribution license gate
+        run: npm run check:licenses
+      - name: Build renderer and main process
+        run: npm run build --workspace=client
+      - name: Rebuild native modules for Electron
+        run: npm run rebuild:native --workspace=client -- --arch=${{ matrix.arch }}
+      - name: Real native Electron security and SQLite checks
+        run: npm run test:e2e --workspace=client -- electron-boundary.spec.ts
+      - name: Package ad-hoc signed macOS DMG and ZIP
+        working-directory: client
+        run: npx electron-builder --config electron-builder.mac.yml --mac dmg zip --${{ matrix.arch }} --publish never
+      - name: Verify packaged architecture, signature and FFmpeg execution
+        run: node scripts/verify-macos-package.mjs ${{ matrix.arch }}
+      - name: Verify packaged Electron fuses
+        run: node scripts/verify-electron-fuses.cjs "client/release/mac/${{ matrix.app-directory }}/KokoMovie.app/Contents/MacOS/KokoMovie"
+      - name: Stage corresponding FFmpeg source
+        if: matrix.arch == 'arm64'
+        run: cp client/vendor/ffmpeg/darwin-arm64/ffmpeg-8.1.2.tar.xz client/release/mac/
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            client/release/mac/*.dmg
+            client/release/mac/*.zip
+            client/release/mac/*.blockmap
+            client/release/mac/latest-mac.yml
+            client/release/mac/ffmpeg-*.tar.xz
+          retention-days: 3
 
+  # This assembly gate also runs for workflow_dispatch, before any release tag exists.
+  verify-artifacts:
+    name: Verify complete release artifacts
+    needs: [build-linux, package-linux-arm64, build-windows, build-macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install locked dependencies
+        run: npm ci
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: linux-release-*
           path: artifacts/linux
           merge-multiple: true
-
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: windows-release
           path: artifacts/windows
+      - name: Download distinct macOS architecture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-release-*
+          path: artifacts/macos
+      - name: Validate files, hashes, versions, source and combined Mac metadata
+        run: node scripts/prepare-release.mjs artifacts release-artifacts
+      - name: Verify flat release checksum manifest
+        working-directory: release-artifacts
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Upload validated release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ready
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Verify release version, filenames, and required artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          test "$version" = "$(node -p "require('./client/package.json').version")"
-          test -f "artifacts/windows/KokoMovie-Setup-$version.exe"
-          test -f "artifacts/windows/latest.yml"
-          test -f "artifacts/windows/KokoMovie-Setup-$version.exe.blockmap"
-          grep -F "KokoMovie-Setup-$version.exe" artifacts/windows/latest.yml
-          find artifacts/linux -maxdepth 1 -name "KokoMovie-$version-linux-x86_64.AppImage" | grep -q .
-          test -f "artifacts/linux/KokoMovie-$version-linux-amd64.deb"
-          find artifacts/linux -maxdepth 1 -name "KokoMovie-$version-linux-arm64.AppImage" | grep -q .
-          test -f "artifacts/linux/KokoMovie-$version-linux-arm64.deb"
-          test -f "artifacts/linux/latest-linux.yml"
-          test -f "artifacts/linux/latest-linux-arm64.yml"
-          grep -F "KokoMovie-$version-linux-x86_64.AppImage" artifacts/linux/latest-linux.yml
-          grep -F "KokoMovie-$version-linux-arm64.AppImage" artifacts/linux/latest-linux-arm64.yml
-          grep -F "blockMapSize:" artifacts/linux/latest-linux.yml
-          grep -F "blockMapSize:" artifacts/linux/latest-linux-arm64.yml
-
-      # GPL-3.0-or-later and the bundled LGPL FFmpeg both require the licence terms to accompany
-      # the binaries, so they are published as release assets rather than living only in the repo.
-      - name: Stage licence and notice files
-        shell: bash
-        run: cp LICENSE THIRD-PARTY-NOTICES.md artifacts/
-
-      - name: Generate SHA-256 checksums
-        shell: bash
-        run: |
-          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.blockmap' -o -name 'latest*.yml' \) -print0 |
-            sort -z |
-            xargs -0 sha256sum > artifacts/SHA256SUMS.txt
-
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish GitHub Release
+    needs: verify-artifacts
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated release
+        uses: actions/download-artifact@v4
+        with:
+          name: release-ready
+          path: artifacts
+      - name: Verify downloaded release checksums
+        working-directory: artifacts
+        run: sha256sum --check SHA256SUMS.txt
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: artifacts/RELEASE_NOTES.md
           draft: false
+          fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
-          files: |
-            artifacts/linux/*.AppImage
-            artifacts/linux/*.deb
-            artifacts/linux/latest-linux*.yml
-            artifacts/linux/*.blockmap
-            artifacts/windows/*.exe
-            artifacts/windows/latest.yml
-            artifacts/windows/*.blockmap
-            artifacts/SHA256SUMS.txt
-            artifacts/LICENSE
-            artifacts/THIRD-PARTY-NOTICES.md
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

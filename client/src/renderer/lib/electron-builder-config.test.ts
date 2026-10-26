@@ -65,6 +65,12 @@ describe('electron-builder configuration', () => {
     expect(failures(loadConfig(target))).toEqual([])
   })
 
+  it('uses the shipping configuration for the default local packaging command', () => {
+    const config = require(resolve(repoRoot, 'client/electron-builder.cjs'))
+    expect(failures(config)).toEqual([])
+    expect(config).toEqual(loadConfig(({ linux: 'linux', win32: 'win', darwin: 'mac' } as Record<string, string>)[process.platform]!))
+  })
+
   it('rejects the win.sign key that broke the v1.5.1 Windows release', () => {
     const config = loadConfig('win')
     const win = config.win as Record<string, unknown>

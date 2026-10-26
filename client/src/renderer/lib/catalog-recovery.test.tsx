@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { BrowsePage } from '../pages/Browse'
+vi.mock('../api/recommendation', () => ({ recommendationApi: { getPersonalized: async () => ({ data: [] }) } }))
 import { MoviesPage } from '../pages/Movies'
 import { SeriesPage } from '../pages/Series'
 import { ContinueWatchingPage } from '../pages/ContinueWatching'

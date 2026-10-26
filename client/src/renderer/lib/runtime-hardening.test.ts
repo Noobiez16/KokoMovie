@@ -13,8 +13,8 @@ describe('runtime and package hardening', () => {
       scripts: Record<string, string>
       devDependencies: Record<string, string>
     }
-    expect(rootPackage.version).toBe('2.0.0')
-    expect(clientPackage.version).toBe('2.0.0')
+    expect(rootPackage.version).toBe('2.1.0')
+    expect(clientPackage.version).toBe('2.1.0')
     expect(clientPackage.devDependencies.electron).toBe('43.4.1')
     expect(clientPackage.scripts['rebuild:native']).toContain('--version 43.4.1')
     for (const target of ['linux', 'win', 'mac']) {

@@ -218,32 +218,7 @@ describe('outbound provider requests', () => {
   })
 })
 
-describe('torrent player audio labelling', () => {
-  const player = readFileSync(resolve(process.cwd(), 'src/renderer/components/player/VideoPlayer.tsx'), 'utf8')
-
-  // A progressive torrent MP4 has no HLS renditions, so nothing publishes its audio language —
-  // the menu kept showing the previous source's "English" while Spanish audio played.
-  it('publishes the resolved dub as the progressive stream sole audio track', () => {
-    expect(player).toContain('const publishTorrentAudioTrack = (lang: string) => {')
-    expect(player).toContain("setAudioTracks([{ id: -1, name: getCleanAudioName('', lang), lang }])")
-    // The label follows what is genuinely audible, never merely what was requested.
-    expect(player).toContain('const playingLang = res.audioLang || wantLang')
-    expect(player).toContain('publishTorrentAudioTrack(playingLang)')
-    expect(player).toContain('publishTorrentAudioTrack(res.audioLang || norm)')
-    // A language hunt moves on when a release only advertised the dub it does not carry.
-    expect(player).toContain('if (res.audioLang && res.audioLang !== norm) {')
-    // A non-torrent source still gets its real rendition list back from hls.js.
-    expect(player).toContain('const resetAudioForNonTorrentSource = () => {')
-    expect(player).toContain('hls.on(Hls.Events.AUDIO_TRACKS_UPDATED')
-  })
-
-  // A release that declares exactly one language wins over a stale cross-source language ref,
-  // otherwise picking "Torrent - Spanish-1080P" remuxed English.
-  it('lets a single-language release outrank a stale remembered language', () => {
-    expect(player).toContain("const declaredLang = (stream.audioLangs?.length ?? 0) === 1 ? normalizeLang(stream.audioLangs![0]!) : ''")
-    expect(player).toContain('const wantLang = declaredLang || currentAudioLangRef.current')
-  })
-})
+// Torrent audio selection and transactional switching are exercised in VideoPlayer.test.tsx.
 
 describe('torrent seek and source-switch boundaries', () => {
   const player = readFileSync(resolve(process.cwd(), 'src/renderer/components/player/VideoPlayer.tsx'), 'utf8')
@@ -255,7 +230,6 @@ describe('torrent seek and source-switch boundaries', () => {
     expect(player).toContain('const [torrentSeeking, setTorrentSeeking] = useState(false)')
     expect(player).toContain('if (torrentSeeking) return')
     expect(player).toContain('if (torrentSeekingRef.current) {')
-    expect(player).toContain('}, [initialLoading, isBuffering, switchingSource, torrentSeeking, activeStreamUrl])')
   })
 
   // The grace window must end on success AND on failure, or the watchdogs stay disarmed forever.
@@ -268,17 +242,12 @@ describe('torrent seek and source-switch boundaries', () => {
 
   // A torrent is only ever an explicit user choice; generic embed fallback must never take it over.
   it('keeps generic embed fallback away from an explicitly chosen torrent', () => {
-    expect(player).toContain("if (torrentStreamRef.current || activeSourceId?.startsWith('p2p-')) {")
+    expect(player).toContain("if (torrentStreamRef.current || activeSourceId?.startsWith('p2p-') || userPinnedSourceRef.current) {")
   })
 
   it('exposes built-in torrents through Audio rather than the Source menu', () => {
     expect(player).toContain(".filter((s) => !s.providerId.startsWith('p2p-')")
     expect(player).toContain("availableSourceIds={allStreams.filter((s) => !s.providerId.startsWith('p2p-')).map((s) => s.providerId)}")
-  })
-
-  // Resolving a replacement can take tens of seconds; the outgoing stream must not keep playing.
-  it('pauses the outgoing source before resolving a replacement', () => {
-    expect(player.match(/try \{ videoRef\.current\?\.pause\(\) \} catch/g) ?? []).toHaveLength(2)
   })
 
   // A seek reload or buffering recovery flips isPlaying false -> true; auto-closing on that made

@@ -11,3 +11,11 @@ Security fixes target the latest published version.
 ## Boundaries
 
 The renderer is sandboxed and isolated from Node.js. Privileged operations cross a limited preload/IPC bridge and validate senders and payloads. TMDB credentials use the operating-system keychain. Provider extraction uses hidden isolated sessions with permissions, popups, and downloads denied. Provider and torrent content is untrusted; never submit secrets or personal data to it.
+
+## Distribution in v2.1.0
+
+Supported targets are Windows x64, Linux x64/ARM64 and macOS Intel/Apple Silicon. Windows/Linux
+installers are unsigned; macOS builds are ad-hoc signed and not Apple-notarized. Verify release
+SHA256SUMS.txt; checksums do not establish an Apple/Microsoft publisher identity. Mac updates
+are manual. Report platform-specific signing, startup or update issues with the architecture
+and OS version, without sending keychain contents or local library data.

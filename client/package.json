@@ -1,6 +1,6 @@
 {
   "name": "kokomovie-client",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "KokoMovie desktop streaming client — Windows, macOS, Linux x64 and Linux ARM64",
   "author": {
     "name": "KokoMovie Inc.",
@@ -22,8 +22,9 @@
     "vendor:ffmpeg": "node ../scripts/fetch-ffmpeg.mjs",
     "dist:linux": "npm run build && npm run vendor:ffmpeg && npm run rebuild:native && electron-builder --config electron-builder.linux.yml --linux",
     "dist:win": "npm run build && npm run vendor:ffmpeg win32-x64 && npm run rebuild:native && electron-builder --config electron-builder.win.yml",
-    "dist:mac": "npm run build && npm run rebuild:native && electron-builder --config electron-builder.mac.yml",
-    "dist:all": "npm run dist:linux && npm run dist:win",
+    "dist:mac": "npm run build && npm run vendor:ffmpeg && npm run rebuild:native && electron-builder --config electron-builder.mac.yml --mac --publish never",
+    "dist:mac:x64": "npm run build && npm run vendor:ffmpeg darwin-x64 && npm run rebuild:native -- --arch=x64 && electron-builder --config electron-builder.mac.yml --mac dmg zip --x64 --publish never",
+    "dist:mac:arm64": "npm run build && npm run vendor:ffmpeg darwin-arm64 && npm run rebuild:native -- --arch=arm64 && electron-builder --config electron-builder.mac.yml --mac dmg zip --arm64 --publish never",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -48,7 +49,7 @@
     "react-i18next": "^17.0.11",
     "react-router-dom": "7.18.2",
     "webtorrent": "3.0.21",
-    "zod": "^3.25.76",
+    "zod": "^4.6.7",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 # KokoMovie PC — Architecture
 
-**Version:** 1.5.4 source-discovery baseline (Fully Local, Multi-Architecture Linux)
-**Date:** 2026-08-12
+**Version:** 2.1.0 (fully local; Windows, Linux x64/ARM64, macOS Intel/Apple Silicon)
+**Date:** 2026-10-26
 **Status:** Current
 
 ---
@@ -155,6 +155,22 @@ The main process ships a fixed, verified provider registry. Provider definitions
 
 Enabled providers run through a staggered quality-aware race and publish live per-provider states (`searching`, `available`, `unavailable`, or `timed-out`) to the source menu. Fast & Progressive mode starts from the best acceptable result while the remaining bounded workers continue; Complete Scan waits for every worker or the firm 40-second deadline. Quality labels combine manifest resolution with explicit or inferred release evidence, leave uncertain release type visibly unverified, and rank CAM/telesync last. Cancellation tears down ephemeral extraction windows, provider sessions deny permissions/popups/downloads, and repeated infrastructure failures temporarily open an in-memory circuit without affecting catalog, library, or offline features. Installable packs and remote registries remain deferred until signing, revocation, isolated execution, permission confirmation, and last-known-good rollback are proven.
 
+Manual source switches are transactions: collected streams commit without another extraction,
+while fresh extraction has a 20-second main deadline and a 22-second renderer guard. Cancellation,
+renderer destruction and newer sessions abort or invalidate the pending result. Failed switches
+restore usable outgoing playback; retry refreshes extraction and retains the last playback
+position. DNS callbacks cannot retain a pending direct request past cancellation/deadline.
+
+First-frame loading tracks actual fragment bytes/buffer progress with 12-second idle and
+45-second absolute limits; torrent seek preparation has its own 90-second limit. Pinned
+sources/audio selections report a recoverable error instead of silently changing source or
+spinning forever. HLS.js owns nonfatal retries under bounded load policies; exhausted network
+errors trigger fallback and media recovery is limited to two real media errors spaced five
+seconds apart. Autoplay denial exposes a user Play action. Quality lists actual 4K / 1080p /
+720p tiers, disables unavailable tiers and keeps AUTO adaptive. Master probes inspect the
+highest compatible variant, and HLS downloads choose the highest compatible tier by height
+then bitrate. Explicit HEVC/Dolby Vision declarations cannot win by advertised dimensions.
+
 The HLS proxy listens only on loopback. Initial targets and every redirect reject credentials, unsafe protocols, localhost, private/LAN, link-local, carrier-grade NAT, benchmark, and multicast addresses. Downloads may use only public HTTP(S) targets or the exact active KokoMovie proxy port.
 
 ---
@@ -290,6 +306,48 @@ Manual portability is implemented entirely in the main process. The renderer can
 
 The versioned JSON format includes watchlist, playback history/positions, preferences, and optional bounded catalog artwork. Credentials, downloaded media, and machine-specific paths are excluded. Imports are strict-schema validated, previewed, backed up with SQLite's online backup API, applied transactionally with timestamp-based conflict rules, and artwork files are restored atomically after extension and signature checks. Cloud and watched-folder sync remain disabled and out of scope.
 
+The local `likes` table stores one content ID/type and update timestamp per liked title.
+Trusted `library:likes:list` / `library:likes:set` IPC validates access and payloads. Library
+exports include an optional `likes` array; older exports without it remain importable.
+Merge retains existing likes and applies newer incoming records. Replace clears likes,
+watchlist and positions before importing; its preview and confirmation include likes.
+Older application versions with strict schemas may reject exports containing the new field.
+
+Home's personalized suggestions select at most six distinct seed titles from explicit likes,
+completed or meaningful playback and saved titles, with recency decay and a maximum vote
+per title so a series' episode count does not dominate. Existing cache-backed movie/TV
+recommendation endpoints supply candidates. Weighted rank fusion deduplicates candidates,
+excludes titles already in local signals and retains the existing maturity filter. Failed
+seeds do not discard successful ones; no generic trending row is relabeled as personalized.
+
+Stream validation retains release clues from root/final URLs, server filenames and the
+inspected variant playlist. Camera evidence overrides positive release claims and pixel
+dimensions. Validation promises are reused only within one search for the exact URL and
+headers. Different credentials and later searches do not share probes. Source ordering,
+the 40-second cap, real HLS quality choices and manual source pinning are unchanged.
+
 ## 11. Local diagnostics boundary
 
 Diagnostics flow from main-process operational events into a rotating 512 KiB log with three retained generations. Every field is length-bounded and redacted before persistence. Export does not copy arbitrary logs or database rows: it constructs a schema-v1 report from app/platform metadata, aggregate local-library counts, aggregate download states, and the latest redacted events. A trusted-renderer IPC issues a ten-minute preview token; only that reviewed immutable snapshot can be saved.
+
+## macOS distribution and release assembly — v2.1.0
+
+Mac packages build on native `macos-15-intel` (x64) and `macos-15` (arm64) runners. Each job
+installs the lockfile, compiles checksum-pinned official FFmpeg 8.1.2 source, rebuilds native
+addons for Electron 43.4.1, runs the real security/SQLite boundary tests and packages DMG/ZIP.
+The package verifier checks Mach-O architecture, deep code signatures, FFmpeg's LGPL provenance
+and actual AAC/MP4 execution; production fuses are read from the packaged Electron executable.
+FFmpeg is outside ASAR and depends only on system dylibs. The source archive ships separately
+as a release asset; Linux/Windows keep their retained BtbN LGPL artifacts.
+
+Mac code signing is explicitly ad-hoc because no Apple Developer ID/notarization credentials
+are configured. Entitlements retain JIT/native-addon support; DYLD environment injection is
+not enabled. Gatekeeper approval and manual updates are documented. The trusted update-mode
+IPC directs Settings to the manual download action and prevents Squirrel download/install
+attempts on packaged Mac builds. Windows/Linux updater behavior is preserved.
+
+A version preflight checks both packages, both lockfile package entries, the changelog and tag.
+Artifact assembly runs on manual dispatch as well as tags, requires all five native targets,
+verifies real SHA-512 updater hashes, combines the two Mac manifests without overwriting an
+architecture, and generates flat SHA-256 checksums including licenses and corresponding Mac
+FFmpeg source. Only a matching version tag publishes the validated bundle.

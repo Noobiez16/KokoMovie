@@ -67,7 +67,7 @@ function normalizeIpcError(error: unknown): never {
   throw new Error('IPC request failed')
 }
 
-const proxyHeadersSchema = z.record(z.string().max(8192)).default({}).transform((headers, ctx) => {
+const proxyHeadersSchema = z.record(z.string(), z.string().max(8192)).default({}).transform((headers, ctx) => {
   const allowed = new Set(['accept', 'authorization', 'x-github-api-version'])
   const clean: Record<string, string> = {}
   for (const [name, value] of Object.entries(headers)) {

@@ -487,3 +487,38 @@ test('large desktop and native fullscreen show complete hero artwork with adapti
     await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isFullScreen())).toBe(false)
   }
 })
+
+test('local likes survive reload and produce personalized suggestions without repeating the liked title', async () => {
+  await application.evaluate(() => { process.env.KOKOMOVIE_UI_FIXTURE_EMPTY = '0' })
+  await page.evaluate(async () => {
+    if (!window.electronAPI) throw new Error('Desktop preload bridge is required')
+    await window.electronAPI.prefsSet({ language: 'en-US' })
+    for (const row of await window.electronAPI.likesList()) {
+      await window.electronAPI.likeSet({ contentId: row.content_id, contentType: row.content_type, liked: false })
+    }
+  })
+  const base = page.url().split('#')[0]
+  const contentId = '00000001-0000-4000-8000-000000000064'
+  await page.goto(`${base}#/content/${contentId}`)
+  await page.reload()
+  const like = page.getByRole('button', { name: 'Like', exact: true })
+  await expect(like).toBeEnabled()
+  await like.click()
+  await expect(page.getByRole('button', { name: 'Liked', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Liked', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await screenshot('personal-like-detail')
+  await page.goto(`${base}#/browse`)
+  const suggestions = page.locator('.km-content-row').filter({ has: page.getByRole('heading', { name: 'Picked for You', exact: true }) })
+  await expect(suggestions).toBeVisible()
+  await expect(suggestions.getByRole('button', { name: 'Fixture Movie 1-1', exact: true })).toHaveCount(0)
+  expect(await suggestions.locator('.km-content-card').count()).toBeGreaterThan(0)
+  await screenshot('personal-suggestions')
+  await screenshot('personal-suggestions', 960, 768)
+  await suggestions.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(visual, 'personal-suggestions-row-960.png'), animations: 'disabled' })
+  await page.goto(`${base}#/content/${contentId}`)
+  await page.getByRole('button', { name: 'Liked', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Like', exact: true })).toHaveAttribute('aria-pressed', 'false')
+  expect(await page.evaluate(async () => (await window.electronAPI!.likesList()).some(row => row.content_id === '00000001-0000-4000-8000-000000000064'))).toBe(false)
+})

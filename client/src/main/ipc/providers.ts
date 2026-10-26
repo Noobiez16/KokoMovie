@@ -28,7 +28,8 @@ import {
   validateProxyTargetUrl,
   validateResolvedAddresses,
 } from '../providers/network-policy.js'
-import { SupersedingRequestRegistry } from '../providers/request-lifecycle.js'
+import { SupersedingRequestRegistry, abortableProviderOperation } from '../providers/request-lifecycle.js'
+import { playbackVariants } from '../providers/hls-variants.js'
 import * as nodeHttp from 'http'
 import * as nodeHttps from 'https'
 import * as zlib from 'zlib'
@@ -1217,6 +1218,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>, si
   try {
     const isDirect = url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')
     if (isDirect) {
+      let directEvidence = ''
       // Chromium on the supported desktop targets cannot reliably decode HEVC/H.265. Some
       // providers expose those files with an .mp4 extension and an explicit codec directory
       // (notably VidLink's /resource/h265/ URLs), so a successful byte probe used to score them as
@@ -1237,6 +1239,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>, si
           logExtraction("Rejected direct video with HTTP " + probe.status + ": " + url.slice(0, 140))
           return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
         }
+        directEvidence = probe.headers['content-disposition'] ?? ''
         const contentType = (probe.headers["content-type"] ?? "").toLowerCase()
         const prefix = probe.firstBytes.toString("utf8").trimStart().toLowerCase()
         if (probe.firstBytes.length === 0 || contentType.includes("text/html") || prefix.includes("forbidden") || prefix.startsWith("<!doctype") || prefix.startsWith("<html")) {
@@ -1254,7 +1257,7 @@ async function getMaxResolution(url: string, headers: Record<string, string>, si
         logExtraction("Rejected unprobeable direct video: " + (error instanceof Error ? error.message : String(error)))
         return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
       }
-      return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: true }
+      return { resolution: 0, audioLangs: [], manifestText: directEvidence, mediaValidated: true }
     }
 
     // Main-process probes fetch the validated upstream directly. The local proxy URL is
@@ -1273,14 +1276,18 @@ async function getMaxResolution(url: string, headers: Record<string, string>, si
       return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
     }
     const text = response.buffer.toString('utf8')
+    const evidence = [text, url, response.finalUrl, response.headers['content-disposition'] ?? '']
 
-    if (text.includes('<html') || text.includes('<!DOCTYPE html')) {
+    if (/<(?:html[\s>]|!doctype\s+html)/i.test(text)) {
       logExtraction(`getMaxResolution got HTML page instead of playlist for ${url}`)
       return { resolution: 0, audioLangs: [], manifestText: text, mediaValidated: false } // Invalid stream
     }
 
-    if (!text.includes('#EXTM3U')) {
-      return { resolution: 0, audioLangs: [], manifestText: text, mediaValidated: true }
+    if (!text.trimStart().startsWith('#EXTM3U')) {
+      const type = response.headers['content-type'] ?? ''
+      const signature = response.buffer.subarray(4, 8).toString('ascii') === 'ftyp'
+        || response.buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+      return { resolution: 0, audioLangs: [], manifestText: evidence.join('\n'), mediaValidated: /^video\/(?:mp4|webm)/i.test(type) && signature }
     }
 
     const audioLangs = parseAudioLangs(text)
@@ -1290,36 +1297,29 @@ async function getMaxResolution(url: string, headers: Record<string, string>, si
         logExtraction('Rejected short HLS placeholder playlist')
         return { resolution: 0, audioLangs, manifestText: text, mediaValidated: false }
       }
-      return { resolution: 0, audioLangs, manifestText: text, mediaValidated: true }
+      return { resolution: 0, audioLangs, manifestText: evidence.join('\n'), mediaValidated: true }
     }
 
-    const matches = [...text.matchAll(/RESOLUTION=(\d+)x(\d+)/gi)]
-    if (matches.length === 0) {
-      return { resolution: 0, audioLangs, manifestText: text, mediaValidated: true }
+    const variants = playbackVariants(text, response.finalUrl)
+      .sort((a, b) => getStandardHeight(b.width, b.height) - getStandardHeight(a.width, a.height) || b.bandwidth - a.bandwidth)
+    if (text.includes('#EXT-X-STREAM-INF') && variants.length === 0) {
+      return { resolution: 0, audioLangs, manifestText: evidence.join('\n'), mediaValidated: false }
     }
-
-    const masterLines = text.split(/\r?\n/)
-    const firstVariantIndex = masterLines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF"))
-    const firstVariant = firstVariantIndex >= 0 ? masterLines[firstVariantIndex + 1]?.trim() : ""
-    if (firstVariant && !firstVariant.startsWith("#")) {
+    const bestVariant = variants[0]
+    if (bestVariant) {
       try {
-        const variantUrl = new URL(firstVariant, response.finalUrl).toString()
-        const variantResponse = await fetchNode(variantUrl, { probe, headers: { ...getStreamHeaders(variantUrl), "User-Agent": "Mozilla/5.0" } })
-        const variantText = variantResponse.buffer.toString("utf8")
-        if (variantText.includes("#EXTINF") && !isLikelyFullLengthPlaylist(variantText)) {
-          logExtraction("Rejected short HLS placeholder master")
-          return { resolution: 0, audioLangs, manifestText: text, mediaValidated: false }
+        const variantUrl = bestVariant.url
+        const variantResponse = await fetchNode(variantUrl, { probe, headers: { ...getStreamHeaders(variantUrl), 'User-Agent': 'Mozilla/5.0' } })
+        const variantText = variantResponse.buffer.toString('utf8')
+        evidence.push(variantUrl, variantResponse.finalUrl, variantResponse.headers['content-disposition'] ?? '', variantText)
+        if (variantResponse.status < 200 || variantResponse.status >= 300 || !variantText.trimStart().startsWith('#EXTM3U') || !isLikelyFullLengthPlaylist(variantText)) {
+          return { resolution: 0, audioLangs, manifestText: evidence.join('\n'), mediaValidated: false }
         }
-      } catch { /* the player retry/fallback path remains authoritative */ }
+      } catch {
+        return { resolution: 0, audioLangs, manifestText: evidence.join('\n'), mediaValidated: false }
+      }
     }
-
-    const standardHeights = matches.map((m) => {
-      const w = parseInt(m[1]!, 10)
-      const h = parseInt(m[2]!, 10)
-      return getStandardHeight(w, h)
-    }).filter((h) => !isNaN(h))
-
-    return { resolution: standardHeights.length > 0 ? Math.max(...standardHeights) : 0, audioLangs, manifestText: text, mediaValidated: true }
+    return { resolution: bestVariant ? getStandardHeight(bestVariant.width, bestVariant.height) : 0, audioLangs, manifestText: evidence.join('\n'), mediaValidated: true }
   } catch (err) {
     logExtraction(`Failed to check resolution for ${url}: ${err}`)
     return { resolution: 0, audioLangs: [], manifestText: '', mediaValidated: false }
@@ -1394,6 +1394,11 @@ export function registerProvidersIpc(): void {
   }))
 
   // Get stream from a specific provider
+  ipcMain.handle('providers:cancel-request', trustedIpcHandler((event) => {
+    directProviderRequests.abort(event.sender.id)
+    return { ok: true }
+  }))
+
   ipcMain.handle('providers:getStream', trustedIpcHandler(async (e, providerIdInput: unknown, reqInput: unknown): Promise<ProviderResult> => {
     const providerId = providerIdSchema.parse(providerIdInput)
     const req = validateStreamRequest(reqInput)
@@ -1423,7 +1428,7 @@ export function registerProvidersIpc(): void {
         }
       }
 
-      const resolves = await checkDomainResolves(embedUrl)
+      const resolves = await abortableProviderOperation(checkDomainResolves(embedUrl), requestLifecycle.signal)
       if (requestLifecycle.signal.aborted) {
         return { providerId, providerName: p.name, streams: [], error: 'Request cancelled' }
       }
@@ -1459,6 +1464,9 @@ export function registerProvidersIpc(): void {
       providerCircuits.recordSuccess(p.id)
 
       const probe = await getMaxResolution(result.url, result.headers, requestLifecycle.signal)
+      if (requestLifecycle.signal.aborted || !probe.mediaValidated) {
+        return { providerId, providerName: p.name, streams: [], error: requestLifecycle.signal.aborted ? 'Provider request timed out' : 'Stream validation failed' }
+      }
       const qualityInfo = classifySourceQuality({
         url: result.url,
         resolution: probe.resolution,
@@ -1472,7 +1480,7 @@ export function registerProvidersIpc(): void {
         streams: [{ url: toProxyUrl(result.url), quality: qualityInfo.resolutionLabel, qualityInfo, headers: result.headers, audioLangs: probe.audioLangs }],
       }
     } catch (err) {
-      providerCircuits.recordFailure(p.id)
+      if (!requestLifecycle.signal.aborted) providerCircuits.recordFailure(p.id)
       return {
         providerId,
         providerName: p.name,
@@ -1509,6 +1517,15 @@ export function registerProvidersIpc(): void {
 
     const controller = new AbortController()
     const signal = controller.signal
+    // Scope reuse to this lookup and exact headers: no stale CAM choice or signed
+    // URL survives another title search, and different credentials never share probes.
+    const probes = new Map<string, ReturnType<typeof getMaxResolution>>()
+    const probeStream = (url: string, headers: Record<string, string>) => {
+      const key = JSON.stringify([url, Object.entries(headers).sort(([a], [b]) => a.localeCompare(b))])
+      let pending = probes.get(key)
+      if (!pending) { pending = getMaxResolution(url, headers, signal); probes.set(key, pending) }
+      return pending
+    }
     try {
       setMaxListeners(30, signal)
     } catch { /* ignore */ }
@@ -1609,6 +1626,7 @@ export function registerProvidersIpc(): void {
           }
 
           const resolves = await checkDomainResolves(embedUrl)
+          if (signal.aborted) return
           if (!resolves) {
             providerCircuits.recordFailure(provider.id)
             logExtraction(`Provider ${provider.name} skipped: host ${new URL(embedUrl).hostname} did not resolve.`)
@@ -1634,7 +1652,7 @@ export function registerProvidersIpc(): void {
             providerCircuits.recordSuccess(provider.id)
 
             // Check resolution + alternate audio (dub) languages of the found stream
-            const { resolution, audioLangs, manifestText, mediaValidated } = await getMaxResolution(result.url, result.headers, signal)
+            const { resolution, audioLangs, manifestText, mediaValidated } = await probeStream(result.url, result.headers)
             logExtraction(`SUCCESS: ${provider.name} found stream in ${duration}ms | Resolution: ${resolution}p | Audio: [${audioLangs.join(',')}] | EmbedURL: ${embedUrl} | StreamURL: ${result.url}`)
             if (signal.aborted) return
             if (!mediaValidated) {

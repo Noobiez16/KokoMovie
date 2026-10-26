@@ -13,7 +13,7 @@ export const audioLanguageSchema = z.string().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/
 export const magnetUriSchema = z.string().trim().min(1).max(16_384)
   .regex(/^magnet:\?xt=urn:btih:(?:[a-fA-F\d]{40}|[A-Z2-7]{32})(?:&|$)/)
 
-const untrustedStreamHeadersSchema = z.record(z.string().max(8_192)).superRefine((headers, context) => {
+const untrustedStreamHeadersSchema = z.record(z.string(), z.string().max(8_192)).superRefine((headers, context) => {
   if (Object.keys(headers).length > 32) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Too many stream headers' })
   }

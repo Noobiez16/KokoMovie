@@ -1,6 +1,7 @@
 import i18n from '../i18n'
 
 export const providersApi = {
+  cancelRequest: () => window.electronAPI?.cancelProviderRequest?.().catch(() => {}),
   list: () => window.electronAPI!.listProviders(),
   toggle: (id: string, enabled: boolean) => window.electronAPI!.toggleProvider(id, enabled),
   getStream: (providerId: string, req: StreamRequest) => window.electronAPI!.getStream(providerId, req),

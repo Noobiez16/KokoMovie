@@ -172,6 +172,7 @@ export function SettingsPage() {
   // Auto-update preference. Authoritative copy lives in the main process (so startup
   // respects it); we hydrate the toggle from there and mirror to localStorage for instant UI.
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(() => localStorage.getItem('km_auto_update') !== 'false')
+  const [manualUpdates, setManualUpdates] = useState(false)
   const [updateCheck, setUpdateCheck] = useState<{ status: 'idle' | 'checking' | 'available' | 'up-to-date' | 'error' | 'dev'; version?: string; message?: string }>({ status: 'idle' })
 
   // Layout Tab selection
@@ -207,6 +208,7 @@ export function SettingsPage() {
         setAutoUpdateEnabled(enabled)
         localStorage.setItem('km_auto_update', String(enabled))
       }).catch(() => {})
+      window.electronAPI.getUpdateMode?.().then(mode => setManualUpdates(mode === 'manual')).catch(() => {})
       window.electronAPI.getTmdbCacheStats?.().then(setCacheStats).catch(() => {})
     }
   }, [])
@@ -249,6 +251,7 @@ export function SettingsPage() {
       if (res.status === 'available') setUpdateCheck({ status: 'available', version: res.version })
       else if (res.status === 'not-available') setUpdateCheck({ status: 'up-to-date', version: res.version })
       else if (res.status === 'dev') setUpdateCheck({ status: 'dev', version: res.version })
+      else if (res.status === 'manual') { setManualUpdates(true); setUpdateCheck({ status: 'idle' }) }
       else setUpdateCheck({ status: 'error', message: res.message })
     } catch (e) {
       setUpdateCheck({ status: 'error', message: e instanceof Error ? e.message : 'Check failed' })
@@ -377,7 +380,7 @@ export function SettingsPage() {
 
   async function handleApplyImport(mode: 'merge' | 'replace') {
     if (!importSelection?.token) return
-    if (mode === 'replace' && !window.confirm('Replace the current watchlist and playback history with this import? A SQLite backup will be created first.')) return
+    if (mode === 'replace' && !window.confirm(t('settings.replaceLibraryConfirmation'))) return
     setPortabilityBusy(true)
     try {
       await libraryPortabilityApi.applyImport(importSelection.token, mode)
@@ -574,7 +577,9 @@ export function SettingsPage() {
                     title={t('settings.applicationUpdates')}
                     description={t('settings.applicationUpdatesDescription')}
                   >
-                    <SettingRow
+                    {manualUpdates ? <SettingRow label={t('settings.manualUpdates')} description={t('settings.manualUpdatesDescription')}>
+                      <a href="https://github.com/Noobiez16/KokoMovie/releases/latest" target="_blank" rel="noreferrer" className="km-button-secondary">{t('settings.openDownloads')}</a>
+                    </SettingRow> : <><SettingRow
                       label={t('settings.automaticUpdates')}
                       description={t('settings.automaticUpdatesDescription')}
                     >
@@ -610,6 +615,7 @@ export function SettingsPage() {
                         )}
                       </div>
                     </SettingRow>
+                    </>}
                   </SectionCard>
                 </>
               )}
@@ -825,6 +831,7 @@ export function SettingsPage() {
                           <p className="text-white/80 text-xs font-semibold">{t('settings.importPreview')}</p>
                           <p className="text-white/45 text-xs mt-1">
                             {t('settings.importCounts', { watchlist: importSelection.preview.watchlist, history: importSelection.preview.positions, artwork: importSelection.preview.artwork })}
+                            {' · '}{t('settings.importLikes', { count: importSelection.preview.likes ?? 0 })}
                           </p>
                           <p className="text-white/60 text-[11px] mt-1">
                             {t('settings.importConflicts', { count: importSelection.preview.watchlistConflicts + importSelection.preview.positionConflicts })}

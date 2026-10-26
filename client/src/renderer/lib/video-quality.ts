@@ -1,4 +1,8 @@
 /** Nominal tiers also account for widescreen films whose encoded frame is cropped. */
+export function formatVideoQuality(height: number): string {
+  return height === 2160 ? '4K' : `${height}p`
+}
+
 export function getStandardHeight(width: number, height: number): number | null {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height <= 0) return null
   if (width >= 3840 || height >= 2160) return 2160

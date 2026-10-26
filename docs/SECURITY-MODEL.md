@@ -6,7 +6,7 @@ The React renderer is untrusted web content without Node.js integration. The pre
 
 The normal window uses context isolation, sandboxing, web security, no webviews, and no mixed content. Credential and arbitrary-URL IPC validates sender and payload. The API proxy permits GET only to measured TMDB and GitHub API hosts, with restricted headers, timeout, and response-size limits.
 
-In v2.0.0, the production renderer's script policy is `script-src 'self'`; inline
+Since v2.0.0, the production renderer's script policy is `script-src 'self'`; inline
 scripts and dynamic evaluation are blocked. Vite embeds the policy into the local HTML
 entry, and main applies policy headers only to the trusted main frame. Blob workers are
 explicitly permitted for media processing. Development permits Vite's inline/eval/HMR
@@ -36,9 +36,8 @@ short issued-URL reservations and accepted-job leases prevent ordinary source se
 from cancelling another active consumer. Forced shutdown still cancels and awaits resources.
 Shared resolver failure does not confer ownership to destroy an existing allocation.
 
-The normal TMDB repository additionally permits the exact movie/TV watch-provider and
-country-list endpoints. Availability links are restricted to the matching HTTPS TMDB title
-and country landing page; returned data cannot grant arbitrary navigation or filesystem access.
+TMDB access is restricted to catalog, related-title, account-free search and maturity metadata.
+The removed watch-provider/country-list endpoints are not part of the current capability set.
 
 Windows v2.0.0 source verification produced an unsigned local unpacked package. Its
 RunAsNode, NODE_OPTIONS and CLI inspect fuses were disabled and read back from the actual
@@ -52,3 +51,16 @@ a separate release operation and signing identity.
 - Third-party streams, torrents, subtitles, and metadata are hostile inputs.
 - Remaining IPC surfaces need progressive schema hardening as Phase 6/7 contracts stabilize.
 - Dependency and Electron/Chromium advisories require continuous review.
+
+## v2.1.0 Mac distribution
+
+macOS packages are ad-hoc signed, retain hardened runtime/JIT/native-addon entitlements and
+have production fuses verified after packing. The DYLD environment entitlement is removed.
+Ad-hoc signing is not Apple Developer ID/notarization or proof of publisher identity. Mac
+updates use a trusted manual-delivery mode instead of Squirrel automatic installation.
+
+Native runner jobs verify packaged architecture, code signatures, SQLite/keytar loading and
+LGPL FFmpeg execution/provenance. Every release is assembled and checked before publishing:
+version/tag consistency, all platform assets, actual updater SHA-512 values and flat SHA-256
+checksums. Corresponding Mac FFmpeg source accompanies the release. CI does not establish
+Gatekeeper approval on a downloaded/quarantined install or a real installed upgrade.

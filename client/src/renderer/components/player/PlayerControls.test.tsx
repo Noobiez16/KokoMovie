@@ -57,8 +57,27 @@ describe('actual video quality controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '360p' }))
     expect(base.onLevelChange).toHaveBeenCalledWith(1)
     fireEvent.click(screen.getByRole('button', { name: /^Quality.+/ }))
-    fireEvent.click(screen.getByRole('button', { name: '2160p' }))
+    fireEvent.click(screen.getByRole('button', { name: '4K' }))
     expect(base.onLevelChange).toHaveBeenLastCalledWith(3)
+  })
+  it('always shows 4K, 1080p and 720p, disabling genuinely missing variants', () => {
+    render(<PlayerControls {...base} hls={{} as Props['hls']} levels={[{ height: 1080, bitrate: 4 }]} />)
+    openQuality()
+    const options = screen.getAllByRole('button').filter(button => /^(4K|1080p|720p)/.test(button.textContent ?? ''))
+    expect(options.map(button => button.textContent?.trim())).toEqual(['4KUnavailable', '1080p', '720pUnavailable'])
+    expect((screen.getByRole('button', { name: '4K Unavailable' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('reports actual direct 4K without manufacturing lower renditions', () => {
+    render(<PlayerControls {...base} decodedHeight={2160} />)
+    openQuality()
+    expect(screen.getByRole('button', { name: '4K ✓' }).getAttribute('aria-pressed')).toBe('true')
+    expect((screen.getByRole('button', { name: '1080p Unavailable' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('chooses the highest-bitrate actual variant within a selected tier', () => {
+    render(<PlayerControls {...base} hls={{} as Props['hls']} levels={[{ height: 2160, bitrate: 8 }, { height: 1080, bitrate: 4 }, { height: 2160, bitrate: 16 }]} />)
+    openQuality()
+    fireEvent.click(screen.getByRole('button', { name: '4K' }))
+    expect(base.onLevelChange).toHaveBeenCalledWith(2)
   })
   it.each([720, 1080])('disables the missing HLS tier beside real %ip', (height) => {
     render(<PlayerControls {...base} hls={{} as Props['hls']} levels={[{ height, bitrate: 1 }]} />)

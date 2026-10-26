@@ -24,6 +24,15 @@ The GPL-only components (`libx264`, `libx265`, `libxvid`, `libvidstab`, `frei0r`
 in this build. KokoMovie only uses stream copy, the native AAC encoder, the MP4/MOV muxers, and
 the Matroska/AVI/MOV/MPEG-TS demuxers — all LGPL.
 
+macOS `darwin-x64` and `darwin-arm64` use unmodified official **FFmpeg 8.1.2** source from
+<https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz>, SHA-256
+`464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`.
+`scripts/fetch-ffmpeg.mjs` records the exact configure arguments and native target. External
+library autodetection, GPL and nonfree components are disabled; only system dylibs may be
+required. LGPLv3 text and provenance accompany the executable. The unmodified source archive
+is also published with the KokoMovie release. No Mac FFmpeg binary is fetched from an
+unverified third-party package.
+
 **Corresponding source:** FFmpeg source for this exact build is available from
 <https://github.com/BtbN/FFmpeg-Builds> and <https://ffmpeg.org/download.html>. The full licence
 text ships with every installer at `resources/ffmpeg/LICENSE.txt`, alongside

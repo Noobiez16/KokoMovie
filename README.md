@@ -6,7 +6,7 @@
 
 **A local movie and TV library with catalog discovery, playback and offline files.**
 
-[![Version](https://img.shields.io/badge/version-2.0.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0-8B5CF6?style=for-the-badge)](https://github.com/Noobiez16/KokoMovie/releases)
 [![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20·%20macOS-100B21?style=for-the-badge&labelColor=8B5CF6)](#download)
 [![Auto-Update](https://img.shields.io/badge/updates-automatic-A78BFA?style=for-the-badge)](#automatic-updates)
 
@@ -27,19 +27,25 @@ Pick your system and click to grab the latest version from the
 &nbsp;
 [![Download for Linux (AppImage)](https://img.shields.io/badge/Linux-Download%20.AppImage-A78BFA?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
 
+[![Download for macOS](https://img.shields.io/badge/macOS-Download%20.dmg-A78BFA?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Noobiez16/KokoMovie/releases/latest)
+
 Linux downloads are published separately for **x64/amd64** and **ARM64/aarch64**. Choose the
 artifact whose architecture matches `uname -m` (`x86_64` → `x64`, `aarch64` → `arm64`).
 
 </div>
 
-> **On macOS?** A ready-made installer isn't published yet. You can build the app
-> yourself — see [For Developers](#for-developers) below.
+macOS 12+ downloads have separate **Intel (`mac-x64`)** and **Apple Silicon (`mac-arm64`)**
+DMG/ZIP files. Open the DMG and drag KokoMovie into Applications. These builds are **ad-hoc
+signed, not Apple-notarized**. Verify the checksum and use macOS's per-app approval flow if
+Gatekeeper blocks it; see [Apple's instructions](https://support.apple.com/102445). Mac updates
+are installed manually from Releases, with the local library preserved.
 
 ---
 
 ## What is KokoMovie?
 
-**KokoMovie 2.0.0** introduces an HBO Max-inspired desktop composition:
+**KokoMovie 2.1.0** adds native macOS packages, personal suggestions, stronger CAM notices,
+provider recovery and real 4K quality choices. The desktop composition includes
 top navigation with the original centered logo, cinematic title artwork, a landscape
 Continue Watching row, genre navigation and keyboard-operated season tabs. The clean header
 has no separator line; My Library joins saved titles and viewing history under one menu entry.
@@ -47,13 +53,13 @@ Search expands left in the header and suggests titles below the field as you typ
 the current page until you select a detail. It contracts right when dismissed; an empty or
 one-character field shows no instructional panel. Existing `/search` links retain filters and pagination.
 Hero/detail artwork shows its complete frame on large and ultrawide screens, with fluid height
-and higher-resolution trusted artwork when needed. Playback exposes real 720p/1080p choices;
+and higher-resolution trusted artwork when needed. Playback exposes real 4K / 1080p / 720p choices;
 unavailable variants are disabled, and direct videos report their decoded quality.
 The existing purple palette and logo bytes are preserved;
 motion respects the system's reduced-motion preference. Login and profiles are not added.
 It also adds permanent completed downloads, controlled
 transfer teardown and a stricter renderer script policy.
-The `v2.0.0` tag runs installer builds and publication through
+The `v2.1.0` tag runs installer builds and publication through
 [GitHub Actions](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml).
 Downloads become available when the release workflow succeeds. See
 [current state](docs/current-state.md) for verified scope.
@@ -66,6 +72,8 @@ External catalog access uses your TMDB credential; source availability depends o
 - **Source discovery** — prefers available non-CAM sources at 4K, 1440p, 1080p, then 720p; manual selection, visible errors and retries remain available
 - **Built-in player** — quality options, subtitles, Picture-in-Picture, and keyboard shortcuts
 - **On-device storage** — watchlists, history, and preferences are stored locally on your machine
+- **Picked for You** — suggestions combine explicit Likes, meaningful watch history and My List. Use Like on a title's detail page; suggestions appear on Home after there is enough local interest and related catalog data.
+- **Honest source quality** — CAM/TS evidence triggers confirmation and a player warning. Movies with no release evidence show an unverified-source notice; encoded 1080p/4K dimensions alone do not establish a clean release.
 - **Watch offline** — completed portable MP4 files stay until you remove them; equal-title downloads receive distinct filenames
 - **Release updates** — optional update checks for published builds
 - **English, Español, Français** — switch the localised interface in Settings, with no restart
@@ -103,12 +111,10 @@ with catalog availability and the selected interface language.
 
 ## Automatic Updates
 
-You only download KokoMovie once. After that, it **checks for new versions on its own**
-and installs them quietly in the background — the next time you open the app, you're
-already on the latest version. No re-downloading, no reinstalling.
-
-> On Linux, automatic updates work with the **AppImage** version. The `.deb` package
-> is updated like other system apps when you reinstall it.
+Windows and Linux AppImage builds can check for updates and install them when enabled.
+Linux `.deb` packages are updated by installing a newer package. The ad-hoc signed macOS
+build uses **Settings → Manual updates → Open downloads**; quit the app and replace it in
+Applications with the latest matching architecture. Your library remains in local app data.
 
 ---
 
@@ -209,7 +215,7 @@ KokoMovie/
 | `npm run dev:client` | Start the Electron/Vite client locally |
 | `npm run build` | Build the production bundle |
 | `npm run lint` | Run ESLint |
-| `npm run typecheck` | Typecheck renderer and main process |
+| `npm run typecheck` | Typecheck renderer, main process and Electron tests |
 | `npm test` | Run the deterministic Vitest suite |
 | `npm run audit:production` | Production dependency advisory policy |
 | `npm run check:licenses` | Distribution licence gate (`-- --report` for the inventory) |
@@ -217,9 +223,12 @@ KokoMovie/
 
 ### Bundled FFmpeg
 
-FFmpeg is not an npm dependency. `npm run vendor:ffmpeg` downloads a checksum-pinned **LGPL-3.0**
+FFmpeg is not an npm dependency. `npm run vendor:ffmpeg` obtains a checksum-pinned **LGPL-3.0**
 build into `client/vendor/ffmpeg/<platform>-<arch>/` and refuses any binary configured with
-GPL-only components. The `dist:*` scripts run it automatically; run it manually if you want
+GPL-only components. Linux/Windows use pinned BtbN archives; macOS compiles unmodified official
+FFmpeg 8.1.2 source on a matching native Mac using Xcode Command Line Tools and `make`, with
+external-library autodetection disabled. CI checks for unexpected dylib dependencies and
+publishes the exact Mac FFmpeg source archive. The `dist:*` scripts run it automatically; run it manually if you want
 torrent remuxing or download finalization while developing with `npm run dev:client`.
 
 ### Building installers
@@ -236,19 +245,32 @@ cd client && npm run dist:linux:arm64
 # Windows (.exe)  →  client/release/windows/   (run on Windows)
 cd client && npm run dist:win
 
-# macOS (.dmg)  →  client/release/mac/   (run on a Mac; needs Apple signing for notarization)
-cd client && npm run dist:mac
+# macOS (.dmg + .zip) → client/release/mac/ (run on a matching native Mac)
+xcode-select --install # once, if Command Line Tools are missing
+npm run dist:mac --workspace=client
+# Explicit native architecture (not cross-compilation)
+npm run dist:mac:x64 --workspace=client
+npm run dist:mac:arm64 --workspace=client
 ```
 
 ### Releasing (auto-update pipeline)
 
-Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on any
-`v*` tag. The same workflow can be dispatched manually to validate both Linux architectures without publishing a release. The workflow builds Windows plus native Linux x64 and ARM64 jobs, then publishes the installers, `SHA256SUMS.txt`, **plus the
-`latest.yml` / `latest-linux*.yml` and `.blockmap` files** to a GitHub Release.
+Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on a matching
+`v*` tag. Dispatch the workflow on a preparation branch first: this runs the same quality,
+native Electron, Windows, Linux x64/ARM64, macOS Intel/Apple Silicon and release-assembly gates
+without publishing. Mac jobs use `macos-15-intel` and `macos-15` and verify architecture,
+code signatures, native modules, FFmpeg execution and production fuses.
+
+The assembly gate requires every installer, verifies updater SHA-512 hashes, combines both Mac
+metadata files, includes licenses/corresponding FFmpeg source, and generates a flat
+`SHA256SUMS.txt`. Publication consumes only this validated artifact bundle. App/root/lockfile,
+changelog and tag versions must agree before builds begin.
 
 ```bash
-git tag v2.0.0
-git push origin v2.0.0
+gh workflow run electron-release.yml --ref <preparation-branch>
+# After the complete validation run succeeds:
+git tag -a v2.1.0 -m "KokoMovie v2.1.0"
+git push origin v2.1.0
 ```
 
 Auto-update is configured in `client/src/main/updater.ts` and the `publish:` block of
@@ -256,7 +278,7 @@ each `client/electron-builder.*.yml`.
 
 ### Tech stack
 
-**Client:** Electron 43 (Chromium 150 · Node 24) · React 19 · Vite 5 · TypeScript · SQLite 3 (via `better-sqlite3` v13) · TanStack Query v5 · Zustand v5 · hls.js v1.5 · bundled LGPL FFmpeg 8.1
+**Client:** Electron 43 (Chromium 150 · Node 24) · React 19 · Vite 8 · TypeScript · SQLite 3 (via `better-sqlite3` v13) · TanStack Query v5 · Zustand v5 · hls.js v1.6 · bundled LGPL FFmpeg 8.1
 
 </details>
 
@@ -280,4 +302,7 @@ provenance ship beside it. Third-party components are inventoried in
 
 ### Signing and verification limits
 
-Current Windows and Linux artifacts are unsigned. Users may receive operating-system trust warnings, and unsigned artifacts do not provide platform-level publisher identity. Every release must therefore include `SHA256SUMS.txt`; users can verify downloads with `sha256sum -c SHA256SUMS.txt`. macOS remains build-only until Apple signing and notarization are configured and validated.
+Current Windows and Linux artifacts are unsigned. Users may receive operating-system trust warnings, and unsigned artifacts do not provide platform-level publisher identity. Every release must therefore include `SHA256SUMS.txt`; users can verify downloads with `sha256sum -c SHA256SUMS.txt`. macOS installers are ad-hoc signed and not notarized; they provide no Apple-verified publisher
+identity and may require per-app Gatekeeper approval. Their updates are manual. On macOS,
+verify downloaded files with `shasum -a 256 -c SHA256SUMS.txt` after downloading every listed
+asset, or compare the checksum of your chosen file against the manifest.

@@ -19,6 +19,8 @@ secret:
       match: 0c8716a94ac1fe22eb56e7a0cedd0f00c1d8fae712ec19973d679a7a87916743
     - name: FFmpeg win32-x64 release archive SHA-256
       match: 089e4169e93b2b3f3acbfced3c0704d24276a225641bdda04d796d28b07a2a38
+    - name: Official FFmpeg 8.1.2 source archive SHA-256
+      match: 464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
 
     # Static UUID fixture asserting that the download-id schema accepts a well-formed UUID.
     - name: Download identifier test fixture UUID

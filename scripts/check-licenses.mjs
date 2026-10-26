@@ -106,9 +106,9 @@ for (const manifest of ['package.json', 'client/package.json']) {
 // ── 2. The bundled FFmpeg executable ───────────────────────────────────────
 // FFmpeg is the one redistributed binary that is not an npm package. A GPL build here is what
 // blocked the previous release, so its recorded provenance is verified whenever it is vendored.
-const { FFMPEG_TARGETS } = await import('./fetch-ffmpeg.mjs')
+const { FFMPEG_TARGETS, MACOS_FFMPEG_TARGETS, MACOS_FFMPEG_SOURCE, assertLgplConfiguration } = await import('./fetch-ffmpeg.mjs')
 let vendoredTargets = 0
-for (const target of Object.keys(FFMPEG_TARGETS)) {
+for (const target of [...Object.keys(FFMPEG_TARGETS), ...MACOS_FFMPEG_TARGETS]) {
   const provenancePath = join(repoRoot, 'client', 'vendor', 'ffmpeg', target, 'PROVENANCE.json')
   if (!existsSync(provenancePath)) continue
   vendoredTargets += 1
@@ -116,9 +116,12 @@ for (const target of Object.keys(FFMPEG_TARGETS)) {
   if (!provenance.license.startsWith('LGPL')) {
     problems.push(`Vendored FFmpeg for ${target} is ${provenance.license}; only an LGPL build may ship.`)
   }
-  if (provenance.sha256 !== FFMPEG_TARGETS[target].sha256) {
+  const expected = FFMPEG_TARGETS[target] ?? MACOS_FFMPEG_SOURCE
+  if (provenance.sha256 !== expected.sha256) {
     problems.push(`Vendored FFmpeg for ${target} does not match the pinned digest; re-run npm run vendor:ffmpeg.`)
   }
+  try { assertLgplConfiguration(join(repoRoot, 'client', 'vendor', 'ffmpeg', target, FFMPEG_TARGETS[target]?.binary ?? 'ffmpeg'), target) }
+  catch (error) { problems.push(String(error.message)) }
   for (const flag of ['--enable-gpl', '--enable-nonfree', '--enable-libx264', '--enable-libx265']) {
     if (provenance.configuration.includes(flag)) {
       problems.push(`Vendored FFmpeg for ${target} was configured with ${flag}.`)

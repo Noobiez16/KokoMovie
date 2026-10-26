@@ -50,6 +50,8 @@ const frFR = {
     searchPlaceholder: 'Rechercher des films, séries et genres…',
   },
   catalog: {
+    forYou: 'Sélection pour vous', forYouDescription: 'Des suggestions selon vos mentions J’aime, votre historique et Ma liste.',
+
     featured: 'À la une',
     genreNavigation: 'Explorer les genres',
     trending: 'Tendances', popularMovies: 'Films populaires', popularSeries: 'Séries populaires', topRatedMovies: 'Films les mieux notés', topRatedSeries: 'Séries les mieux notées',
@@ -69,8 +71,20 @@ const frFR = {
     removeContinue: 'Retirer de Continuer à regarder', moreInfo: 'Plus d’informations', trailer: 'Bande-annonce',
     genres: { action: 'Action', comedy: 'Comédie', drama: 'Drame', sciFi: 'Science-fiction', horror: 'Horreur', thriller: 'Thriller', romance: 'Romance', animation: 'Animation', documentary: 'Documentaire', fantasy: 'Fantastique', mystery: 'Mystère', crime: 'Crime' },
   },
-  detail: { overview: 'Synopsis', cast: 'Distribution', seasons: 'Saisons', episodes: 'Épisodes', season: 'Saison {{number}}', episode: 'Épisode {{number}}', addToList: 'Ajouter à Ma liste', removeFromList: 'Retirer de Ma liste', trailer: 'Bande-annonce', runtimeMinutes: '{{count}} min', notFound: 'Contenu introuvable', seasonCount_one: '{{count}} saison', seasonCount_other: '{{count}} saisons', watchNow: 'Regarder', keepWatching: 'Continuer à regarder', inMyList: 'Dans Ma liste', options: 'Options', queued: 'En attente', queuing: 'Mise en file…', queuingAll: 'Mise en file de tout…', downloadAllSeasons: 'Télécharger toutes les saisons', asRole: 'dans le rôle de {{role}}', episodeOptions: 'Options de l’épisode', moreLikeThis: 'Dans le même genre', chooseDownloadSource: 'Choisir la source de téléchargement', bestStreamDescription: 'Meilleure source sélectionne automatiquement la meilleure source 1080p validée.', findingTorrentLanguages: 'Recherche des langues torrent 1080p…', chooseTorrentLanguage: 'Torrent · choisir la langue audio' },
+  detail: {
+    like: 'J’aime', liked: 'Aimé',
+    overview: 'Synopsis', cast: 'Distribution', seasons: 'Saisons', episodes: 'Épisodes', season: 'Saison {{number}}', episode: 'Épisode {{number}}', addToList: 'Ajouter à Ma liste', removeFromList: 'Retirer de Ma liste', trailer: 'Bande-annonce', runtimeMinutes: '{{count}} min', notFound: 'Contenu introuvable', seasonCount_one: '{{count}} saison', seasonCount_other: '{{count}} saisons', watchNow: 'Regarder', keepWatching: 'Continuer à regarder', inMyList: 'Dans Ma liste', options: 'Options', queued: 'En attente', queuing: 'Mise en file…', queuingAll: 'Mise en file de tout…', downloadAllSeasons: 'Télécharger toutes les saisons', asRole: 'dans le rôle de {{role}}', episodeOptions: 'Options de l’épisode', moreLikeThis: 'Dans le même genre', chooseDownloadSource: 'Choisir la source de téléchargement', bestStreamDescription: 'Meilleure source sélectionne automatiquement la meilleure source validée, en privilégiant la 4K, puis le 1080p et le 720p.', findingTorrentLanguages: 'Recherche des langues torrent 1080p…', chooseTorrentLanguage: 'Torrent · choisir la langue audio' },
   player: {
+    switchCancelled: "Le changement de source a été annulé. Choisissez une source pour continuer.",
+    switchTimedOut: "Ce fournisseur n’a pas répondu à temps. Réessayez ou choisissez une autre source.",
+    switchFailed: "Ce fournisseur n’a pas pu démarrer. Réessayez ou choisissez une autre source.",
+    sourceNotResponding: "Cette source ne répond plus. Réessayez ou choisissez une autre source.",
+    missingMetadata: "Les identifiants nécessaires pour demander une source sont manquants.",
+    dubUnavailable: "Aucune source disponible ne propose la langue audio demandée.",
+    noPlayableSource: "Aucune source n’a pu lancer la lecture. Réessayez ou choisissez une source.",
+    seekTimedOut: "Le torrent n’a pas chargé cette position à temps. Réessayez ou choisissez une autre source.",
+    camNotice: 'Enregistrement CAM / TS. Un fichier 1080p ou 4K peut être filmé en salle ; sa résolution ne garantit pas la qualité de la source.', unverifiedNotice: 'Qualité de la source non vérifiée. 1080p / 4K indique les dimensions du fichier ; il peut encore s’agir d’un enregistrement CAM.',
+
     torrentCapacityBusy: 'Toutes les connexions P2P sont occupées. Attendez la fin d’un téléchargement, annulez-en un ou réessayez dans une minute.',
     findingStream: 'Recherche de la meilleure source…', noStream: 'Aucune source trouvée', streamError: 'Erreur de lecture', retrying: 'Essai d’une autre source…', source: 'Source', sourceSearching: 'Recherche', sourceAvailable: 'Disponible', sourceUnavailable: 'Indisponible', sourceTimedOut: 'Délai dépassé', camWarning: 'Cette source semble être un enregistrement CAM ou telesync. Continuer quand même ?',
     quality: 'Qualité', qualityUnavailable: 'Indisponible', audio: 'Audio', subtitles: 'Sous-titres', subtitleOff: 'Désactivés', fullscreen: 'Plein écran', exitFullscreen: 'Quitter le plein écran',
@@ -83,6 +97,11 @@ const frFR = {
   history: { title: 'Historique de visionnage', myList: 'Ma liste', empty: 'Aucun visionnage', emptyList: 'Votre liste est vide', completed: 'Terminé', inProgress: 'En cours · {{percent}} %', continue: 'Continuer', removeTitle: 'Retirer de l’historique', loadError: 'Impossible de charger l’historique de visionnage.', watchlistLoadError: 'Impossible de charger votre liste.', emptyDescription: 'Rien ici pour le moment ; ce que vous regardez apparaîtra ici.', loadMore: 'Charger plus', unknownTitle: 'Titre inconnu', addedOn: 'Ajouté le {{date}}' },
   providers: { title: 'Fournisseurs de streaming', description: 'Activez ou désactivez les sources locales.', enabled: 'Activé', disabled: 'Désactivé', temporarilyUnavailable: 'Temporairement indisponible', fullDescription: 'Les fournisseurs sont des sources tierces utilisées par KokoMovie pour trouver des vidéos. Activez-les ou désactivez-les ci-dessous. KokoMovie essaie chaque fournisseur activé dans l’ordre jusqu’à trouver une source.', loading: 'Chargement des fournisseurs…', recommended: 'Recommandé', enableProvider: 'Activer {{name}}', disableProvider: 'Désactiver {{name}}', noteLabel: 'Remarque :', note: 'L’extraction ouvre une fenêtre masquée pour charger le fournisseur et localiser l’URL vidéo. Les sources sont généralement trouvées en 10 à 20 secondes.' },
   settings: {
+    manualUpdates: 'Mises à jour manuelles',
+    manualUpdatesDescription: 'Installez les nouvelles versions macOS depuis GitHub Releases. Votre bibliothèque locale reste sur cet appareil.',
+    openDownloads: 'Ouvrir les téléchargements',
+    importLikes: '{{count}} mentions J’aime', replaceLibraryConfirmation: 'Remplacer Ma liste, les mentions J’aime et l’historique par cet import ? Une sauvegarde SQLite sera créée au préalable.',
+
     title: 'Paramètres', description: 'Gérez les préférences locales, la confidentialité, les téléchargements et la configuration API.', preferences: 'Préférences', apiConfiguration: 'Configuration API',
     downloads: 'Téléchargements', privacy: 'Confidentialité', playback: 'Lecture', playbackDescription: 'Langue, lecture automatique et filtrage du contenu', interfaceLanguage: 'Langue de l’interface',
     languageDescription: 'Modifie immédiatement le texte de KokoMovie et du catalogue', autoplay: 'Lecture automatique de l’épisode suivant', autoplayDescription: 'Lit automatiquement l’épisode suivant à la fin',

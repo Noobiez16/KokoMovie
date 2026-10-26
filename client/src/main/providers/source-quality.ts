@@ -13,8 +13,8 @@ export interface SourceQualityInput {
   mediaValidated?: boolean
 }
 
-const CAM_PATTERN = /(?:^|[^a-z])(?:hd[-_. ]?cam|camrip|cam)(?:[^a-z]|$)/i
-const TELESYNC_PATTERN = /(?:^|[^a-z])(?:telesync|hd[-_. ]?ts|tsrip)(?:[^a-z]|$)/i
+const CAM_PATTERN = /(?:^|[^a-z])(?:hd[-_. ]?cam(?:[-_. ]?rip)?|cam[-_. ]?rip|cam)(?:[^a-z]|$)/i
+const TELESYNC_PATTERN = /(?:^|[^a-z])(?:tele[-_. ]?sync|hd[-_. ]?ts|ts[-_. ]?rip)(?:[^a-z]|$)/i
 const STANDARD_PATTERN = /(?:web[-_. ]?dl|web[-_. ]?rip|blu[-_. ]?ray|brrip|remux|hdtv)/i
 
 function resolutionLabel(resolution: number): string {
@@ -27,6 +27,15 @@ function resolutionLabel(resolution: number): string {
 }
 
 function detectReleaseType(value: string): StreamReleaseType {
+  // Nested/encoded provider URLs must not hide release markers. Keep work bounded.
+  value = value.slice(0, 5 * 1024 * 1024)
+  for (let pass = 0; pass < 2; pass++) {
+    const decoded = value.replace(/(?:%[0-9a-f]{2})+/gi, encoded => {
+      try { return decodeURIComponent(encoded) } catch { return encoded }
+    })
+    if (decoded === value) break
+    value = decoded
+  }
   if (CAM_PATTERN.test(value)) return 'cam'
   if (TELESYNC_PATTERN.test(value)) return 'telesync'
   if (STANDARD_PATTERN.test(value)) return 'standard'
@@ -51,8 +60,10 @@ export function classifySourceQuality(input: SourceQualityInput): StreamQuality 
   const inferredType = explicitUrlType !== 'unknown'
     ? explicitUrlType
     : detectReleaseType(`${input.url}\n${input.manifestText ?? ''}`)
-  const releaseType = declaredType !== 'unknown' ? declaredType : inferredType
-  const confidence: StreamQualityConfidence = declaredType !== 'unknown'
+  // A positive provider claim must never erase a camera-recording marker elsewhere.
+  const negativeType = isCam(declaredType) ? declaredType : isCam(inferredType) ? inferredType : null
+  const releaseType = negativeType ?? (declaredType !== 'unknown' ? declaredType : inferredType)
+  const confidence: StreamQualityConfidence = negativeType && negativeType !== declaredType ? 'inferred' : declaredType !== 'unknown'
     ? 'declared'
     : inferredType !== 'unknown'
       ? 'inferred'

@@ -6,14 +6,15 @@ import { promisify } from 'node:util'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { isolatedCredentials } from './isolated-credentials'
 
-for (const height of [720, 1080]) {
+for (const height of [720, 1080, 2160]) {
   test(`actual ${height}p playback preserves decoded pixels and media session in fullscreen`, async () => {
     await mkdir(resolve('.codex/tmp'), { recursive: true })
     const directory = await mkdtemp(resolve('.codex/tmp/fullscreen-media-'))
     const visual = resolve('.codex/visual')
     await mkdir(visual, { recursive: true })
     const fixture = join(directory, 'source.mp4')
-    const width = height === 720 ? 1280 : 1920
+    const width = height === 720 ? 1280 : height === 1080 ? 1920 : 3840
+    const quality = height === 2160 ? '4K' : `${height}p`
     const ffmpeg = resolve('vendor/ffmpeg', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
     await promisify(execFile)(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=purple:s=${width}x${height}:r=24`, '-t', '20', '-c:v', 'libopenh264', '-b:v', '500k', '-movflags', '+faststart', fixture], { windowsHide: true })
     const bytes = await readFile(fixture)
@@ -62,11 +63,11 @@ for (const height of [720, 1080]) {
       })
       await page.mouse.move(300, 300)
       await page.getByRole('button', { name: 'Playback settings', exact: true }).click()
-      await page.getByRole('button', { name: new RegExp(`^Quality.*${height}p`) }).click()
-      await expect(page.getByRole('button', { name: new RegExp(`^${height}p`) })).toBeVisible()
+      await page.getByRole('button', { name: new RegExp(`^Quality.*${quality}`) }).click()
+      await expect(page.getByRole('button', { name: new RegExp(`^${quality}`) })).toBeVisible()
       await expect(page.getByRole('button', { name: new RegExp(`^${height === 720 ? 1080 : 720}p`) })).toBeDisabled()
       await page.mouse.click(200, 200)
-      await expect(page.getByRole('button', { name: new RegExp(`^${height}p`) })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: new RegExp(`^${quality}`) })).toHaveCount(0)
       await video.evaluate((element: HTMLVideoElement) => { element.muted = true; return element.play() })
       await page.getByTitle('Fullscreen', { exact: true }).click()
       await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true)
@@ -85,8 +86,8 @@ for (const height of [720, 1080]) {
       expect(await page.evaluate(() => (window as unknown as { fullscreenFixtureReloads: number }).fullscreenFixtureReloads)).toBe(0)
       await page.mouse.move(300, 300)
       await page.getByRole('button', { name: 'Playback settings', exact: true }).click()
-      await page.getByRole('button', { name: new RegExp(`^Quality.*${height}p`) }).click()
-      await expect(page.getByRole('button', { name: new RegExp(`^${height}p`) })).toBeVisible()
+      await page.getByRole('button', { name: new RegExp(`^Quality.*${quality}`) }).click()
+      await expect(page.getByRole('button', { name: new RegExp(`^${quality}`) })).toBeVisible()
       await expect(page.getByRole('button', { name: new RegExp(`^${height === 720 ? 1080 : 720}p`) })).toBeDisabled()
       await page.screenshot({ path: join(visual, `fullscreen-video-${height}.png`), animations: 'disabled' })
       await writeFile(join(visual, `fullscreen-video-${height}.json`), JSON.stringify(metrics, null, 2))

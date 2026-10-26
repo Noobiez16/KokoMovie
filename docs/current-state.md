@@ -1,9 +1,28 @@
 # KokoMovie Current State
 
-**Current review:** 2026-10-07
-**Source target:** v2.0.0; release integration into `main` with annotated tag `v2.0.0`. The original development branch is `codex/kokomovie-v2-source-priority`, based on `7e1c219`; CI recovery is preserved in `codex/kokomovie-v2-ci-recovery`.
+**Current review:** 2026-10-26
+**Source target:** v2.1.0. Root/client packages, lockfile and changelog use 2.1.0; release tag is v2.1.0.
+**Status:** release preparation on `codex/kokomovie-v2-1-0-macos`; tag creation waits for hosted CI. Local verification passes 721 units, 20 Electron tests, strict TypeScript, lint, build, audit, licenses and fuses. See testing.md.
+**Platforms:** Windows x64; Linux x64/amd64 and ARM64; macOS Intel x64 and Apple Silicon ARM64 (macOS 12+).
+
+The v2.1.0 release combines local Likes/personal suggestions, CAM evidence/player warnings,
+provider switching/recovery and real 4K choices with native Mac DMG/ZIP distribution. Mac jobs
+compile pinned official LGPL FFmpeg 8.1.2 source, rebuild native modules and verify the package's
+architecture, signatures, FFmpeg execution, hardened startup and production fuses. Windows/Linux
+keep the existing retained BtbN LGPL build `autobuild-2026-07-31-14-10`.
+
+No Apple signing credentials are configured. Mac packages are explicitly ad-hoc signed, not
+notarized; Gatekeeper approval may be needed and updates are manual. There is no App Store build
+or claim of Apple-verified publisher identity. Architecture-specific artifacts and their real
+hashes are assembled and checked on manual dispatch as well as tags. Only a matching version
+tag publishes the validated five-target release bundle, notices, source archive and checksums.
+
+### Previous v2.0.0 release evidence
+
+**Prior review:** 2026-10-26 (v2.0.0 local refinement baseline)
+**Previous source target:** v2.0.0; release integration into `main` with annotated tag `v2.0.0`. The original development branch is `codex/kokomovie-v2-source-priority`, based on `7e1c219`; CI recovery is preserved in `codex/kokomovie-v2-ci-recovery`.
 **Recovery points:** `codex/kokomovie-v2-fullscreen-polish` remains at `7e1c219`; `codex/kokomovie-v2-inline-search` remains at `1cc797a`; `codex/kokomovie-v2-hbo-ui` remains at `2d9ec65`; `codex/kokomovie-v2-0-0` remains at `c465dbb`.
-**Release status:** release prepared on 2026-10-07. The tag-triggered [release workflow](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml) builds and publishes installers after all gates succeed; consult [Releases](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.0.0) for publication status. No installer was installed by this work.
+**Previous release status:** release prepared on 2026-10-07. The tag-triggered [release workflow](https://github.com/Noobiez16/KokoMovie/actions/workflows/electron-release.yml) builds and publishes installers after all gates succeed; consult [Releases](https://github.com/Noobiez16/KokoMovie/releases/tag/v2.0.0) for publication status. No installer was installed by this work.
 
 The first v2.0.0 tag run stopped in Linux test gates, with no installer publication.
 Recovery uses portable OS temporary directories for torrent fixtures and an Openbox
@@ -15,6 +34,48 @@ Linux quality/security, native Electron and Windows/Linux x64/ARM64 packaging. S
 for the failure evidence and validation scope; the tag workflow determines publication.
 
 ## Release integration and screenshots
+
+### Provider recovery and 4K — 2026-10-26
+
+Collected provider switches no longer wait for redundant extraction/header registration.
+Pending extraction can be cancelled, stale replies cannot replace newer sessions, and failed
+switches restore usable paused/playing sources. Retry refreshes extraction and retains position.
+Concurrent audio/video fragment progress is observed independently. Direct DNS/extraction, HLS startup and torrent seek preparation have firm deadlines; explicit
+source/audio choices report recoverable errors instead of loading forever. Nonfatal HLS
+retries stay with hls.js, fatal network retry loops are removed, and blocked autoplay offers Play.
+
+Quality exposes genuine 4K / 1080p / 720p tiers with unavailable options disabled. Master probes
+inspect the highest compatible variant, same-tier manual selection prefers higher bitrate, and
+compatible offline HLS downloads prefer 4K. AUTO remains adaptive to throughput. Actual Electron
+fixtures decode 3840×2160. Live movie and series discovery/decode checks both succeeded at 1080p
+with four available alternatives each; thirteen sources were unavailable in each check. Remote
+uptime and 4K availability remain upstream properties. Final verification passes 712 units,
+20 real Electron tests, strict TypeScript, lint, build, production audit and license checks.
+See testing.md for scope and measurements.
+
+### Local suggestions and source-quality refinements — 2026-10-26
+
+Title details now expose a persistent Like toggle. Home's Picked for You row combines
+likes, meaningful/completed watches and My List using at most six distinct seed requests,
+recency weighting, per-title deduplication, maturity filtering and known-title exclusion.
+Likes stay in SQLite, with validated IPC and manual library import/export support.
+There are no accounts, remote recommendation profiles or invented suggestions for empty history.
+
+CAM detection now recognizes encoded HDCAM/HDCAMRip variants and preserves release clues
+from redirects, Content-Disposition filenames and child playlists. Camera evidence overrides
+WEB-DL claims. Confirmed CAM/TS retains pre-play confirmation and gets a visible player notice;
+unknown movie releases get a dismissible unverified notice even when their encoded size is
+1080p. This does not visually detect an unlabeled camera recording or certify a clean release.
+
+Search-local validation coalesces identical URL/header probes, reducing the controlled shared
+master/variant fixture from four HTTP requests to two. New searches revalidate, different
+headers remain isolated, and highest-available ranking is preserved. This is a deterministic
+request-count improvement, not a universal live-provider startup-time benchmark.
+
+Zod is updated to 4.6.7 with its four record schemas migrated; the ip-address override
+resolves to 10.7.5. Validation and the production audit pass without exceptions. Source checks
+cover 687 unit tests, strict TypeScript, lint, build and licences. See testing.md for native
+verification and the Node 26 test-environment setting. No installer or release is produced.
 
 README previews capture the actual Electron renderer with a live TMDB catalog: Home,
 genre galleries, title details/recommendations and inline search. Images retain the
@@ -177,7 +238,8 @@ unpublished and not installed. Existing Vite/plugin deprecations, Node SQLite ex
 notice, player chunk size and packaging ASAR/duplicate-reference notices remain tooling debt.
 Authenticode needs a signing identity; installed upgrades, Linux/macOS packaging and live
 peer/provider endurance were not repeated here. Title alerts, personal collections,
-history-based recommendations and a marathon planner remain future roadmap items.
+a marathon planner remained future roadmap items at that milestone; local history-based
+suggestions are implemented in the 2026-10-26 refinement above.
 
 ## Historical architecture and phase notes
 
@@ -316,10 +378,10 @@ Two items previously recorded as complete were not:
 
 Both fixes are covered by `client/src/renderer/lib/local-data-hygiene.test.ts` and were verified at runtime against the packaged build.
 
-### Remaining release gates
+### Historical Phase 10 release gates (superseded by the current status above)
 
 - Windows and Linux ARM64 clean install and upgrade have not been exercised on real hardware; only Linux x64 was packaged and launched locally.
 - A genuine 1.4.1 → 1.5.1 updater upgrade has not been run. Only the inverse (downgrade refusal) is verified.
-- Installers remain unsigned on Windows and Linux; macOS stays build-only and has no vendored LGPL FFmpeg.
+- Windows/Linux signing remains unsigned. The historical Mac build-only/FFmpeg gate is resolved by the v2.1.0 distribution work described above.
 - The production CSP still carries `'unsafe-inline'`, `'unsafe-eval'`, a bare `https:` in `frame-src`, and `http:` in `media-src`.
 - Phases 5–10 are merged into `main` and tagged `v1.5.1` locally. The tag and merge have not been pushed, so no release is published and CI has not yet run the packaging gates against them.

@@ -7,6 +7,7 @@ import type { PlaybackSession } from '../../api/playback'
 import { playbackApi } from '../../api/playback'
 import { providersApi, torrentApi } from '../../api/providers'
 import { PlayerControls } from './PlayerControls'
+import { SourceQualityNotice } from './SourceQualityNotice'
 import { NextEpisodeOverlay } from './NextEpisodeOverlay'
 import { autoSyncSubtitles, type SubCue } from '../../lib/subtitleAutoSync'
 import { resolveSubtitleTrackUrl } from '../../../main/download-offline-policy'
@@ -15,6 +16,7 @@ import { rankSourceStatuses } from '../../../main/providers/source-discovery'
 import { selectAutomaticFallback } from '../../../main/providers/source-quality'
 import { createMediaListenerScope } from '../../lib/media-listener-scope'
 import { getStandardHeight } from '../../lib/video-quality'
+import { withPlaybackDeadline, PlaybackProgressDeadline, PROVIDER_SWITCH_TIMEOUT_MS, TORRENT_SWITCH_TIMEOUT_MS, STARTUP_IDLE_TIMEOUT_MS, STARTUP_MAX_TIMEOUT_MS, TORRENT_SEEK_TIMEOUT_MS } from '../../lib/playback-limits'
 
 interface CachedStream {
   providerId: string
@@ -270,6 +272,14 @@ export function VideoPlayer({
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const controlsPinnedRef = useRef(false)
+  const switchGenRef = useRef(0)
+  const pendingSwitchRef = useRef<AbortController | null>(null)
+  const switchRollbackRef = useRef<(() => void) | null>(null)
+  const fragmentProgressRef = useRef<(() => number) | null>(null)
+  const playVideoRef = useRef<(() => void) | null>(null)
+  const sourceSuspendedRef = useRef(false)
+  const [sourceReloadToken, setSourceReloadToken] = useState(0)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
 
   const [activeStreamUrl, setActiveStreamUrl] = useState(session.manifestUrl)
   const [activeHeaders, setActiveHeaders] = useState<Record<string, string> | undefined>(streamHeaders)
@@ -431,6 +441,20 @@ export function VideoPlayer({
 
   // Reset local state on external prop changes (e.g. initial load)
   useEffect(() => {
+    switchGenRef.current += 1
+    pendingSwitchRef.current?.abort()
+    pendingSwitchRef.current = null
+    switchRollbackRef.current = null
+    setSwitchingSource(false)
+    setAwaitingFallback(false)
+    setAutoplayBlocked(false)
+    sourceSuspendedRef.current = false
+    torrentStreamRef.current = null
+    setOverrideDuration(0)
+    setTorrentTimelineOffset(0)
+    setTorrentSeeking(false)
+    setHlsError(null)
+    playbackRecoveryDeadlineRef.current?.cancel()
     setActiveStreamUrl(session.manifestUrl)
     setActiveHeaders(streamHeaders)
     setActiveSourceId(initialProviderId || null)
@@ -444,6 +468,13 @@ export function VideoPlayer({
     // title, so the auto-fallback refuses to switch off a slow/dead initial source and
     // just retries it — the "fetching takes forever / keeps buffering" symptom.
     userPinnedSourceRef.current = false
+    return () => {
+      switchGenRef.current += 1
+      pendingSwitchRef.current?.abort()
+      pendingSwitchRef.current = null
+      switchRollbackRef.current = null
+      void providersApi.cancelRequest?.()
+    }
   }, [session.manifestUrl, streamHeaders, initialProviderId, initialResumeAt])
 
   // Register stream headers with main process so HLS.js segment requests get correct headers
@@ -502,16 +533,62 @@ export function VideoPlayer({
 
   // Cancel ref: incremented on each source switch attempt. If the value changes
   // mid-flight, the result is discarded (user pressed Cancel or started another switch).
-  const switchGenRef = useRef(0)
-
   const cancelSourceSwitch = useCallback(() => {
     switchGenRef.current += 1
+    pendingSwitchRef.current?.abort()
+    pendingSwitchRef.current = null
+    void providersApi.cancelRequest?.()
+    const rollback = switchRollbackRef.current
+    switchRollbackRef.current = null
+    rollback?.()
     playbackRecoveryDeadlineRef.current?.cancel()
     setSwitchingSource(false)
     setAwaitingFallback(false)
     setSwitchingError(null)
-    setHlsError('Automatic source switching was cancelled. Choose a source manually.')
-  }, [])
+    if (!rollback) setHlsError(t('player.switchCancelled'))
+  }, [t])
+
+  const beginSourceSwitch = () => {
+    pendingSwitchRef.current?.abort()
+    switchRollbackRef.current?.()
+    const controller = new AbortController()
+    pendingSwitchRef.current = controller
+    const generation = ++switchGenRef.current
+    const video = videoRef.current
+    const wasPlaying = !!video && !video.paused
+    const previouslyPinned = userPinnedSourceRef.current
+    const position = hlsError || sourceSuspendedRef.current
+      ? currentTimeRef.current
+      : (video?.currentTime ?? 0) + (torrentStreamRef.current?.transcoded ? torrentTimelineOffsetRef.current : 0)
+    try { video?.pause(); hlsRef.current?.stopLoad?.() } catch { /* already stopped */ }
+    const rollback = () => {
+      userPinnedSourceRef.current = previouslyPinned
+      if (video?.isConnected) {
+        try { hlsRef.current?.startLoad() } catch { /* native source */ }
+        if (wasPlaying) void video.play().catch(() => {})
+      }
+    }
+    const canRollback = !!video && !hlsError && !sourceSuspendedRef.current
+    switchRollbackRef.current = canRollback ? rollback : null
+    setSwitchingSource(true)
+    setAwaitingFallback(false)
+    setSwitchingError(null)
+    playbackRecoveryDeadlineRef.current?.cancel()
+    let committed = false
+    return {
+      signal: controller.signal, position,
+      current: () => generation === switchGenRef.current && !controller.signal.aborted,
+      commit: () => { committed = true },
+      finish: () => {
+        if (generation !== switchGenRef.current) return
+        if (!committed && canRollback) rollback()
+        pendingSwitchRef.current = null
+        switchRollbackRef.current = null
+        setSwitchingSource(false)
+        setAwaitingFallback(false)
+      },
+    }
+  }
 
   // A torrent stream is a progressive MP4 (remuxed or direct), not an HLS manifest: it carries the
   // ONE audio stream ffmpeg selected and no rendition metadata, so hls.js never fires
@@ -535,176 +612,101 @@ export function VideoPlayer({
     setCurrentAudioTrack(-1)
   }
 
-  const handleSourceChange = async (providerId: string, isAuto = false) => {
-    if (providerId === activeSourceId) return
-    const selectedQuality = allStreams.find((source) => source.providerId === providerId)?.streams[0]?.qualityInfo
-    if ((selectedQuality?.releaseType === 'cam' || selectedQuality?.releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) return
-    playbackRecoveryDeadlineRef.current?.cancel()
-    const previouslyPinned = userPinnedSourceRef.current
+  const resolveCandidate = async (source: CachedStream, signal: AbortSignal, language = '', timeoutMs = TORRENT_SWITCH_TIMEOUT_MS) => {
+    const stream = source.streams[0]
+    if (!stream) throw new Error(t('player.sourceUnavailable'))
+    if (!stream.url.startsWith('magnet:')) return { stream, url: stream.url, torrent: null, audioLang: '', transcoded: false }
+    const declared = stream.audioLangs?.length === 1 ? normalizeLang(stream.audioLangs[0]!) : ''
+    const wanted = language || declared || currentAudioLangRef.current
+    const resolved = await withPlaybackDeadline(Promise.resolve().then(() => torrentApi.resolve(stream.url, wanted)), timeoutMs, signal)
+    if (!resolved?.url) throw new Error(resolved?.error || t('player.sourceUnavailable'))
+    if (language && resolved.audioLang && resolved.audioLang !== language) throw new Error(t('player.dubUnavailable'))
+    // Keep the capability query when generating seek requests.
+    return { stream, url: resolved.url, torrent: { baseUrl: resolved.url, transcoded: !!resolved.transcoded }, audioLang: resolved.audioLang || wanted, transcoded: !!resolved.transcoded }
+  }
 
-    // An explicit pick (e.g. the user choosing the only black-and-white mirror) pins the
-    // source so the auto-fallback never silently switches them back to a different one.
-    if (!isAuto) userPinnedSourceRef.current = true
-
-    const currentPos = videoRef.current ? videoRef.current.currentTime : 0
-    // Silence the outgoing source NOW. Resolving a replacement can take tens of seconds (a torrent
-    // waits on peers), and leaving the old stream running means its audio keeps playing under the
-    // "Switching…" overlay — and it keeps consuming bandwidth the new source needs.
-    try { videoRef.current?.pause() } catch { /* noop */ }
-    const gen = ++switchGenRef.current
-    setSwitchingSource(true)
-    setSwitchingError(null)
-    // Reset any runtime override; only a transcoded torrent (resolved below) re-enables it.
-    setOverrideDuration(0)
-    torrentStreamRef.current = null
+  const commitCandidate = (providerId: string, result: Awaited<ReturnType<typeof resolveCandidate>>, position: number, pin: boolean) => {
+    torrentStreamRef.current = result.torrent
+    setOverrideDuration(result.transcoded && knownRuntimeSecs > 0 ? knownRuntimeSecs : 0)
     setTorrentSeeking(false)
     setTorrentTimelineOffset(0)
+    if (result.torrent) publishTorrentAudioTrack(result.audioLang)
+    else resetAudioForNonTorrentSource()
+    if (pin) userPinnedSourceRef.current = true
+    setResumeAtSeconds(result.transcoded ? 0 : position)
+    setActiveStreamUrl(result.url)
+    setActiveHeaders(result.stream.headers)
+    setActiveSourceId(providerId)
+    sourceSuspendedRef.current = false
+    setHlsError(null)
+    setAutoplayBlocked(false)
+    setInitialLoading(true)
+    // Explicit retry may resolve to the same URL. It still needs a fresh media lifecycle.
+    setSourceReloadToken(value => value + 1)
+  }
 
-    // Fast path: use a stream already collected during the initial provider race
-    const cached = allStreams.find((s) => s.providerId === providerId)
-    if (cached && cached.streams.length > 0) {
-      const stream = cached.streams[0]!
-
-      // P2P torrent sources carry a magnet URL that must be resolved to a localhost MP4 URL on
-      // demand (this starts the BitTorrent download). Only happens when the user actually picks
-      // a torrent dub — discovery never downloads anything.
-      let playUrl = stream.url
-      if (playUrl.startsWith('magnet:')) {
-        // Tell the torrent remux which dub to select. A release tagged with exactly ONE language
-        // (every Torrentio candidate is: `audioLangs: [lang]`, and its name says so — "Torrent -
-        // Spanish-1080P") DECLARES what it ships, so that wins. `currentAudioLangRef` is only a
-        // fallback for multi-audio releases: it can still hold the PREVIOUS source's language, and
-        // letting a stale 'en' win here is exactly what made a Spanish pick remux English audio and
-        // label the menu English. A multi-audio release with no remembered pick → '' (ffmpeg default).
-        const declaredLang = (stream.audioLangs?.length ?? 0) === 1 ? normalizeLang(stream.audioLangs![0]!) : ''
-        const wantLang = declaredLang || currentAudioLangRef.current
-        const res = await Promise.race([
-          torrentApi.resolve(playUrl, wantLang),
-          new Promise<Awaited<ReturnType<typeof torrentApi.resolve>>>((resolve) =>
-            setTimeout(() => resolve({ error: 'Torrent readiness timed out; choose another 1080p source.' }), 65_000),
-          ),
-        ])
-        if (gen !== switchGenRef.current) return
-        if (!res?.url) {
-          setSwitchingError(res?.error ? `Torrent: ${res.error}` : 'Could not start this torrent. Try another source.')
-          setSwitchingSource(false)
-          setAwaitingFallback(false)
-          return
-        }
-        const baseUrl = res.url.split('?')[0]!
-        torrentStreamRef.current = { baseUrl, transcoded: !!res.transcoded }
-        playUrl = res.url
-        // Label with what is genuinely audible, never with what we asked for. A release advertised
-        // as Spanish that only carries Spanish SUBTITLES resolves to its English audio, and saying
-        // "Spanish" there is simply false — the exact complaint this fixes.
-        const playingLang = res.audioLang || wantLang
-        publishTorrentAudioTrack(playingLang)
-        if (wantLang && playingLang !== wantLang) {
-          setSwitchingError(`This release has no ${getCleanAudioName('', wantLang)} audio — playing ${getCleanAudioName('', playingLang)}. Pick another source for that dub.`)
-        }
-        // A remuxed (non-MP4) torrent streams progressively with unknown duration — show the
-        // TMDB runtime as the total instead of the buffered end ticking up. Direct-MP4 torrents
-        // serve with Range and report their real duration, so no override there.
-        if (res.transcoded && knownRuntimeSecs > 0) setOverrideDuration(knownRuntimeSecs)
-        // NOTE: transcoded torrents always stream from 0 (createReadStream) — we do NOT resume via
-        // ?start=. Restarting ffmpeg mid-file needs `-ss` on the on-disk torrent file, but WebTorrent
-        // persists pieces to disk lazily (only on completion), so an early ?start= hits a file that
-        // doesn't exist yet → "Video failed to load". Streaming from 0 is reliable; the player seeks
-        // within the buffered region natively (see handleSeek). Switching to a dub restarts it at 0.
-      }
-
-      if (stream.headers && Object.keys(stream.headers).length > 0) {
-        await providersApi.registerStreamHeaders(playUrl, stream.headers).catch(() => {})
-      }
-      if (gen !== switchGenRef.current) return
-      resetAudioForNonTorrentSource()
-      setResumeAtSeconds(currentPos)
-      setActiveStreamUrl(playUrl)
-      setActiveHeaders(stream.headers)
-      setActiveSourceId(providerId)
-      setSwitchingSource(false)
-    setAwaitingFallback(false)
-      return
+  const handleSourceChange = async (providerId: string, isAuto = false, forceRefresh = false) => {
+    if (providerId === activeSourceId && !forceRefresh) return false
+    const wasRecovering = !!hlsError || sourceSuspendedRef.current
+    const cached = allStreams.find(source => source.providerId === providerId)
+    const selectedQuality = cached?.streams[0]?.qualityInfo
+    if ((selectedQuality?.releaseType === 'cam' || selectedQuality?.releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) {
+      if (wasRecovering) failPlayback(t('player.switchCancelled'))
+      return false
     }
-
-    // Slow path: no cached stream — extract fresh from the provider
-    const req = getStreamRequest()
-    if (!req) {
-      setSwitchingError('Content is missing metadata IDs to request stream')
-      setSwitchingSource(false)
-    setAwaitingFallback(false)
-      return
-    }
-
+    const attempt = beginSourceSwitch()
     try {
-      // Race the IPC call against a 20s timeout so the UI never hangs forever
-      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000))
-      const result = await Promise.race([
-        providersApi.getStream(providerId, req),
-        timeout,
-      ])
-
-      // If the user cancelled while we were waiting, bail out silently
-      if (gen !== switchGenRef.current) return
-
-      if (!result) {
-        setSwitchingError('Timed out — server took too long to respond. Try another source.')
-        setSwitchingSource(false)
-    setAwaitingFallback(false)
-        return
-      }
-
-      if (result.streams && result.streams.length > 0) {
-        const winningStream = result.streams[0]
+      let source = cached
+      if (!source?.streams.length || (forceRefresh && !providerId.startsWith('p2p-'))) {
+        const req = getStreamRequest()
+        if (!req) throw new Error(t('player.missingMetadata'))
+        const result = await withPlaybackDeadline(Promise.resolve().then(() => providersApi.getStream(providerId, req)), PROVIDER_SWITCH_TIMEOUT_MS, attempt.signal)
+        if (!attempt.current()) return false
+        const winningStream = result?.streams?.[0]
+        if (!winningStream) throw new Error(result?.error || t('player.sourceUnavailable'))
         const freshReleaseType = winningStream.qualityInfo?.releaseType
         if ((freshReleaseType === 'cam' || freshReleaseType === 'telesync') && !window.confirm(t('player.camWarning'))) {
-          userPinnedSourceRef.current = previouslyPinned
-          void videoRef.current?.play().catch(() => {})
-          return
+          if (wasRecovering) failPlayback(t('player.switchCancelled'))
+          return false
         }
+        source = { providerId: result.providerId, providerName: result.providerName, streams: result.streams }
         const currentRequest = usePlayerStore.getState().request
         if (currentRequest) {
           const statusBase = currentRequest.sourceStatuses ?? sourceStatuses
-          const availableStatus: ProviderSourceStatus = {
-            providerId,
-            providerName: result.providerName,
-            state: 'available',
-            qualityInfo: winningStream.qualityInfo,
-          }
-          const freshSourceStatuses = statusBase.some((status) => status.providerId === providerId)
-            ? statusBase.map((status) => status.providerId === providerId ? availableStatus : status)
-            : [...statusBase, availableStatus]
-          const freshStream: CachedStream = {
-            providerId: result.providerId,
-            providerName: result.providerName,
-            streams: result.streams,
-          }
+          const availableStatus: ProviderSourceStatus = { providerId, providerName: result.providerName, state: 'available', qualityInfo: winningStream.qualityInfo }
+          const freshSourceStatuses = statusBase.some(status => status.providerId === providerId)
+            ? statusBase.map(status => status.providerId === providerId ? availableStatus : status) : [...statusBase, availableStatus]
           usePlayerStore.getState().patchRequest({
-            allStreams: [...(currentRequest.allStreams ?? []).filter((source) => source.providerId !== providerId), freshStream],
+            allStreams: [...(currentRequest.allStreams ?? []).filter(item => item.providerId !== providerId), source],
             sourceStatuses: rankSourceStatuses(freshSourceStatuses),
           })
         }
-        if (winningStream.headers && Object.keys(winningStream.headers).length > 0) {
-          await providersApi.registerStreamHeaders(winningStream.url, winningStream.headers).catch(() => {})
-        }
-        if (gen !== switchGenRef.current) return
-        resetAudioForNonTorrentSource()
-        setResumeAtSeconds(currentPos)
-        setActiveStreamUrl(winningStream.url)
-        setActiveHeaders(winningStream.headers)
-        setActiveSourceId(providerId)
-      } else {
-        setSwitchingError(result?.error || 'Provider returned no working stream.')
       }
-    } catch (err) {
-      if (gen !== switchGenRef.current) return
-      setSwitchingError(`Failed to switch stream: ${String(err)}`)
-    } finally {
-      if (gen === switchGenRef.current) {
-        setSwitchingSource(false)
+      const resolved = await resolveCandidate(source!, attempt.signal)
+      if (!attempt.current()) return false
+      // Main already registered trusted source headers before publishing a result.
+      // The non-blocking header effect remains available for legacy callers.
+      commitCandidate(providerId, resolved, attempt.position, !isAuto)
+      attempt.commit()
+      return true
+    } catch (error) {
+      if (attempt.current()) {
+        const message = error instanceof Error && error.message === 'PLAYBACK_TIMEOUT' ? t('player.switchTimedOut') : t('player.switchFailed')
+        if (wasRecovering) failPlayback(message)
+        else setSwitchingError(message)
+      }
+      return false
+    } finally { attempt.finish() }
+  }
+
+  const failPlayback = (message: string) => {
+    playbackRecoveryDeadlineRef.current?.cancel()
+    try { hlsRef.current?.stopLoad?.(); videoRef.current?.pause() } catch { /* source already closed */ }
+    setInitialLoading(false)
+    setIsBuffering(false)
     setAwaitingFallback(false)
-      }
-    }
+    setAutoplayBlocked(false)
+    setHlsError(message)
   }
 
   // Automatically move to the next collected source when the current one can't play
@@ -720,17 +722,8 @@ export function VideoPlayer({
     // A torrent is ALWAYS an explicit user choice (auto-fallback never selects one), and its
     // startup/seek costs are nothing like an embed's. Generic embed fallback must not handle it,
     // independently of the pin below — the pin is cleared on every new title, this is not.
-    if (torrentStreamRef.current || activeSourceId?.startsWith('p2p-')) {
-      console.warn(`[auto-fallback] ${reason} — active source is an explicitly chosen torrent, not switching`)
-      networkErrorCountRef.current = 0
-      return
-    }
-    // The user pinned this source (only it has what they want). Never switch away — keep
-    // trying to recover the current stream instead (the key/segment loaders retry on their own).
-    if (userPinnedSourceRef.current) {
-      console.warn(`[auto-fallback] ${reason} — source is user-pinned, retrying instead of switching`)
-      networkErrorCountRef.current = 0
-      try { hlsRef.current?.startLoad() } catch { /* noop */ }
+    if (torrentStreamRef.current || activeSourceId?.startsWith('p2p-') || userPinnedSourceRef.current) {
+      failPlayback(t('player.sourceNotResponding'))
       return
     }
     if (activeSourceId) triedSourcesRef.current.add(activeSourceId)
@@ -744,7 +737,11 @@ export function VideoPlayer({
       console.warn(`[auto-fallback] ${reason} — switching to ${next.providerName} (${next.providerId})`)
       networkErrorCountRef.current = 0
       setSwitchingError(null)
-      handleSourceChange(next.providerId, true)
+      const pending = handleSourceChange(next.providerId, true)
+      const generation = switchGenRef.current
+      void pending.then(changed => {
+        if (changed === false && generation === switchGenRef.current) failPlayback(t('player.sourceNotResponding'))
+      })
     } else {
       console.warn(`[auto-fallback] ${reason} — no untried sources left`)
       setInitialLoading(false)
@@ -752,7 +749,7 @@ export function VideoPlayer({
       setAwaitingFallback(true)
       playbackRecoveryDeadlineRef.current?.start(() => {
         setAwaitingFallback(false)
-        setHlsError('This title wouldn’t play on any available source. Please try again later or choose a source manually.')
+        failPlayback(t('player.noPlayableSource'))
       }, 8000)
     }
   }
@@ -785,10 +782,20 @@ export function VideoPlayer({
     if (torrentSeeking) return
     if (!initialLoading && !isBuffering) return
 
-    // Initial load: no frame has played yet, so judge on elapsed time alone.
+    // Initial startup has a no-progress deadline and an absolute first-frame cap.
+    // Byte progress lets a large 4K fragment finish without granting endless retries.
     if (initialLoading) {
-      const t = setTimeout(() => autoFallbackRef.current('initial-load timeout'), 25000)
-      return () => clearTimeout(t)
+      const deadline = new PlaybackProgressDeadline(Date.now(), STARTUP_IDLE_TIMEOUT_MS, STARTUP_MAX_TIMEOUT_MS)
+      const interval = setInterval(() => {
+        const video = videoRef.current
+        const end = video && video.buffered.length ? video.buffered.end(video.buffered.length - 1) : 0
+        const bytes = fragmentProgressRef.current?.() ?? 0
+        if (deadline.expired(Date.now(), Math.max(bytes, end * 1_000_000))) {
+          clearInterval(interval)
+          autoFallbackRef.current('initial-load timeout')
+        }
+      }, 1000)
+      return () => clearInterval(interval)
     }
 
     // Buffering mid-playback: only fall back if the buffer makes NO progress for a sustained
@@ -818,7 +825,16 @@ export function VideoPlayer({
       }
     }, STEP)
     return () => clearInterval(iv)
-  }, [initialLoading, isBuffering, switchingSource, torrentSeeking, activeStreamUrl])
+  }, [initialLoading, isBuffering, switchingSource, torrentSeeking, activeStreamUrl, sourceReloadToken])
+
+  useEffect(() => {
+    if (!torrentSeeking) return
+    const timer = setTimeout(() => {
+      setTorrentSeeking(false)
+      failPlayback(t('player.seekTimedOut'))
+    }, TORRENT_SEEK_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [torrentSeeking, activeStreamUrl, t])
 
   // Resolve the HLS proxy port once per stream URL change. Torrent sources play from a
   // different local server, so never derive subtitle proxy port from activeStreamUrl alone.
@@ -987,26 +1003,43 @@ export function VideoPlayer({
   // A different source must obtain fresh frame geometry from its own metadata.
   useEffect(() => { setDecodedDimensions(null) }, [activeStreamUrl])
 
+  const sourceFailureMessage = t('player.sourceNotResponding')
   // Init HLS or direct video
   useEffect(() => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || hlsError || sourceSuspendedRef.current) return
 
     setHlsError(null)
+    setAutoplayBlocked(false)
+    fragmentProgressRef.current = null
     setInitialLoading(true)
     setLevels([])
     setCurrentLevel(-1)
     const manifestUrl = activeStreamUrl
     const sourceListeners = createMediaListenerScope(video)
-    const playWhenReady: EventListener = () => { video.play().catch(() => {}) }
+    let disposed = false
+    const attemptPlay = () => {
+      void video.play().catch((error: unknown) => {
+        if (disposed) return
+        const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : ''
+        if (name === 'NotAllowedError') {
+          setInitialLoading(false)
+          setIsBuffering(false)
+          setAutoplayBlocked(true)
+          setShowControls(true)
+        } else if (name !== 'AbortError') autoFallbackRef.current('media play request rejected')
+      })
+    }
+    playVideoRef.current = attemptPlay
+    const playWhenReady: EventListener = attemptPlay
     const handleDirectMetadata: EventListener = () => {
       if (resumeAtSeconds && resumeAtSeconds > 0 && !torrentStreamRef.current?.transcoded) {
         video.currentTime = resumeAtSeconds
       }
-      video.play().catch(() => {})
+      attemptPlay()
     }
-    const handleDirectError: EventListener = () => setHlsError('Video failed to load. Try a different source.')
-    const handleFallbackError: EventListener = () => setHlsError('Stream failed to load. Try choosing a different source.')
+    const handleDirectError: EventListener = () => failPlayback(sourceFailureMessage)
+    const handleFallbackError: EventListener = () => failPlayback(sourceFailureMessage)
 
     // Detect if this is a direct video file (MP4/WebM) vs HLS manifest
     const isDirectVideo = (() => {
@@ -1024,6 +1057,8 @@ export function VideoPlayer({
       sourceListeners.listen('loadedmetadata', handleDirectMetadata, { once: true })
       sourceListeners.listen('error', handleDirectError, { once: true })
       return () => {
+        disposed = true
+        if (playVideoRef.current === attemptPlay) playVideoRef.current = null
         sourceListeners.clear()
         video.removeAttribute('src')
         video.load()
@@ -1054,29 +1089,28 @@ export function VideoPlayer({
         abrEwmaSlowLive: 9.0,
         abrEwmaFastVoD: 3.0,
         abrEwmaSlowVoD: 9.0,
-        // Be patient with slow/flaky provider CDNs: more retries, longer timeouts, and
-        // exponential backoff so a single slow segment doesn't escalate to a fatal error.
-        manifestLoadingMaxRetry: 6,
-        manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 6,
-        levelLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 8,
-        fragLoadingRetryDelay: 1000,
-        fragLoadingMaxRetryTimeout: 64000,
-        fragLoadingTimeOut: 30000,
-        // Encryption-key loading: the default policy only retries ONCE on timeout, so a slow
-        // AES-128 key fetch (common on the encrypted MovieAPI streams) gives up almost
-        // immediately → keyLoadError → permanent stall. Make it as patient as fragment loading:
-        // many retries, long timeouts, exponential backoff. Paired with proxying the key URL
-        // (see the proxy's URI="..." rewrite), this makes encrypted sources play reliably.
-        keyLoadPolicy: {
-          default: {
-            maxTimeToFirstByteMs: 20000,
-            maxLoadTimeMs: 60000,
-            timeoutRetry: { maxNumRetry: 8, retryDelayMs: 1000, maxRetryDelayMs: 8000, backoff: 'linear' },
-            errorRetry: { maxNumRetry: 8, retryDelayMs: 1000, maxRetryDelayMs: 8000, backoff: 'linear' },
-          },
-        },
+        // Let hls.js own bounded retries; restarting startLoad on each error
+        // resets recovery and can create a perpetual loading loop.
+        manifestLoadPolicy: { default: {
+          maxTimeToFirstByteMs: 6000, maxLoadTimeMs: 10000,
+          timeoutRetry: { maxNumRetry: 1, retryDelayMs: 500, maxRetryDelayMs: 1000 },
+          errorRetry: { maxNumRetry: 1, retryDelayMs: 500, maxRetryDelayMs: 1000 },
+        } },
+        playlistLoadPolicy: { default: {
+          maxTimeToFirstByteMs: 8000, maxLoadTimeMs: 15000,
+          timeoutRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+          errorRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+        } },
+        fragLoadPolicy: { default: {
+          maxTimeToFirstByteMs: 10000, maxLoadTimeMs: 45000,
+          timeoutRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+          errorRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+        } },
+        keyLoadPolicy: { default: {
+          maxTimeToFirstByteMs: 8000, maxLoadTimeMs: 15000,
+          timeoutRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+          errorRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+        } },
       })
 
       // Don't let hls.js auto-render an internal subtitle unless the user actually has
@@ -1085,6 +1119,14 @@ export function VideoPlayer({
 
       hls.loadSource(manifestUrl)
       hls.attachMedia(video)
+      // Audio and video fragments can load concurrently. Observing only the latest
+      // audio request would falsely time out a large, actively downloading 4K frame.
+      const progressStats = new Set<{ loaded: number }>()
+      fragmentProgressRef.current = () => [...progressStats].reduce((bytes, stats) => bytes + Math.max(0, stats.loaded), 0)
+      if (Hls.Events.FRAG_LOADING) hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+        progressStats.add(data.frag.stats)
+        if (progressStats.size > 64) progressStats.delete(progressStats.values().next().value!)
+      })
 
       // Play only after the browser signals it has enough data to start — avoids
       // bufferStalledError caused by calling play() before the first segment buffers.
@@ -1175,16 +1217,23 @@ export function VideoPlayer({
       // Some provider CDNs deliver fragments at (or below) real-time, draining the buffer
       // mid-playback (bufferStalledError / fragLoadTimeOut). These are NON-FATAL: hls.js
       // recovers on its own and the browser shows the buffering spinner until data arrives.
-      // We let it ride — a gentle loader kick in case fetching stopped, and nothing else.
+      // Leave its retries intact; the progress watchdog bounds a genuine dead end.
       // (An earlier "auto-rebuffer-to-goal" that PAUSED playback to build an 8–30s cushion
       // made playback feel constantly stuck and was removed — see DN-035/DN-042. ABR already
       // adapts quality to throughput; we never force the bitrate down on a stall.)
       let keyErrorCount = 0
+      let mediaRecoveryCount = 0
+      let lastMediaRecovery = -Infinity
+      const recentErrors = new Map<string, number>()
 
       // Log ALL hls.js errors — non-fatal demux/parse errors are silently swallowed by
       // the recovery handler below and are usually what causes "duration shown, 0:00 stuck".
       hls.on(Hls.Events.ERROR, (_, data) => {
-        console.warn('[hls ERROR]', {
+        const signature = `${data.type}:${data.details}:${data.response?.code ?? ''}`
+        const lastLog = recentErrors.get(signature) ?? -Infinity
+        if (data.fatal || Date.now() - lastLog >= 5000) {
+          recentErrors.set(signature, Date.now())
+          console.warn('[hls ERROR]', {
           type: data.type,
           details: data.details,
           fatal: data.fatal,
@@ -1192,16 +1241,9 @@ export function VideoPlayer({
           response: data.response ? { code: data.response.code, text: data.response.text } : undefined,
           frag: data.frag ? { sn: (data.frag as any).sn, url: data.frag.url?.slice(0, 140) } : undefined,
         })
+        }
         if (!data.fatal) {
           if (
-            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR
-          ) {
-            // Kick the loader in case it stopped fetching; let hls.js + the browser handle the
-            // stall naturally (no forced pause).
-            try { hls.startLoad() } catch { /* noop */ }
-          } else if (
             data.details === Hls.ErrorDetails.KEY_LOAD_ERROR ||
             data.details === Hls.ErrorDetails.KEY_LOAD_TIMEOUT
           ) {
@@ -1215,19 +1257,15 @@ export function VideoPlayer({
         }
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // Try to recover a couple of times; if the source keeps failing to
-            // deliver segments (e.g. a CDN returning empty ranges), stop looping and
-            // fall back to the next collected source instead of spinning forever.
-            networkErrorCountRef.current++
-            if (networkErrorCountRef.current > 2) {
-              autoFallbackRef.current('fatal network error')
-            } else {
-              hls.startLoad()
-            }
+            // Fatal means the configured retries are exhausted. Do not restart them.
+            autoFallbackRef.current('fatal network error')
             break
           case Hls.ErrorTypes.MEDIA_ERROR:
-            // Try to recover media errors
-            hls.recoverMediaError()
+            if (video.error && mediaRecoveryCount < 2 && Date.now() - lastMediaRecovery >= 5000) {
+              mediaRecoveryCount++
+              lastMediaRecovery = Date.now()
+              hls.recoverMediaError()
+            } else autoFallbackRef.current('unrecoverable media error')
             break
           default:
             // hls.js can't handle this URL — try native <video> as a last resort
@@ -1235,7 +1273,7 @@ export function VideoPlayer({
             hls.destroy()
             hlsRef.current = null
             video.src = manifestUrl
-            video.play().catch(() => {})
+            attemptPlay()
             sourceListeners.listen('error', handleFallbackError, { once: true })
             break
         }
@@ -1249,6 +1287,8 @@ export function VideoPlayer({
     }
 
     return () => {
+      disposed = true
+      if (playVideoRef.current === attemptPlay) playVideoRef.current = null
       sourceListeners.clear()
       // Disable the internal subtitle before teardown so it can't linger in a
       // 'showing' state and double up with the next source's subtitles.
@@ -1256,7 +1296,7 @@ export function VideoPlayer({
       hlsRef.current?.destroy()
       hlsRef.current = null
     }
-  }, [activeStreamUrl, resumeAtSeconds, content.id, episode?.id, profileId, session.sessionId])
+  }, [activeStreamUrl, resumeAtSeconds, content.id, episode?.id, profileId, session.sessionId, sourceReloadToken, hlsError, sourceFailureMessage])
 
   // Bind to the rendered video so recovery from an error panel also observes the new element.
   const updateDecodedDimensions = (event: React.SyntheticEvent<HTMLVideoElement>) => {
@@ -1305,6 +1345,7 @@ export function VideoPlayer({
       const recovery = getPlaybackRecoveryPatch('playing')
       playbackRecoveryDeadlineRef.current?.markPlaying()
       setIsPlaying(true)
+      setAutoplayBlocked(false)
       setInitialLoading(recovery.initialLoading)
       setAwaitingFallback(recovery.awaitingFallback)
       setHlsError(recovery.hlsError)
@@ -1328,6 +1369,7 @@ export function VideoPlayer({
     const onStalled = () => showBufferingSoon()
     const onTimeUpdate = () => {
       const offset = torrentStreamRef.current?.transcoded ? torrentTimelineOffsetRef.current : 0
+      if (!video.paused && video.currentTime > 0) onPlaying()
       const displayTime = video.currentTime + offset
       setCurrentTime(displayTime)
       if (video.buffered.length > 0) {
@@ -1383,7 +1425,7 @@ export function VideoPlayer({
         bufferingTimerRef.current = null
       }
     }
-  }, [nextEpisode, activeStreamUrl, knownRuntimeSecs])
+  }, [nextEpisode, activeStreamUrl, knownRuntimeSecs, sourceReloadToken, hlsError])
 
   // Heartbeat every 10s
   useEffect(() => {
@@ -1476,7 +1518,8 @@ export function VideoPlayer({
   const handlePlayPause = () => {
     const video = videoRef.current
     if (!video) return
-    isPlaying ? video.pause() : video.play()
+    if (isPlaying) video.pause()
+    else playVideoRef.current?.()
   }
   const handleMute = () => { if (videoRef.current) videoRef.current.muted = !isMuted }
   const handleVolumeChange = (v: number) => {
@@ -1567,88 +1610,37 @@ export function VideoPlayer({
   // never yanks the user off the dub they chose (DN-038). We never fabricate or merge audio across
   // providers — we route to a source that genuinely ships the dub (DN-041).
   const tryPlayDub = async (lang: string, preferredSourceId?: string) => {
+    const wasRecovering = !!hlsError || sourceSuspendedRef.current
     const norm = normalizeLang(lang)
-    const candidates = allStreams
-      .filter((s) => s.providerId !== activeSourceId
-        && (s.streams[0]?.audioLangs ?? []).map(normalizeLang).includes(norm))
+    const candidates = allStreams.filter(source => source.providerId !== activeSourceId && (source.streams[0]?.audioLangs ?? []).map(normalizeLang).includes(norm))
       .sort((a, b) => {
-        if (preferredSourceId) {
-          if (a.providerId === preferredSourceId) return -1
-          if (b.providerId === preferredSourceId) return 1
-        }
-        // Embeds before torrents; keep discovery order within each group.
+        if (preferredSourceId && (a.providerId === preferredSourceId || b.providerId === preferredSourceId)) return a.providerId === preferredSourceId ? -1 : 1
         return Number(a.providerId.startsWith('p2p-')) - Number(b.providerId.startsWith('p2p-'))
-      })
-      .slice(0, 6)
-    if (candidates.length === 0) return
-
-    userPinnedSourceRef.current = true
-    currentAudioLangRef.current = norm
-    const langLabel = getCleanAudioName('', norm)
-    const currentPos = videoRef.current ? videoRef.current.currentTime : 0
-    // Same as handleSourceChange: stop the outgoing stream before the (possibly slow) resolve.
-    try { videoRef.current?.pause() } catch { /* noop */ }
-    const gen = ++switchGenRef.current
-    setSwitchingSource(true)
-    setSwitchingError(null)
-    setOverrideDuration(0)
-    torrentStreamRef.current = null
-    setTorrentSeeking(false)
-    setTorrentTimelineOffset(0)
-
-    for (let i = 0; i < candidates.length; i++) {
-      const cand = candidates[i]!
-      const stream = cand.streams[0]
-      if (!stream) continue
-      let playUrl = stream.url
-
-      if (playUrl.startsWith('magnet:')) {
-        if (i > 0) setSwitchingError(`Trying another ${langLabel} source…`)
-        const res = await torrentApi.resolve(playUrl, norm)
-        if (gen !== switchGenRef.current) return
-        if (!res?.url) {
-          // No peers / failed — try the next collected release of the same language.
-          if (i < candidates.length - 1) continue
-          setSwitchingError(res?.error ? `Torrent: ${res.error}` : `No working ${langLabel} source found.`)
-          setSwitchingSource(false)
-    setAwaitingFallback(false)
+      }).slice(0, 6)
+    if (!candidates.length) return
+    const attempt = beginSourceSwitch()
+    const deadline = Date.now() + TORRENT_SWITCH_TIMEOUT_MS
+    try {
+      for (const source of candidates) {
+        const quality = source.streams[0]?.qualityInfo
+        if ((quality?.releaseType === 'cam' || quality?.releaseType === 'telesync') && !window.confirm(t('player.camWarning'))) continue
+        if (!attempt.current()) return
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) break
+        try {
+          const resolved = await resolveCandidate(source, attempt.signal, norm, Math.min(30_000, remaining))
+          if (!attempt.current()) return
+          currentAudioLangRef.current = norm
+          commitCandidate(source.providerId, resolved, attempt.position, true)
+          attempt.commit()
           return
-        }
-        // The release ADVERTISED this dub; the resolver checked whether the file actually carries
-        // it. Torrentio's language flags frequently come from SUBTITLE tracks, so a "Spanish"
-        // BluRay rip can be English-only audio. This is a language hunt, so move on to the next
-        // release that claims the dub rather than playing English under a Spanish label.
-        // A resolver that couldn't read the file reports the requested language and is accepted.
-        if (res.audioLang && res.audioLang !== norm) {
-          if (i < candidates.length - 1) continue
-          setSwitchingError(`No available source actually carries ${langLabel} audio for this title.`)
-          setSwitchingSource(false)
-          setAwaitingFallback(false)
-          return
-        }
-        const baseUrl = res.url.split('?')[0]!
-        torrentStreamRef.current = { baseUrl, transcoded: !!res.transcoded }
-        playUrl = res.url
-        publishTorrentAudioTrack(res.audioLang || norm)
-        if (res.transcoded && knownRuntimeSecs > 0) setOverrideDuration(knownRuntimeSecs)
-        // Transcoded dubs stream from 0 (no ?start= resume — the on-disk file isn't written yet for
-        // an early -ss seek). Switching to a dub restarts it at 0; native in-buffer seek thereafter.
+        } catch { if (!attempt.current()) return }
       }
-
-      if (stream.headers && Object.keys(stream.headers).length > 0) {
-        await providersApi.registerStreamHeaders(playUrl, stream.headers).catch(() => {})
+      if (attempt.current()) {
+        if (wasRecovering) failPlayback(t('player.dubUnavailable'))
+        else setSwitchingError(t('player.dubUnavailable'))
       }
-      if (gen !== switchGenRef.current) return
-      resetAudioForNonTorrentSource()
-      setResumeAtSeconds(currentPos)
-      setActiveStreamUrl(playUrl)
-      setActiveHeaders(stream.headers)
-      setActiveSourceId(cand.providerId)
-      setSwitchingError(null)
-      setSwitchingSource(false)
-    setAwaitingFallback(false)
-      return
-    }
+    } finally { attempt.finish() }
   }
 
   // Select a dub that lives on a DIFFERENT collected source (cross-provider language switch).
@@ -1787,6 +1779,7 @@ export function VideoPlayer({
   // can pick another source/dub right where they are.
   if (hlsError) {
     const chooseAnotherSource = () => {
+      sourceSuspendedRef.current = true
       setHlsError(null)
       setInitialLoading(false)
       setSwitchingError(null)
@@ -1798,6 +1791,17 @@ export function VideoPlayer({
           <p className="text-white/50 text-4xl mb-4">⚠</p>
           <p className="text-white font-semibold mb-2">{t('player.streamError')}</p>
           <p className="text-white/60 text-sm mb-6">{hlsError}</p>
+          <button type="button" onClick={() => {
+            if (activeSourceId) {
+              sourceSuspendedRef.current = true
+              setHlsError(null)
+              setInitialLoading(false)
+              void handleSourceChange(activeSourceId, false, true)
+            } else {
+              sourceSuspendedRef.current = false
+              setHlsError(null); setInitialLoading(true); setSourceReloadToken(value => value + 1)
+            }
+          }} className="bg-km-accent text-white px-6 py-2.5 rounded-lg mr-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">{t('common.retry')}</button>
           <button
             onClick={chooseAnotherSource}
             className="bg-white/10 border border-white/20 text-white px-6 py-2.5 rounded-lg hover:bg-white/20 transition-colors"
@@ -1877,6 +1881,11 @@ export function VideoPlayer({
         </div>
       )}
 
+      {autoplayBlocked && !switchingSource && <button type="button" onClick={() => playVideoRef.current?.()}
+        className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 text-white text-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-km-accent">
+        <span className="rounded-full bg-km-accent px-8 py-4">▶ {t('common.play')}</span>
+      </button>}
+
       {/* Switch Source Error Banner */}
       {switchingError && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500/90 text-white text-xs px-4 py-2.5 rounded-lg border border-red-400/20 shadow-2xl z-40 flex items-center gap-2 backdrop-blur-md">
@@ -1890,6 +1899,11 @@ export function VideoPlayer({
           >×</button>
         </div>
       )}
+
+      {!embedded && !switchingSource && !switchingError && <SourceQualityNotice
+        quality={sourceStatuses.find(source => source.providerId === activeSourceId)?.qualityInfo ?? allStreams.find(source => source.providerId === activeSourceId)?.streams[0]?.qualityInfo}
+        mediaUrl={activeStreamUrl} movie={content.type === 'movie'}
+      />}
 
       <video
         ref={videoRef}

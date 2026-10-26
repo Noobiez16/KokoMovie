@@ -15,6 +15,7 @@ import { CategoryPagination, scrollCatalogToTop } from '../components/catalog/Ca
 import { PageHeader } from '../components/ui/PageHeader'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ApiKeyRequired } from '../components/catalog/ApiKeyRequired'
+import { PersonalSuggestions, usePersonalSuggestions } from '../components/catalog/PersonalSuggestions'
 
 export function BrowsePage() {
   const { t } = useTranslation()
@@ -36,6 +37,8 @@ export function BrowsePage() {
 
   const tmdbApiKey = useSettingsStore((s) => s.tmdbApiKey)
   const tmdbKeyHydrated = useSettingsStore((s) => s.tmdbKeyHydrated)
+  const suggestions = usePersonalSuggestions(!isCategory)
+  const suggestedItems = suggestions.data?.data ?? []
 
   useEffect(() => {
     setPage(1)
@@ -154,7 +157,7 @@ export function BrowsePage() {
     )
   }
 
-  if (isLoading) {
+  if (isLoading && !suggestedItems.length) {
     return (
       <AppLayout><div className="min-h-[60vh] bg-km-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -165,7 +168,7 @@ export function BrowsePage() {
     )
   }
 
-  if (isError && !cwData?.data?.length && !isCwLoading) {
+  if (isError && !cwData?.data?.length && !suggestedItems.length && !isCwLoading && !suggestions.isFetching) {
     return (
       <AppLayout>
         <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />
@@ -196,7 +199,7 @@ export function BrowsePage() {
     episodeId: item.episodeId,
   })) as unknown as ContentSummary[]
 
-  const hasContent = mappedCw.length > 0 || featured || trending.length > 0 || (homeData?.rows?.length ?? 0) > 0
+  const hasContent = mappedCw.length > 0 || suggestedItems.length > 0 || featured || trending.length > 0 || (homeData?.rows?.length ?? 0) > 0
 
   if (!hasContent) {
     return (
@@ -223,6 +226,8 @@ export function BrowsePage() {
         )}
 
         {isError && <EmptyState title={t('catalog.serviceError')} action={<button className="km-button-secondary" onClick={() => void refetchHome()}>{t('common.retry')}</button>} />}
+
+        <PersonalSuggestions items={suggestedItems} />
 
         {trending.length > 0 && (
           <ContentRow

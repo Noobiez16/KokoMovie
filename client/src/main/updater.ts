@@ -1,5 +1,5 @@
 import { autoUpdater } from 'electron-updater'
-import { app, ipcMain, BrowserWindow } from 'electron'
+import { app, ipcMain, BrowserWindow, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { booleanFlagSchema, trustedIpcHandler } from './ipc/security.js'
@@ -27,6 +27,17 @@ function saveAutoUpdate(enabled: boolean): void {
 }
 
 export function setupUpdater() {
+  // v2.1 macOS packages are ad-hoc signed. Squirrel cannot validate future updates
+  // against a stable Developer ID, so these builds deliberately use manual installation.
+  const mode = !app.isPackaged ? 'development' : process.platform === 'darwin' ? 'manual' : 'automatic'
+  ipcMain.handle('app:update-mode', trustedIpcHandler(() => mode))
+  if (mode === 'manual') {
+    ipcMain.handle('app:get-auto-update', trustedIpcHandler(() => false))
+    ipcMain.handle('app:set-auto-update', trustedIpcHandler((_event, value: unknown) => { booleanFlagSchema.parse(value); return false }))
+    ipcMain.handle('app:check-for-updates', trustedIpcHandler(() => ({ status: 'manual', version: app.getVersion() })))
+    ipcMain.handle('app:install-update', trustedIpcHandler(() => shell.openExternal('https://github.com/Noobiez16/KokoMovie/releases/latest')))
+    return
+  }
   // Only run real updater logic in a packaged build. In development the app is unpackaged
   // and version is often '0.0', which makes electron-updater throw on init.
   if (!app.isPackaged) {

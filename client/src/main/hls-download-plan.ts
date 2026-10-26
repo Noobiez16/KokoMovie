@@ -1,4 +1,5 @@
 import { createDecipheriv } from 'node:crypto'
+import { hasUnsupportedVideoCodec } from './providers/hls-variants'
 
 export interface HlsByteRange {
   length: number
@@ -33,6 +34,7 @@ export interface HlsVariant {
   bandwidth: number
   height: number
   audioGroupId?: string
+  codecs?: string
 }
 
 export interface HlsAudioRendition {
@@ -191,6 +193,7 @@ export function parseHlsPlaylist(text: string, playlistUrl: string): HlsPlaylist
         bandwidth: parsePositiveInteger(attrs['AVERAGE-BANDWIDTH'] ?? attrs['BANDWIDTH']),
         height: parsePositiveInteger(resolution?.[1]),
         audioGroupId: attrs['AUDIO'],
+        codecs: attrs['CODECS'],
       })
     }
     if (variants.length === 0) throw new UnsupportedHlsError('DOWNLOAD_UNSUPPORTED_PLAYLIST')
@@ -274,10 +277,9 @@ export function parseHlsPlaylist(text: string, playlistUrl: string): HlsPlaylist
 }
 
 export function selectHlsVariant(master: HlsMasterPlaylist): HlsVariant {
-  return [...master.variants].sort((a, b) => {
-    const a1080 = a.height === 1080 ? 1 : 0
-    const b1080 = b.height === 1080 ? 1 : 0
-    if (a1080 !== b1080) return b1080 - a1080
+  const compatible = master.variants.filter(variant => !hasUnsupportedVideoCodec(variant.codecs))
+  if (!compatible.length) throw new UnsupportedHlsError('DOWNLOAD_UNSUPPORTED_PLAYLIST')
+  return compatible.sort((a, b) => {
     if (a.height !== b.height) return b.height - a.height
     return b.bandwidth - a.bandwidth
   })[0]!

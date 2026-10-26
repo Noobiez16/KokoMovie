@@ -16,7 +16,7 @@ const artworkUrl = z.string().trim().max(8192).refine((value) => {
   }
 }, 'A valid catalog artwork URL is required')
 
-const headersSchema = z.record(z.string().max(2048)).superRefine((headers, context) => {
+const headersSchema = z.record(z.string(), z.string().max(2048)).superRefine((headers, context) => {
   const entries = Object.entries(headers)
   if (entries.length > 32) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Too many request headers' })

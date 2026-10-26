@@ -3,6 +3,7 @@
 interface LibraryImportPreview {
   watchlist: number
   positions: number
+  likes: number
   artwork: number
   watchlistConflicts: number
   positionConflicts: number
@@ -76,8 +77,9 @@ interface ElectronAPI {
   onUpdateDownloaded: (callback: (version?: string) => void) => () => void
   installUpdate: () => Promise<void>
   getAutoUpdateEnabled: () => Promise<boolean>
+  getUpdateMode: () => Promise<'manual' | 'automatic' | 'development'>
   setAutoUpdateEnabled: (enabled: boolean) => Promise<boolean>
-  checkForUpdates: () => Promise<{ status: 'available' | 'not-available' | 'error' | 'dev'; version?: string; message?: string }>
+  checkForUpdates: () => Promise<{ status: 'available' | 'not-available' | 'error' | 'dev' | 'manual'; version?: string; message?: string }>
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) => Promise<{ ok: boolean; reason?: string }>
 
   // OAuth
@@ -88,6 +90,8 @@ interface ElectronAPI {
 
   // Local library
   watchlistList: () => Promise<Array<{ content_id: string; content_type: string; added_at: string }>>
+  likesList: () => Promise<Array<{ content_id: string; content_type: string; updated_at: string }>>
+  likeSet: (input: { contentId: string; contentType: string; liked: boolean }) => Promise<{ ok: boolean }>
   watchlistAdd: (contentId: string, contentType: string) => Promise<{ ok: boolean }>
   watchlistRemove: (contentId: string) => Promise<{ ok: boolean }>
   watchlistHas: (contentId: string) => Promise<{ inWatchlist: boolean }>
@@ -114,6 +118,7 @@ interface ElectronAPI {
   ) => () => void
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) => Promise<{ ok: boolean }>
   getProxyPort: () => Promise<number>
+  cancelProviderRequest: () => Promise<{ ok: boolean }>
   getProxyInfo: () => Promise<{ port: number; capability: string }>
 
   // Built-in P2P torrent streaming (free dub sourcing)

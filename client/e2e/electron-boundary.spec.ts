@@ -58,7 +58,7 @@ test.afterAll(async () => {
 })
 
 test('launches the real isolated renderer on Electron 43.4.1', async () => {
-  expect(await application.evaluate(({ app }) => app.getVersion())).toBe('2.0.0')
+  expect(await application.evaluate(({ app }) => app.getVersion())).toBe('2.1.0')
   expect(await application.evaluate(() => process.versions.electron)).toBe('43.4.1')
   const preferences = await application.evaluate(({ BrowserWindow }) => {
     const webContents = BrowserWindow.getAllWindows()[0]?.webContents

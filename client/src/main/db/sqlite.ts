@@ -53,6 +53,12 @@ function migrate(db: Database.Database): void {
       added_at     TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS likes (
+      content_id TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL DEFAULT 'movie',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS playback_positions (
       content_id       TEXT NOT NULL,
       episode_id       TEXT NOT NULL DEFAULT '',

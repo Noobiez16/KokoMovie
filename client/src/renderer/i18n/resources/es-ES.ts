@@ -51,6 +51,8 @@ const esES = {
     searchPlaceholder: 'Buscar películas, series y géneros…',
   },
   catalog: {
+    forYou: 'Elegido para ti', forYouDescription: 'Sugerencias basadas en tus Me gusta, historial y Mi lista.',
+
     featured: 'Destacados',
     genreNavigation: 'Explorar géneros',
     trending: 'Tendencias', popularMovies: 'Películas populares', popularSeries: 'Series populares', topRatedMovies: 'Películas mejor valoradas',
@@ -71,8 +73,20 @@ const esES = {
     removeContinue: 'Quitar de Continuar viendo', moreInfo: 'Más información', trailer: 'Tráiler',
     genres: { action: 'Acción', comedy: 'Comedia', drama: 'Drama', sciFi: 'Ciencia ficción', horror: 'Terror', thriller: 'Suspenso', romance: 'Romance', animation: 'Animación', documentary: 'Documental', fantasy: 'Fantasía', mystery: 'Misterio', crime: 'Crimen' },
   },
-  detail: { overview: 'Sinopsis', cast: 'Reparto', seasons: 'Temporadas', episodes: 'Episodios', season: 'Temporada {{number}}', episode: 'Episodio {{number}}', addToList: 'Añadir a Mi lista', removeFromList: 'Quitar de Mi lista', trailer: 'Tráiler', runtimeMinutes: '{{count}} min', notFound: 'No se encontró el contenido', seasonCount_one: '{{count}} temporada', seasonCount_other: '{{count}} temporadas', watchNow: 'Ver ahora', keepWatching: 'Seguir viendo', inMyList: 'En Mi lista', options: 'Opciones', queued: 'En cola', queuing: 'Añadiendo a la cola…', queuingAll: 'Añadiendo todo…', downloadAllSeasons: 'Descargar todas las temporadas', asRole: 'como {{role}}', episodeOptions: 'Opciones del episodio', moreLikeThis: 'Más como esto', chooseDownloadSource: 'Elegir fuente de descarga', bestStreamDescription: 'Mejor fuente selecciona automáticamente la fuente 1080p validada de mayor calidad.', findingTorrentLanguages: 'Buscando idiomas de torrents 1080p…', chooseTorrentLanguage: 'Torrent · elige el idioma de audio' },
+  detail: {
+    like: 'Me gusta', liked: 'Te gusta',
+    overview: 'Sinopsis', cast: 'Reparto', seasons: 'Temporadas', episodes: 'Episodios', season: 'Temporada {{number}}', episode: 'Episodio {{number}}', addToList: 'Añadir a Mi lista', removeFromList: 'Quitar de Mi lista', trailer: 'Tráiler', runtimeMinutes: '{{count}} min', notFound: 'No se encontró el contenido', seasonCount_one: '{{count}} temporada', seasonCount_other: '{{count}} temporadas', watchNow: 'Ver ahora', keepWatching: 'Seguir viendo', inMyList: 'En Mi lista', options: 'Opciones', queued: 'En cola', queuing: 'Añadiendo a la cola…', queuingAll: 'Añadiendo todo…', downloadAllSeasons: 'Descargar todas las temporadas', asRole: 'como {{role}}', episodeOptions: 'Opciones del episodio', moreLikeThis: 'Más como esto', chooseDownloadSource: 'Elegir fuente de descarga', bestStreamDescription: 'Mejor fuente selecciona automáticamente la fuente validada de mayor calidad, priorizando 4K, luego 1080p y 720p.', findingTorrentLanguages: 'Buscando idiomas de torrents 1080p…', chooseTorrentLanguage: 'Torrent · elige el idioma de audio' },
   player: {
+    switchCancelled: "Se canceló el cambio de fuente. Elige una fuente para continuar.",
+    switchTimedOut: "El proveedor no respondió a tiempo. Reintenta o elige otra fuente.",
+    switchFailed: "No se pudo iniciar este proveedor. Reintenta o elige otra fuente.",
+    sourceNotResponding: "Esta fuente dejó de responder. Reintenta o elige otra fuente.",
+    missingMetadata: "Faltan los identificadores necesarios para solicitar una fuente.",
+    dubUnavailable: "No se encontró una fuente disponible con el idioma de audio solicitado.",
+    noPlayableSource: "Ninguna fuente pudo iniciar la reproducción. Reintenta o elige una manualmente.",
+    seekTimedOut: "El torrent no pudo cargar esta posición a tiempo. Reintenta o elige otra fuente.",
+    camNotice: 'Grabación CAM / TS. Un archivo de 1080p o 4K puede ser una grabación de cámara; la resolución no verifica la calidad del estreno.', unverifiedNotice: 'Calidad de la fuente sin verificar. 1080p / 4K indica las dimensiones del archivo; esta fuente aún podría ser una grabación CAM.',
+
     torrentCapacityBusy: 'Todas las conexiones P2P están ocupadas. Espera a que termine una descarga, cancela una o vuelve a intentarlo en un minuto.',
     findingStream: 'Buscando la mejor fuente…', noStream: 'No se encontró ninguna fuente', streamError: 'Error de reproducción', retrying: 'Probando otra fuente…',
     source: 'Fuente', sourceSearching: 'Buscando', sourceAvailable: 'Disponible', sourceUnavailable: 'No disponible', sourceTimedOut: 'Tiempo agotado', camWarning: 'Esta fuente parece ser una grabación CAM o telesync. ¿Continuar de todos modos?', quality: 'Calidad', qualityUnavailable: 'No disponible', audio: 'Audio', subtitles: 'Subtítulos', subtitleOff: 'Desactivados', fullscreen: 'Pantalla completa',
@@ -85,6 +99,11 @@ const esES = {
   history: { title: 'Historial de reproducción', myList: 'Mi lista', empty: 'Todavía no has visto nada', emptyList: 'Tu lista está vacía', completed: 'Completado', inProgress: 'En progreso · {{percent}}%', continue: 'Continuar', removeTitle: 'Quitar del historial', loadError: 'No se pudo cargar el historial de reproducción.', watchlistLoadError: 'No se pudo cargar tu lista.', emptyDescription: 'Todavía no hay nada aquí; lo que veas aparecerá en este espacio.', loadMore: 'Cargar más', unknownTitle: 'Título desconocido', addedOn: 'Añadido el {{date}}' },
   providers: { title: 'Proveedores de streaming', description: 'Activa o desactiva las fuentes locales.', enabled: 'Activado', disabled: 'Desactivado', temporarilyUnavailable: 'Temporalmente no disponible', fullDescription: 'Los proveedores son fuentes de terceros que KokoMovie usa para encontrar vídeos. Actívalos o desactívalos aquí. KokoMovie prueba cada proveedor habilitado en orden hasta encontrar una fuente.', loading: 'Cargando proveedores…', recommended: 'Recomendado', enableProvider: 'Activar {{name}}', disableProvider: 'Desactivar {{name}}', noteLabel: 'Nota:', note: 'La extracción abre una ventana oculta para cargar el proveedor y localizar la URL del vídeo. Las fuentes suelen encontrarse en 10–20 segundos.' },
   settings: {
+    manualUpdates: 'Actualizaciones manuales',
+    manualUpdatesDescription: 'Instala nuevas versiones de macOS desde GitHub Releases. Tu biblioteca local permanece en este dispositivo.',
+    openDownloads: 'Abrir descargas',
+    importLikes: '{{count}} Me gusta', replaceLibraryConfirmation: '¿Reemplazar Mi lista, los Me gusta y el historial con esta importación? Primero se creará una copia de seguridad de SQLite.',
+
     title: 'Configuración', description: 'Administra las preferencias locales, privacidad, descargas y configuración de API.', preferences: 'Preferencias',
     apiConfiguration: 'Configuración de API', downloads: 'Descargas', privacy: 'Privacidad', playback: 'Reproducción', playbackDescription: 'Idioma, reproducción automática y filtro de contenido',
     interfaceLanguage: 'Idioma de la interfaz', languageDescription: 'Cambia inmediatamente el texto de KokoMovie y del catálogo', autoplay: 'Reproducir automáticamente el siguiente episodio',

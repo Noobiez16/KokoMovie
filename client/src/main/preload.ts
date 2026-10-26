@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
   getAutoUpdateEnabled: () => ipcRenderer.invoke('app:get-auto-update'),
+  getUpdateMode: () => ipcRenderer.invoke('app:update-mode'),
   setAutoUpdateEnabled: (enabled: boolean) => ipcRenderer.invoke('app:set-auto-update', enabled),
   checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
   setDiscordActivity: (activity: { title: string; episode?: string; startedAt?: number } | null) =>
@@ -97,6 +98,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ─── Local library (watchlist, resume positions, preferences) ────────────
   watchlistList: () => ipcRenderer.invoke('library:watchlist:list'),
+  likesList: () => ipcRenderer.invoke('library:likes:list'),
+  likeSet: (input: { contentId: string; contentType: string; liked: boolean }) => ipcRenderer.invoke('library:likes:set', input),
   watchlistAdd: (contentId: string, contentType: string) => ipcRenderer.invoke('library:watchlist:add', contentId, contentType),
   watchlistRemove: (contentId: string) => ipcRenderer.invoke('library:watchlist:remove', contentId),
   watchlistHas: (contentId: string) => ipcRenderer.invoke('library:watchlist:has', contentId),
@@ -141,6 +144,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   registerStreamHeaders: (streamUrl: string, headers: Record<string, string>) =>
     ipcRenderer.invoke('providers:registerStreamHeaders', streamUrl, headers),
   getProxyPort: () => ipcRenderer.invoke('providers:getProxyPort'),
+  cancelProviderRequest: () => ipcRenderer.invoke('providers:cancel-request'),
   getProxyInfo: () => ipcRenderer.invoke('providers:getProxyInfo'),
 
   // ─── Built-in P2P torrent streaming (free dub sourcing, e.g. Spanish/Latino) ──
