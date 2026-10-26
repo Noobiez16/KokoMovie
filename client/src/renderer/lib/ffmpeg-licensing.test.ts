@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { FFMPEG_RELEASE, FFMPEG_TARGETS, FFMPEG_VERSION, MACOS_FFMPEG_SOURCE, MACOS_FFMPEG_TARGETS, macosConfigureArgs, buildMacosTarget } from '../../../../scripts/fetch-ffmpeg.mjs'
+import { describe, expect, it, vi } from 'vitest'
+import { FFMPEG_RELEASE, FFMPEG_TARGETS, FFMPEG_VERSION, MACOS_FFMPEG_SOURCE, MACOS_FFMPEG_TARGETS, macosConfigureArgs, buildMacosTarget, downloadArchive } from '../../../../scripts/fetch-ffmpeg.mjs'
 
 // KokoMovie distributes an FFmpeg executable. The former `ffmpeg-static` dependency shipped a
 // GPL-3.0-or-later build, which dictated the project's own distribution licence and blocked the
@@ -11,6 +11,27 @@ const clientPackage = JSON.parse(readFileSync(resolve(process.cwd(), 'package.js
 const fetchScript = readFileSync(resolve(process.cwd(), '../scripts/fetch-ffmpeg.mjs'), 'utf8')
 
 describe('FFmpeg licensing policy', () => {
+  it('retries transient archive connections and server failures with a finite backoff', async () => {
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('connect timeout'))
+      .mockResolvedValueOnce(new Response('busy', { status: 503 }))
+      .mockResolvedValueOnce(new Response('verified bytes'))
+    const wait = vi.fn().mockResolvedValue(undefined)
+    expect((await downloadArchive('https://fixture.invalid/archive', { fetcher, wait })).toString()).toBe('verified bytes')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(wait.mock.calls).toEqual([[1500], [3000]])
+    expect(fetcher.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('fails permanent archive errors immediately and exhausts only the bounded transient budget', async () => {
+    const wait = vi.fn().mockResolvedValue(undefined)
+    const missing = vi.fn().mockResolvedValue(new Response('missing', { status: 404 }))
+    await expect(downloadArchive('https://fixture.invalid/missing', { fetcher: missing, wait })).rejects.toThrow('HTTP 404')
+    expect(missing).toHaveBeenCalledOnce()
+    expect(wait).not.toHaveBeenCalled()
+    const offline = vi.fn().mockRejectedValue(new TypeError('offline'))
+    await expect(downloadArchive('https://fixture.invalid/offline', { fetcher: offline, wait })).rejects.toThrow('offline')
+    expect(offline).toHaveBeenCalledTimes(3)
+  })
   it('pins both native macOS targets to official source without external-library autodetection', () => {
     expect(MACOS_FFMPEG_TARGETS).toEqual(['darwin-x64', 'darwin-arm64'])
     expect(MACOS_FFMPEG_SOURCE.url).toBe(`https://ffmpeg.org/releases/ffmpeg-${MACOS_FFMPEG_SOURCE.version}.tar.xz`)

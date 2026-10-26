@@ -333,7 +333,7 @@ Diagnostics flow from main-process operational events into a rotating 512 KiB lo
 ## macOS distribution and release assembly — v2.1.0
 
 Mac packages build on native `macos-15-intel` (x64) and `macos-15` (arm64) runners. Each job
-installs the lockfile, compiles checksum-pinned official FFmpeg 8.1.2 source, rebuilds native
+installs the lockfile, downloads the checksum-verified official FFmpeg 8.1.2 source artifact from the Linux quality job, compiles it natively and rebuilds native
 addons for Electron 43.4.1, runs the real security/SQLite boundary tests and packages DMG/ZIP.
 The package verifier checks Mach-O architecture, deep code signatures, FFmpeg's LGPL provenance
 and actual AAC/MP4 execution; production fuses are read from the packaged Electron executable.
@@ -351,3 +351,5 @@ Artifact assembly runs on manual dispatch as well as tags, requires all five nat
 verifies real SHA-512 updater hashes, combines the two Mac manifests without overwriting an
 architecture, and generates flat SHA-256 checksums including licenses and corresponding Mac
 FFmpeg source. Only a matching version tag publishes the validated bundle.
+
+The source downloader has a finite retry budget for network/5xx/429 failures and fails permanent HTTP errors immediately. Source acquisition happens once in quality; Mac runners rehash the transferred archive. Verified native FFmpeg is cached before app packaging, and the staged signed application crosses architecture/signature/media/startup/fuse checks before archive creation. Mac ZIP uses normal compression; maximum mode added minutes of extra passes without changing runtime behavior.

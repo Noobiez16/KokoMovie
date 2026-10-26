@@ -20,7 +20,7 @@ for packaged ad-hoc Mac builds, no Squirrel download and trusted/validated calle
 Native Mac CI uses macos-15-intel/x64 and macos-15/arm64. Each compiles pinned official FFmpeg
 8.1.2 source with external-library autodetection disabled, checks LGPL configuration/provenance
 and system-only dylibs, rebuilds native modules and runs real Electron security/SQLite tests.
-After DMG/ZIP packaging, checks read Mach-O architectures and code signatures, execute AAC/MP4
+Before DMG/ZIP archiving, checks read Mach-O architectures and code signatures, execute AAC/MP4
 encoding/decoding with packaged FFmpeg, launch the actual hardened app for a bounded startup
 smoke and read production fuses from the packaged executable. These checks do not validate
 quarantined downloads, Apple notarization or a real installed upgrade on customer hardware.
@@ -434,3 +434,24 @@ Not yet performed: Windows and Linux ARM64 install/upgrade on real hardware, and
 ## Phase testing policy
 
 Every later phase adds tests before refactoring its high-risk behavior. Public TMDB/provider sites are manual smoke dependencies, not deterministic automated-test dependencies. Fixtures and temporary databases must cover failure paths locally.
+
+### Source-transfer resilience after Mac preparation runs
+
+The corrected run [40279260303](https://github.com/Noobiez16/KokoMovie/actions/runs/40279260303)
+passed quality and Linux Electron checks, then both Mac runners timed out connecting directly
+to ffmpeg.org. Other jobs were canceled after those failures. This was a source-fetch failure,
+not a native compiler or application regression. The downloader now retries transient failures
+at most three times under a per-attempt deadline; permanent 4xx responses fail immediately.
+Two deterministic regressions exercise timeout/503 recovery, permanent 404 and budget exhaustion.
+The quality job acquires and hashes the source once, transfers it through GitHub artifacts and
+Mac jobs verify the hash again. Verified native FFmpeg is cached before later app checks.
+Mac staging now validates architecture, signatures, media execution, startup and fuses before
+DMG/ZIP compression. Normal compression removes maximum-mode extra ZIP passes; final artifact
+assembly still verifies actual file hashes. All of these changes require a clean hosted rerun.
+
+Local resilience verification passes **723 tests across 98 files**, strict TypeScript,
+zero-warning lint, workflow actionlint and the packaging schema checks. A real Linux source
+fetch recovered after two transient failures, succeeded on its third attempt and produced the
+pinned archive; a subsequent cached acquisition revalidates the same SHA-256. App code and
+renderer behavior are unchanged by this CI correction; the earlier full 20-test Electron run
+remains valid. Hosted validation is still required for staged Mac signature/startup checks.

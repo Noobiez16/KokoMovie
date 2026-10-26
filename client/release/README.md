@@ -39,3 +39,5 @@ artifact assembly succeed. The bundle contains flat checksums, licenses, changel
 notes, combined Mac metadata and corresponding Mac FFmpeg source. A matching `v2.1.0` tag
 publishes it. Mac users may need Gatekeeper approval and install updates manually; no Apple
 Developer ID/notarization is claimed.
+
+Mac jobs consume the quality job's checksum-verified source artifact and verify the signed staged application before creating DMG/ZIP archives. Native FFmpeg caches are validated against source/configuration pins before reuse.

@@ -31,9 +31,16 @@ jobs:
       # Vendor FFmpeg first: the licence gate verifies the recorded provenance of every LGPL
       # build present, and a release must never ship a GPL-configured binary.
       - name: Vendor pinned LGPL FFmpeg for Linux and Windows
-        run: npm run vendor:ffmpeg --workspace=client -- linux-x64 linux-arm64 win32-x64
+        run: npm run vendor:ffmpeg --workspace=client -- linux-x64 linux-arm64 win32-x64 --source
       - name: Distribution licence gate
         run: npm run check:licenses -- --report
+      - name: Publish checksum-verified official FFmpeg source for Mac runners
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-official-source
+          path: client/vendor/ffmpeg/source/ffmpeg-8.1.2.tar.xz
+          if-no-files-found: error
+          retention-days: 3
       - name: Production build
         run: npm run build
       - name: Verify Electron runtime fuses
@@ -447,27 +454,43 @@ jobs:
       - name: Verify native runner architecture
         run: test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
       - name: Cache native LGPL FFmpeg
-        uses: actions/cache@v4
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
         with:
           path: client/vendor/ffmpeg/darwin-${{ matrix.arch }}
           key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('scripts/fetch-ffmpeg.mjs') }}
+          restore-keys: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-
+      - name: Download verified source from quality gate
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-official-source
+          path: client/vendor/ffmpeg/source
       - name: Build LGPL FFmpeg from pinned official source
         run: npm run vendor:ffmpeg --workspace=client -- darwin-${{ matrix.arch }}
       - name: Distribution license gate
         run: npm run check:licenses
+      - name: Save verified native FFmpeg before application packaging
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: client/vendor/ffmpeg/darwin-${{ matrix.arch }}
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
       - name: Build renderer and main process
         run: npm run build --workspace=client
       - name: Rebuild native modules for Electron
         run: npm run rebuild:native --workspace=client -- --arch=${{ matrix.arch }}
       - name: Real native Electron security and SQLite checks
         run: npm run test:e2e --workspace=client -- electron-boundary.spec.ts
-      - name: Package ad-hoc signed macOS DMG and ZIP
+      - name: Stage ad-hoc signed macOS application
         working-directory: client
-        run: npx electron-builder --config electron-builder.mac.yml --mac dmg zip --${{ matrix.arch }} --publish never
+        run: npx electron-builder --config electron-builder.mac.yml --mac dir --${{ matrix.arch }} --publish never
       - name: Verify packaged architecture, signature and FFmpeg execution
         run: node scripts/verify-macos-package.mjs ${{ matrix.arch }}
       - name: Verify packaged Electron fuses
         run: node scripts/verify-electron-fuses.cjs "client/release/mac/${{ matrix.app-directory }}/KokoMovie.app/Contents/MacOS/KokoMovie"
+      - name: Archive the verified macOS application as DMG and ZIP
+        working-directory: client
+        run: npx electron-builder --config electron-builder.mac.yml --prepackaged release/mac/${{ matrix.app-directory }}/KokoMovie.app --mac dmg zip --${{ matrix.arch }} --publish never
       - name: Stage corresponding FFmpeg source
         if: matrix.arch == 'arm64'
         run: cp client/vendor/ffmpeg/darwin-arm64/ffmpeg-8.1.2.tar.xz client/release/mac/

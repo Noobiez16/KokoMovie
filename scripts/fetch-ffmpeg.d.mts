@@ -16,3 +16,7 @@ export declare const MACOS_FFMPEG_TARGETS: string[]
 export declare function macosConfigureArgs(arch: string): string[]
 export declare function assertLgplConfiguration(binaryPath: string, target: string): string
 export declare function buildMacosTarget(target: string): Promise<string>
+export declare function fetchMacosSource(): Promise<string>
+export declare function downloadArchive(url: string, options?: {
+  fetcher?: typeof fetch; wait?: (ms: number) => Promise<void>; attempts?: number; timeoutMs?: number
+}): Promise<Buffer>

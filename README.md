@@ -258,8 +258,8 @@ npm run dist:mac:arm64 --workspace=client
 Releases are built by GitHub Actions (`.github/workflows/electron-release.yml`) on a matching
 `v*` tag. Dispatch the workflow on a preparation branch first: this runs the same quality,
 native Electron, Windows, Linux x64/ARM64, macOS Intel/Apple Silicon and release-assembly gates
-without publishing. Mac jobs use `macos-15-intel` and `macos-15` and verify architecture,
-code signatures, native modules, FFmpeg execution and production fuses.
+without publishing. The quality job downloads the pinned Mac FFmpeg source once with bounded retries; Mac jobs consume the verified GitHub artifact instead of contacting ffmpeg.org. Mac jobs use `macos-15-intel` and `macos-15` and verify architecture,
+code signatures, native modules, FFmpeg execution and production fuses on staged bundles before creating DMG/ZIP archives.
 
 The assembly gate requires every installer, verifies updater SHA-512 hashes, combines both Mac
 metadata files, includes licenses/corresponding FFmpeg source, and generates a flat

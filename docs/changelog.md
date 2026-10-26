@@ -1,13 +1,14 @@
 # Changelog
 
-All notable changes to KokoMovie PC are documented here.  
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
+All notable changes to KokoMovie PC are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.1.0] — 2026-10-26
 
 - Added native macOS Intel (x64) and Apple Silicon (arm64) DMG and ZIP builds. macOS
   bundles a checksum-pinned, native LGPL FFmpeg build from official 8.1.2 source.
+- Added shared checksum-verified source transfer, bounded download retries and staged Mac verification before archiving.
 - Added Mac runner, architecture, native-module, code-signature, FFmpeg execution and
   Electron security checks. Release assembly validates every platform before publication,
   combines Mac metadata without architecture collisions and hashes all downloadable assets.

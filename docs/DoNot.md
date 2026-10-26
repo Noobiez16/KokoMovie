@@ -9,6 +9,8 @@ A living document of bugs that were fixed and **why they worked after the fix**.
 **Date:** 2026-10-26
 **Area:** Mac packaging, FFmpeg vendoring, updater and release workflow.
 
+The second preparation run hit ffmpeg.org connection timeouts from both Mac runners. Download and hash source once in Linux quality, transfer the verified archive through GitHub artifacts, and rehash it on Mac. Use bounded transient retries; permanent HTTP errors and integrity failures must still stop the build. Save validated native FFmpeg before app packaging, and verify the staged bundle before expensive ZIP compression.
+
 A DMG target alone is not Mac support. Native SQLite/keytar/Electron/FFmpeg architecture must
 match the runner. BtbN has no Mac binaries: build the pinned official LGPL source natively,
 disable external-library autodetection and verify only system dylibs are required. Do not

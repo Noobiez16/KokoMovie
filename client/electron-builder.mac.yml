@@ -29,7 +29,7 @@ asarUnpack:
   - "**/*.node"
   - node_modules/better-sqlite3/**/*
   - node_modules/keytar/**/*
-compression: maximum
+compression: normal
 
 mac:
   artifactName: "${productName}-${version}-mac-${arch}.${ext}"

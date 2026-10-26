@@ -100,3 +100,5 @@
 - **Release gate:** Run assembly validation on preparation-branch dispatches before tagging.
   Require all platform artifacts and actual updater hashes; merge Mac metadata deterministically
   and publish only the validated bundle. Version metadata and tag must all be v2.1.0.
+
+ADR-010 refinement: preparation exposed direct Mac-to-ffmpeg.org connection timeouts. Fetch and verify the source once in quality, transfer it by GitHub artifact, and rehash on Mac. Use bounded transient retries and cache verified native builds before packaging. Validate the staged signed app before archiving it with normal compression.

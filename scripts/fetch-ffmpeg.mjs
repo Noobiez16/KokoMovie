@@ -82,10 +82,36 @@ function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
-async function download(url) {
-  const response = await fetch(url, { redirect: 'follow' })
-  if (!response.ok) throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`)
-  return Buffer.from(await response.arrayBuffer())
+export async function downloadArchive(url, { fetcher = fetch, wait = ms => new Promise(resolveWait => setTimeout(resolveWait, ms)), attempts = 3, timeoutMs = 120000 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let retryable = true
+    try {
+      const response = await fetcher(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) })
+      if (!response.ok) {
+        retryable = [408, 425, 429].includes(response.status) || response.status >= 500
+        await response.body?.cancel()
+        throw new Error(`Archive download failed with HTTP ${response.status}`)
+      }
+      return Buffer.from(await response.arrayBuffer())
+    } catch (error) {
+      if (!retryable || attempt + 1 === attempts) throw error
+      console.warn(`Archive download attempt ${attempt + 1} failed; retrying`)
+      await wait(1500 * (attempt + 1))
+    }
+  }
+  throw new Error('Archive download attempts exhausted')
+}
+
+export async function fetchMacosSource() {
+  const directory = join(vendorRoot, 'source')
+  const path = join(directory, MACOS_FFMPEG_SOURCE.asset)
+  // CI transfers this exact archive from the Linux quality job, avoiding a second
+  // connection to ffmpeg.org from a Mac runner. Local development can fetch it directly.
+  const archive = existsSync(path) ? readFileSync(path) : await downloadArchive(MACOS_FFMPEG_SOURCE.url)
+  if (sha256(archive) !== MACOS_FFMPEG_SOURCE.sha256) throw new Error('FFmpeg source SHA-256 mismatch')
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(path, archive)
+  return path
 }
 
 // The configure line is stored as a NUL-terminated ASCII string inside the executable. Scanning
@@ -118,7 +144,8 @@ export async function buildMacosTarget(target) {
   if (existsSync(stampPath) && existsSync(join(destination, 'ffmpeg')) && existsSync(join(destination, 'LICENSE.txt')) && existsSync(join(destination, MACOS_FFMPEG_SOURCE.asset))) {
     const stamp = JSON.parse(readFileSync(stampPath, 'utf8'))
     if (stamp.release === MACOS_FFMPEG_SOURCE.release && stamp.sha256 === MACOS_FFMPEG_SOURCE.sha256
-      && JSON.stringify(stamp.configureArgs) === JSON.stringify(configureArgs)) {
+      && JSON.stringify(stamp.configureArgs) === JSON.stringify(configureArgs)
+      && sha256(readFileSync(join(destination, MACOS_FFMPEG_SOURCE.asset))) === MACOS_FFMPEG_SOURCE.sha256) {
       assertLgplConfiguration(join(destination, 'ffmpeg'), target)
       console.log(`${target}: already built from verified official source`)
       return destination
@@ -126,7 +153,7 @@ export async function buildMacosTarget(target) {
   }
   const workDir = mkdtempSync(join(tmpdir(), 'kokomovie-ffmpeg-macos-'))
   try {
-    const archive = await download(MACOS_FFMPEG_SOURCE.url)
+    const archive = readFileSync(await fetchMacosSource())
     if (sha256(archive) !== MACOS_FFMPEG_SOURCE.sha256) throw new Error(`${target}: FFmpeg source SHA-256 mismatch`)
     const archivePath = join(workDir, MACOS_FFMPEG_SOURCE.asset)
     writeFileSync(archivePath, archive)
@@ -217,7 +244,7 @@ export async function fetchTarget(target) {
   const workDir = mkdtempSync(join(tmpdir(), 'kokomovie-ffmpeg-'))
   try {
     console.log(`${target}: downloading ${spec.asset}`)
-    const archive = await download(`${BASE_URL}/${spec.asset}`)
+    const archive = await downloadArchive(`${BASE_URL}/${spec.asset}`)
 
     const digest = sha256(archive)
     if (digest !== spec.sha256) {
@@ -258,6 +285,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const targets = requested.length > 0 ? requested : [`${process.platform}-${process.arch}`]
 
   for (const target of targets) {
+    if (target === '--source') { await fetchMacosSource(); continue }
     await fetchTarget(target)
   }
 }
